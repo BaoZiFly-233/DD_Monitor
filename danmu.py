@@ -1,14 +1,14 @@
 """将弹幕机分离出来单独开发
 """
-from PyQt5.QtWidgets import QLabel, QToolButton, QWidget, QComboBox, QLineEdit, QTextBrowser, QGridLayout, QStyle
-from PyQt5.QtGui import QFont
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PySide2.QtWidgets import QLabel, QToolButton, QWidget, QComboBox, QLineEdit, QTextBrowser, QGridLayout, QStyle
+from PySide2.QtGui import QFont
+from PySide2.QtCore import Qt, Signal, QPoint
 from CommonWidget import Slider
 
 
 class Bar(QLabel):
     """自定义标题栏"""
-    moveSignal = pyqtSignal(QPoint)
+    moveSignal = Signal(QPoint)
 
     def __init__(self, text):
         super(Bar, self).__init__()
@@ -91,8 +91,8 @@ class TextBrowser(QWidget):
     """弹幕机 - 弹出式窗口
     通过限制移动位置来模拟嵌入式窗口
     """
-    closeSignal = pyqtSignal()
-    moveSignal = pyqtSignal(QPoint)
+    closeSignal = Signal()
+    moveSignal = Signal(QPoint)
 
     def __init__(self, parent):
         super(TextBrowser, self).__init__(parent)

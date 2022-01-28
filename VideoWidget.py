@@ -1,15 +1,15 @@
 import requests
 import json
-from PyQt5.QtWidgets import * 	# QAction,QFileDialog
-from PyQt5.QtGui import *		# QIcon,QPixmap
-from PyQt5.QtCore import * 		# QSize
-from PyQt5.QtMultimedia import *
-from PyQt5.QtMultimediaWidgets import QGraphicsVideoItem
+from PySide2.QtWidgets import * 	# QAction,QFileDialog
+from PySide2.QtGui import *		# QIcon,QPixmap
+from PySide2.QtCore import * 		# QSize
+from PySide2.QtMultimedia import *
+from PySide2.QtMultimediaWidgets import QGraphicsVideoItem
 from remote import remoteThread
 
 
 class Bar(QLabel):
-    moveSignal = pyqtSignal(QPoint)
+    moveSignal = Signal(QPoint)
 
     def __init__(self, text):
         super(Bar, self).__init__()
@@ -67,7 +67,7 @@ class TextOpation(QWidget):
 
 
 class TextBrowser(QWidget):
-    closeSignal = pyqtSignal()
+    closeSignal = Signal()
 
     def __init__(self, parent, id):
         super(TextBrowser, self).__init__(parent)
@@ -134,7 +134,7 @@ class PushButton(QPushButton):
 
 
 class Slider(QSlider):
-    value = pyqtSignal(int)
+    value = Signal(int)
 
     def __init__(self, value=100):
         super(Slider, self).__init__()
@@ -162,7 +162,7 @@ class Slider(QSlider):
 
 
 class GraphicsView(QGraphicsView):
-    rightClicked = pyqtSignal(QEvent)
+    rightClicked = Signal(QEvent)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.RightButton:
@@ -170,7 +170,7 @@ class GraphicsView(QGraphicsView):
 
 
 class GraphicsVideoItem(QGraphicsVideoItem):
-    dropFile = pyqtSignal(str)  # 重写接收drop信号
+    dropFile = Signal(str)  # 重写接收drop信号
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,7 +182,7 @@ class GraphicsVideoItem(QGraphicsVideoItem):
 
 
 class GetMediaURL(QThread):
-    url = pyqtSignal(QMediaContent)
+    url = Signal(QMediaContent)
 
     def __init__(self):
         super(GetMediaURL, self).__init__()
@@ -250,15 +250,15 @@ class GetMediaURL(QThread):
 
 
 class VideoWidget(QWidget):
-    mutedChanged = pyqtSignal(list)
-    volumeChanged = pyqtSignal(list)
-    addMedia = pyqtSignal(list)  # 发送新增的直播
-    deleteMedia = pyqtSignal(int)  # 删除选中的直播
-    exchangeMedia = pyqtSignal(list)  # 交换播放窗口
-    setDanmu = pyqtSignal(list)  # 发射弹幕关闭信号
-    setTranslator = pyqtSignal(list)  # 发送同传关闭信号
-    changeQuality = pyqtSignal(list)  # 修改画质
-    popWindow = pyqtSignal(list)  # 弹出悬浮窗
+    mutedChanged = Signal(list)
+    volumeChanged = Signal(list)
+    addMedia = Signal(list)  # 发送新增的直播
+    deleteMedia = Signal(int)  # 删除选中的直播
+    exchangeMedia = Signal(list)  # 交换播放窗口
+    setDanmu = Signal(list)  # 发射弹幕关闭信号
+    setTranslator = Signal(list)  # 发送同传关闭信号
+    changeQuality = Signal(list)  # 修改画质
+    popWindow = Signal(list)  # 弹出悬浮窗
 
     def __init__(self, id, top=False, title='', resize=[], textSetting=[True, 20, 2, 6, 0, '【 [ {']):
         super(VideoWidget, self).__init__()

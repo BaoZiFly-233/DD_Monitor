@@ -46,5 +46,5 @@ self.mediaplayer.set_media(self.media)
 ## 参考资料
 + [doc/libvlc/QtPlayer/player.cpp · 3.0.0-git · VideoLAN / VLC · GitLab]( https://code.videolan.org/videolan/vlc/-/blob/3.0.0-git/doc/libvlc/QtPlayer/player.cpp )
     VLC 官方的 Qt 例子
-+ [python-vlc/pyqt5vlc.py at master · oaubert/python-vlc]( https://github.com/oaubert/python-vlc/blob/master/examples/pyqt5vlc.py )
++ [python-vlc/PySide2vlc.py at master · oaubert/python-vlc]( https://github.com/oaubert/python-vlc/blob/master/examples/PySide2vlc.py )
     python-vlc 的 PyQt 例子

@@ -17,9 +17,9 @@ import shutil
 import logging
 import platform
 import threading
-from PyQt5.QtWidgets import * 	# QAction,QFileDialog
-from PyQt5.QtGui import *		# QIcon,QPixmap
-from PyQt5.QtCore import * 		# QSize
+from PySide2.QtWidgets import * 	# QAction,QFileDialog
+from PySide2.QtGui import *		# QIcon,QPixmap
+from PySide2.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
 # from VideoWidget import PushButton, Slider, VideoWidget  # 已弃用
 from VideoWidget_vlc import PushButton, Slider, VideoWidget
@@ -41,7 +41,7 @@ def _translate(context, text, disambig):
 
 
 class ControlWidget(QWidget):
-    heightValue = pyqtSignal(int)
+    heightValue = Signal(int)
 
     def __init__(self):
         super(ControlWidget, self).__init__()
@@ -51,9 +51,9 @@ class ControlWidget(QWidget):
 
 
 class ScrollArea(QScrollArea):
-    multipleTimes = pyqtSignal(int)
-    addLiver = pyqtSignal()
-    clearAll = pyqtSignal()
+    multipleTimes = Signal(int)
+    addLiver = Signal()
+    clearAll = Signal()
 
     def __init__(self):
         super(ScrollArea, self).__init__()
@@ -124,7 +124,7 @@ class StartLiveWindow(QWidget):
 
 class CacheSetting(QWidget):
     """缓存设置窗口"""
-    setting = pyqtSignal(list)
+    setting = Signal(list)
 
     def __init__(self):
         super(CacheSetting, self).__init__()

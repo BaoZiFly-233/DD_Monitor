@@ -7,7 +7,7 @@ import asyncio
 import json
 import requests
 from aiowebsocket.converses import AioWebSocket
-from PyQt5.QtCore import QThread, pyqtSignal
+from PySide2.QtCore import QThread, Signal
 import logging
 import struct
 import brotli
@@ -63,7 +63,7 @@ def unpack(data: bytes):
 
 
 class remoteThread(QThread):
-    message = pyqtSignal(str)
+    message = Signal(str)
 
     def __init__(self, roomID):
         super(remoteThread, self).__init__()

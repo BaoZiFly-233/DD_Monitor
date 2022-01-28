@@ -9,9 +9,9 @@ import os
 import time
 import shutil
 import random
-from PyQt5.QtWidgets import * 	# QAction,QFileDialog
-from PyQt5.QtGui import *		# QIcon,QPixmap
-from PyQt5.QtCore import * 		# QSize
+from PySide2.QtWidgets import * 	# QAction,QFileDialog
+from PySide2.QtGui import *		# QIcon,QPixmap
+from PySide2.QtCore import * 		# QSize
 from CommonWidget import Slider
 from remote import remoteThread
 from danmu import TextBrowser
@@ -43,9 +43,9 @@ class GetMediaURL(QThread):
     """获取直播推流并缓存
     TODO: 换用 bilibili_api.live.get_room_play_url(room_id)
     """
-    cacheName = pyqtSignal(str)
-    copyFile = pyqtSignal(str)
-    downloadError = pyqtSignal()
+    cacheName = Signal(str)
+    copyFile = Signal(str)
+    downloadError = Signal()
 
     def __init__(self, id, cacheFolder, maxCacheSize, saveCachePath):
         super(GetMediaURL, self).__init__()
@@ -162,9 +162,9 @@ class GetMediaURL(QThread):
 
 class VideoFrame(QFrame):
     """视频播放容器"""
-    rightClicked = pyqtSignal(QEvent)
-    leftClicked = pyqtSignal()
-    doubleClicked = pyqtSignal()
+    rightClicked = Signal(QEvent)
+    leftClicked = Signal()
+    doubleClicked = Signal()
 
     def __init__(self):
         super(VideoFrame, self).__init__()
@@ -182,7 +182,7 @@ class VideoFrame(QFrame):
 
 class ExportCache(QThread):
     """导出缓存的视频"""
-    finish = pyqtSignal(list)
+    finish = Signal(list)
 
     def __init__(self):
         super(ExportCache, self).__init__()
@@ -219,20 +219,20 @@ class VideoWidget(QFrame):
     """
     视频播放窗口
     """
-    mutedChanged = pyqtSignal(list)  # 按下静音按钮
-    volumeChanged = pyqtSignal(list)  # 音量滑条改变
-    addMedia = pyqtSignal(list)  # 发送新增的直播
-    deleteMedia = pyqtSignal(int)  # 删除选中的直播
-    exchangeMedia = pyqtSignal(list)  # 交换播放窗口
-    setDanmu = pyqtSignal()  # 发射弹幕设置信号
-    setTranslator = pyqtSignal(list)  # 发送同传关闭信号
-    changeQuality = pyqtSignal(list)  # 修改画质
-    changeAudioChannel = pyqtSignal(list)  # 修改音效
-    popWindow = pyqtSignal(list)  # 弹出悬浮窗
-    hideBarKey = pyqtSignal()  # 隐藏控制条快捷键
-    fullScreenKey = pyqtSignal()  # 全屏快捷键
-    muteExceptKey = pyqtSignal()  # 除了这个播放器 其他全部静音快捷键
-    closePopWindow = pyqtSignal(list)  # 关闭悬浮窗
+    mutedChanged = Signal(list)  # 按下静音按钮
+    volumeChanged = Signal(list)  # 音量滑条改变
+    addMedia = Signal(list)  # 发送新增的直播
+    deleteMedia = Signal(int)  # 删除选中的直播
+    exchangeMedia = Signal(list)  # 交换播放窗口
+    setDanmu = Signal()  # 发射弹幕设置信号
+    setTranslator = Signal(list)  # 发送同传关闭信号
+    changeQuality = Signal(list)  # 修改画质
+    changeAudioChannel = Signal(list)  # 修改音效
+    popWindow = Signal(list)  # 弹出悬浮窗
+    hideBarKey = Signal()  # 隐藏控制条快捷键
+    fullScreenKey = Signal()  # 全屏快捷键
+    muteExceptKey = Signal()  # 除了这个播放器 其他全部静音快捷键
+    closePopWindow = Signal(list)  # 关闭悬浮窗
 
     def __init__(self, id, volume, cacheFolder, top=False, title='', resize=[],
                  textSetting=[True, 20, 2, 6, 0, '【 [ {', 10, 0], maxCacheSize=2048000,

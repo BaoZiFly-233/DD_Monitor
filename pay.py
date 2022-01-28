@@ -2,14 +2,14 @@
 赞助页弹窗
 """
 import requests
-from PyQt5.QtWidgets import * 	# QAction,QFileDialog
-from PyQt5.QtGui import *		# QIcon,QPixmap
-from PyQt5.QtCore import * 		# QSize
+from PySide2.QtWidgets import * 	# QAction,QFileDialog
+from PySide2.QtGui import *		# QIcon,QPixmap
+from PySide2.QtCore import * 		# QSize
 
 
 class DownloadImage(QThread):
     """下载图片 - 二维码"""
-    img = pyqtSignal(QPixmap)
+    img = Signal(QPixmap)
 
     def __init__(self):
         super(DownloadImage, self).__init__()
@@ -25,7 +25,7 @@ class DownloadImage(QThread):
 
 class thankToBoss(QThread):
     """获取感谢名单"""
-    bossList = pyqtSignal(list)
+    bossList = Signal(list)
 
     def __init__(self, parent=None):
         super(thankToBoss, self).__init__(parent)

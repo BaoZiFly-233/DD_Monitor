@@ -9,7 +9,7 @@
 推荐在venv/anaconda环境下开发
 
 ### 所需包
- - PyQt5
+ - PySide2
 
  - requests
 

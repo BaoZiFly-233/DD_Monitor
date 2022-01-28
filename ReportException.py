@@ -2,7 +2,7 @@
 异常捕获器
 """
 import os, sys, time, datetime, subprocess, logging, traceback, platform
-from PyQt5.Qt import *
+# from PySide2.Qt import *
 
 
 def uncaughtExceptionHandler(exctype, value, tb):

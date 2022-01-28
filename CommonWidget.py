@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """一些公用的组件
 """
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QSlider
+from PySide2.QtCore import Qt, Signal
+from PySide2.QtWidgets import QSlider
 
 
 class Slider(QSlider):
     """通用的滚动条"""
-    value = pyqtSignal(int)
+    value = Signal(int)
 
     def __init__(self, value=100):
         super(Slider, self).__init__()

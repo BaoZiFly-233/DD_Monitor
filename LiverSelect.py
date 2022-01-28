@@ -3,9 +3,9 @@ DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 包含主播开播/下播检测和刷新展示 置顶排序 录制管理等功能
 """
 import requests, json, time, codecs, logging, os
-from PyQt5.QtWidgets import * 	# QAction,QFileDialog
-from PyQt5.QtGui import *		# QIcon,QPixmap
-from PyQt5.QtCore import * 		# QSize
+from PySide2.QtWidgets import * 	# QAction,QFileDialog
+from PySide2.QtGui import *		# QIcon,QPixmap
+from PySide2.QtCore import * 		# QSize
 
 
 header = {
@@ -98,7 +98,7 @@ class PushButton(QPushButton):
 
 
 # class RequestAPI(QThread):
-#     data = pyqtSignal(dict)
+#     data = Signal(dict)
 #
 #     def __init__(self, roomID):
 #         super(RequestAPI, self).__init__()
@@ -113,8 +113,8 @@ class RecordThread(QThread):
     """获取直播推流并录制
     TODO: 换用 bilibili_api.live.get_room_play_url(room_id)
     """
-    downloadTimer = pyqtSignal(str)
-    downloadError = pyqtSignal(str)
+    downloadTimer = Signal(str)
+    downloadError = Signal(str)
 
     def __init__(self, roomID):
         super(RecordThread, self).__init__()
@@ -163,8 +163,8 @@ class RecordThread(QThread):
 
 class DownloadImage(QThread):
     """下载图片"""
-    img = pyqtSignal(QPixmap)
-    img_origin = pyqtSignal(QPixmap)
+    img = Signal(QPixmap)
+    img_origin = Signal(QPixmap)
 
     def __init__(self, scaleW, scaleH, keyFrame=False):
         super(DownloadImage, self).__init__()
@@ -191,9 +191,9 @@ class DownloadImage(QThread):
 
 class CoverLabel(QLabel):
     """封面的文字"""
-    addToWindow = pyqtSignal(list)
-    deleteCover = pyqtSignal(str)
-    changeTopToken = pyqtSignal(list)
+    addToWindow = Signal(list)
+    deleteCover = Signal(str)
+    changeTopToken = Signal(list)
 
     def __init__(self, roomID, topToken=False):
         super(CoverLabel, self).__init__()
@@ -410,7 +410,7 @@ class CoverLabel(QLabel):
 
 class GetHotLiver(QThread):
     """获取指定分区的 热榜"""
-    roomInfoSummary = pyqtSignal(list)
+    roomInfoSummary = Signal(list)
 
     def __init__(self):
         super(GetHotLiver, self).__init__()
@@ -441,7 +441,7 @@ class GetFollows(QThread):
         + 获取关注列表：bilibili_api.user.get_followings_g(uid)
         + 获取直播间地址：bilibili_api.user.get_live_info(uid)
     """
-    roomInfoSummary = pyqtSignal(list)
+    roomInfoSummary = Signal(list)
 
     def __init__(self):
         super(GetFollows, self).__init__()
@@ -488,7 +488,7 @@ class GetFollows(QThread):
 
 class DownloadVTBList(QThread):
     """更新 VTB 信息"""
-    vtbList = pyqtSignal(list)
+    vtbList = Signal(list)
 
     def __init__(self, parent=None):
         super(DownloadVTBList, self).__init__(parent)
@@ -515,7 +515,7 @@ class DownloadVTBList(QThread):
 
 class HotLiverTable(QTableWidget):
     """关注列表"""
-    addToWindow = pyqtSignal(list)
+    addToWindow = Signal(list)
 
     def __init__(self):
         super().__init__()
@@ -536,7 +536,7 @@ class HotLiverTable(QTableWidget):
 
 class AddLiverRoomWidget(QWidget):
     """添加直播间 - 独立弹窗"""
-    roomList = pyqtSignal(dict)
+    roomList = Signal(dict)
 
     def __init__(self,application_path):
         super(AddLiverRoomWidget, self).__init__()
@@ -850,7 +850,7 @@ class CollectLiverInfo(QThread):
     TODO:
     + bilibili_api.live.get_room_info(room_id)
     """
-    liverInfo = pyqtSignal(list)
+    liverInfo = Signal(list)
 
     def __init__(self, roomIDList):
         super(CollectLiverInfo, self).__init__()
@@ -912,10 +912,10 @@ class CollectLiverInfo(QThread):
 
 class LiverPanel(QWidget):
     """关注的直播间"""
-    addToWindow = pyqtSignal(list)
-    dumpConfig = pyqtSignal()
-    refreshIDList = pyqtSignal(list)
-    startLiveList = pyqtSignal(list)
+    addToWindow = Signal(list)
+    dumpConfig = Signal()
+    refreshIDList = Signal(list)
+    startLiveList = Signal(list)
 
     def __init__(self, roomIDDict, app_path):
         super(LiverPanel, self).__init__()
