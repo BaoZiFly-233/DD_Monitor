@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """一些公用的组件
 """
-from PySide2.QtCore import Qt, Signal
-from PySide2.QtWidgets import QSlider
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QSlider
 
 
 class Slider(QSlider):

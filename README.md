@@ -9,7 +9,7 @@
 推荐在venv/anaconda环境下开发
 
 ### 所需包
- - PySide2
+ - PySide6
 
  - requests
 

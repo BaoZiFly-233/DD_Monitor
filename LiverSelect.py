@@ -3,9 +3,9 @@ DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 包含主播开播/下播检测和刷新展示 置顶排序 录制管理等功能
 """
 import requests, json, time, codecs, logging, os
-from PySide2.QtWidgets import * 	# QAction,QFileDialog
-from PySide2.QtGui import *		# QIcon,QPixmap
-from PySide2.QtCore import * 		# QSize
+from PySide6.QtWidgets import * 	# QAction,QFileDialog
+from PySide6.QtGui import *		# QIcon,QPixmap
+from PySide6.QtCore import * 		# QSize
 
 
 header = {

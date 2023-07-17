@@ -1,9 +1,9 @@
 """
 选择布局方式的页面
 """
-from PySide2.QtWidgets import QLabel, QWidget, QGridLayout
-from PySide2.QtGui import QFont
-from PySide2.QtCore import Qt, Signal
+from PySide6.QtWidgets import QLabel, QWidget, QGridLayout
+from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal
 from LayoutConfig import layoutList
 
 

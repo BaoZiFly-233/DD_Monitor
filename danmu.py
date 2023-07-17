@@ -1,8 +1,8 @@
 """将弹幕机分离出来单独开发
 """
-from PySide2.QtWidgets import QLabel, QToolButton, QWidget, QComboBox, QLineEdit, QTextBrowser, QGridLayout, QStyle
-from PySide2.QtGui import QFont
-from PySide2.QtCore import Qt, Signal, QPoint
+from PySide6.QtWidgets import QLabel, QToolButton, QWidget, QComboBox, QLineEdit, QTextBrowser, QGridLayout, QStyle
+from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal, QPoint
 from CommonWidget import Slider
 
 

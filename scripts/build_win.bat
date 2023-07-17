@@ -25,5 +25,5 @@ del /F /Q dist\DDMonitor\_decimal.pyd
 del /F /Q dist\DDMonitor\_multiprocessing.pyd
 
 rem Remove dir
-RMDIR /S /Q dist\DDMonitor\PySide2\Qt\translations
+RMDIR /S /Q dist\DDMonitor\PySide6\Qt\translations
 RMDIR /S /Q dist\DDMonitor\Include

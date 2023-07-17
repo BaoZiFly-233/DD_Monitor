@@ -7,7 +7,7 @@ import asyncio
 import json
 import requests
 from aiowebsocket.converses import AioWebSocket
-from PySide2.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal
 import logging
 import struct
 import brotli

@@ -17,9 +17,9 @@ import shutil
 import logging
 import platform
 import threading
-from PySide2.QtWidgets import * 	# QAction,QFileDialog
-from PySide2.QtGui import *		# QIcon,QPixmap
-from PySide2.QtCore import * 		# QSize
+from PySide6.QtWidgets import * 	# QAction,QFileDialog
+from PySide6.QtGui import *		# QIcon,QPixmap
+from PySide6.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
 # from VideoWidget import PushButton, Slider, VideoWidget  # 已弃用
 from VideoWidget_vlc import PushButton, Slider, VideoWidget

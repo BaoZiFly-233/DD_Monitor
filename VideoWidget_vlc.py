@@ -9,9 +9,9 @@ import os
 import time
 import shutil
 import random
-from PySide2.QtWidgets import * 	# QAction,QFileDialog
-from PySide2.QtGui import *		# QIcon,QPixmap
-from PySide2.QtCore import * 		# QSize
+from PySide6.QtWidgets import * 	# QAction,QFileDialog
+from PySide6.QtGui import *		# QIcon,QPixmap
+from PySide6.QtCore import * 		# QSize
 from CommonWidget import Slider
 from remote import remoteThread
 from danmu import TextBrowser
