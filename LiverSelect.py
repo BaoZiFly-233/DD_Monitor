@@ -122,7 +122,7 @@ class RecordThread(QThread):
         self.recordToken = False
         self.downloadToken = False
         self.downloadTime = 0  # s
-        self.checkTimer = QTimer()
+        self.checkTimer = QTimer(self)
         self.checkTimer.timeout.connect(self.checkDownlods)
         self.reconnectCount = 0
 
@@ -955,12 +955,11 @@ class LiverPanel(QWidget):
         logging.debug("接收到新的主播列表")
         newID = []
         for roomID, topToken in roomDict.items():  # 如果id不在老列表里面 则添加
-            if len(roomID) <= 4:  # 查询短号
+            if len(roomID) <= 5:  # 查询短号
                 try:
                     r = requests.get('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID)
                     data = json.loads(r.text)['data']
                     roomID = str(data['room_info']['room_id'])
-                    # print(roomID)
                 except:
                     logging.exception('房间号查询失败')
             if roomID not in self.roomIDDict:

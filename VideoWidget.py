@@ -1,5 +1,6 @@
 import requests
 import json
+import time
 from PySide2.QtWidgets import * 	# QAction,QFileDialog
 from PySide2.QtGui import *		# QIcon,QPixmap
 from PySide2.QtCore import * 		# QSize
@@ -386,10 +387,10 @@ class VideoWidget(QWidget):
 
         self.danmu = remoteThread(self.roomID)
 
-        self.resizeTimer = QTimer()
+        self.resizeTimer = QTimer(self)
         self.resizeTimer.timeout.connect(self.resizeVideoItem)
 
-        self.fullScreenTimer = QTimer()
+        self.fullScreenTimer = QTimer(self)
         self.fullScreenTimer.timeout.connect(self.hideFrame)
 
     def setDanmuOpacity(self, value):
@@ -505,7 +506,7 @@ class VideoWidget(QWidget):
     def rightMouseClicked(self, event):
         menu = QMenu()
         openBrowser = menu.addAction('打开直播间')
-        chooseQuality = menu.addMenu('选择画质')
+        chooseQuality = menu.addMenu('Signal')
         originQuality = chooseQuality.addAction('原画')
         if self.quality == 10000:
             originQuality.setIcon(self.style().standardIcon(

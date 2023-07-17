@@ -1,7 +1,7 @@
 """
 DD监控室最重要的模块之一 视频播放窗口 现已全部从QMediaPlayer迁移至VLC内核播放（klite问题是在太多了。。。）
 包含视频缓存播放、音量管理、弹幕窗
-遇到不确定的播放状态就调用MediaReload()函数 我已经在里面写好了全部的处理 会自动获取直播间状态并进行对应的刷新操作
+遇到不确定的播放状态就调用MediaReload()函数 我已经在里面写好了全部的处理 会自动Signal间状态并进行对应的刷新操作
 """
 import requests
 import json
@@ -57,7 +57,7 @@ class GetMediaURL(QThread):
         self.downloadToken = False
         self.maxCacheSize = maxCacheSize
         self.saveCachePath = saveCachePath
-        self.checkTimer = QTimer()
+        self.checkTimer = QTimer(self)
         self.checkTimer.timeout.connect(self.checkDownlods)
 
     def checkDownlods(self):
@@ -71,6 +71,12 @@ class GetMediaURL(QThread):
         self.quality = quality
 
     def getStreamUrl(self):
+        api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=%s' % (self.roomID, self.quality)
+        r = requests.get(api)
+        url = json.loads(r.text)['data']['durl'][0]['url']
+        return url
+
+
         url = "https://api.live.bilibili.com/xlive/app-room/v2/index/getRoomPlayInfo"
         onlyAudio = self.quality < 0
         params = {
@@ -102,6 +108,7 @@ class GetMediaURL(QThread):
         }
         r = requests.get(url, params=params)
         j = r.json()
+        print(j)
         baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
         extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']
         host = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['host']
@@ -110,7 +117,9 @@ class GetMediaURL(QThread):
         # let host = jqXHR.responseJSON.data.playurl_info.playurl.stream[0].format[0].codec[0].url_info[0].host
         # streamURL = host + base_url + extra
         streamUrl = host + baseUrl + extra
+        print(streamUrl)
         return streamUrl
+
 
     def run(self):
         # api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=%s' % (
@@ -248,6 +257,7 @@ class VideoWidget(QFrame):
         self.hoverToken = False
         self.roomID = '0'  # 初始化直播间房号
         self.liveStatus = 0  # 初始化直播状态为0
+        self.liveStartTime = 0  # 初始化直播开始时间
         self.pauseToken = False
         self.quality = 250
         self.audioChannel = 0  # 0 原始音效  5 杜比音效
@@ -377,10 +387,15 @@ class VideoWidget(QFrame):
         # ---- 嵌入式播放器 控制栏 ----
         # 主播名
         self.titleLabel = QLabel()
-        self.titleLabel.setMaximumWidth(150)
+        self.titleLabel.setMaximumWidth(135)
         self.titleLabel.setStyleSheet('background-color:#00000000')
         self.setTitle()
         frameLayout.addWidget(self.titleLabel)
+        self.timestampLabel = QLabel()
+        self.timestampLabel.setMaximumWidth(100)
+        self.timestampLabel.setStyleSheet('background-color:#00000000')
+        self.timestampLabel.setText('0:00:00')
+        frameLayout.addWidget(self.timestampLabel)
         # 播放/暂停
         self.play = PushButton(self.style().standardIcon(QStyle.SP_MediaPause))
         self.play.clicked.connect(self.mediaPlay)
@@ -427,16 +442,16 @@ class VideoWidget(QFrame):
 
         # ---- 定时器 ----
         # 弹幕机位置匹配
-        self.moveTimer = QTimer()
+        self.moveTimer = QTimer(self)
         self.moveTimer.timeout.connect(self.initTextPos)
         self.moveTimer.start(50)
 
-        # self.reloadDanmuTimer = QTimer()
+        # self.reloadDanmuTimer = QTimer(self)
         # self.reloadDanmuTimer.timeout.connect(self.reloadDanmu)
         # self.reloadDanmuTimer.start(10000)
 
         # 检查播放卡住的定时器
-        self.checkPlaying = QTimer()
+        self.checkPlaying = QTimer(self)
         self.checkPlaying.timeout.connect(self.checkPlayStatus)
 
         # 最后再 resize 避免有变量尚未初始化
@@ -445,9 +460,13 @@ class VideoWidget(QFrame):
         logging.info(f"{self.name_str} VLC 播放器构造完毕, 缓存大小: %dkb, 缓存路径: %s, 置顶?: %s, 启用弹幕?: %s" %
                      (self.maxCacheSize, self.saveCachePath, self.top, self.startWithDanmu))
 
-        self.audioTimer = QTimer()
+        self.audioTimer = QTimer(self)
         self.audioTimer.timeout.connect(self.checkAudio)
         self.audioTimer.setInterval(100)
+
+        self.refreshTimeStampTimer = QTimer(self)
+        self.refreshTimeStampTimer.timeout.connect(self.refreshTimeStamp)
+        self.refreshTimeStampTimer.setInterval(1000)
 
     def checkPlayStatus(self):  # 播放卡住了
         if not self.player.is_playing() and not self.isHidden() and self.liveStatus != 0 and not self.userPause:
@@ -486,6 +505,13 @@ class VideoWidget(QFrame):
             self.player.audio_set_mute(self.muted)
         else:
             self.audioTimer.stop()
+
+    def refreshTimeStamp(self):
+        if self.liveStartTime:
+            duration = time.time() - self.liveStartTime
+            h, m = divmod(duration, 3600)
+            m, s = divmod(m, 60)
+            self.timestampLabel.setText('%01d:%02d:%02d' % (h, m, s))
 
     def initTextPos(self):  # 初始化弹幕机位置
         videoPos = self.mapToGlobal(self.videoFrame.pos())
@@ -580,6 +606,15 @@ class VideoWidget(QFrame):
         self.setDanmu.emit()
 
     def resizeEvent(self, QEvent):
+        # v_w, v_h = self.player.video_get_size()  # 根据窗口大小实时缩放视频尺寸 但效果不太好
+        # if v_w and v_h:
+        #     new_w = self.height() / v_h * v_w
+        #     new_h = self.width() / v_w * v_h
+        #     if new_h > self.height():
+        #         self.videoFrame.resize(new_w, self.height())
+        #     else:
+        #         self.videoFrame.resize(self.width(), new_h)
+
         self.titleLabel.hide() if self.width() < 350 else self.titleLabel.show()
         self.play.hide() if self.width() < 300 else self.play.show()
         self.danmuButton.hide() if self.width() < 250 else self.danmuButton.show()
@@ -660,7 +695,6 @@ class VideoWidget(QFrame):
     def dropEvent(self, QDropEvent):
         if QDropEvent.mimeData().hasText:
             text = QDropEvent.mimeData().text()  # 拖拽事件
-            print(text)
             if 'roomID' in text:  # 从cover拖拽新直播间
                 self.stopDanmuMessage()
                 self.roomID = text.split(':')[1]
@@ -672,7 +706,6 @@ class VideoWidget(QFrame):
             elif 'exchange' in text:  # 交换窗口
                 fromID, fromRoomID = text.split(':')[1:]  # exchange:id:roomID
                 fromID = int(fromID)
-                print(fromID, self.id)
                 if fromID != self.id:
                     self.exchangeMedia.emit(
                         [fromID, fromRoomID, self.id, self.roomID])
@@ -698,7 +731,7 @@ class VideoWidget(QFrame):
         if self.quality == 80:
             lowQuality.setIcon(self.style().standardIcon(
                 QStyle.SP_DialogApplyButton))
-        onlyAudio = chooseQuality.addAction('仅播声音')
+        onlyAudio = chooseQuality.addAction('仅播声音(失效)')
         if self.quality == -1:
             onlyAudio.setIcon(self.style().standardIcon(
                 QStyle.SP_DialogApplyButton))
@@ -996,6 +1029,8 @@ class VideoWidget(QFrame):
         self.topLabel.setText(('    窗口%s  未定义的直播间' %
                                (self.id + 1))[:20])  # 限制下直播间标题字数
         self.titleLabel.setText('未定义')
+        self.liveStartTime = 0
+        self.timestampLabel.setText('0:00:00')
         self.playerRestart()
         self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         if deleteMedia:
@@ -1004,6 +1039,7 @@ class VideoWidget(QFrame):
         self.getMediaURL.checkTimer.stop()
         self.checkPlaying.stop()
         self.stopDanmu()
+        self.refreshTimeStampTimer.stop()
 
     def stopDanmu(self):
         # try:
@@ -1048,6 +1084,7 @@ class VideoWidget(QFrame):
         # self.moveTimer.start()  # 启动移动弹幕窗的timer
         self.checkPlaying.start(1000)  # 启动播放卡顿检测定时器
         self.audioTimer.start()  # 检测音量是否正确
+        self.refreshTimeStampTimer.start()  # 开始刷新直播时长
 
     def copyCache(self, copyFile):
         title = self.oldTitle if self.oldTitle else self.title
@@ -1119,6 +1156,7 @@ class VideoWidget(QFrame):
             else:
                 data = data['data']
                 self.liveStatus = data['room_info']['live_status']
+                self.liveStartTime = data['room_info']['live_start_time']
                 self.title = data['room_info']['title']
                 self.uname = data['anchor_info']['base_info']['uname']
                 if self.liveStatus != 1:

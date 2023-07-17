@@ -114,7 +114,7 @@ class StartLiveWindow(QWidget):
         layout.setContentsMargins(3, 3, 3, 3)
         layout.addWidget(self.tipLabel)
 
-        self.hideTimer = QTimer()
+        self.hideTimer = QTimer(self)
         self.hideTimer.setInterval(10000)
         self.hideTimer.timeout.connect(self.hide)  # 10秒倒计时结束隐藏
 
@@ -165,7 +165,7 @@ class Version(QWidget):
         self.resize(350, 150)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
-        layout.addWidget(QLabel('DD监控室 v2.9正式版'), 0, 0, 1, 2)
+        layout.addWidget(QLabel('DD监控室 v2.10测试版'), 0, 0, 1, 2)
         layout.addWidget(QLabel('by 神君Channel'), 1, 0, 1, 2)
         layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥'), 2, 0, 1, 2)
         releases_url = QLabel('')
@@ -519,57 +519,41 @@ class MainWindow(QMainWindow):
         # ---- 菜单设置 ----
         self.optionMenu = self.menuBar().addMenu('设置')
         self.controlBarLayoutToken = self.config['control']
-        layoutConfigAction = QAction(
-            '布局方式', self, triggered=self.openLayoutSetting)
+        layoutConfigAction = QAction('布局方式', self, triggered=self.openLayoutSetting)
         self.optionMenu.addAction(layoutConfigAction)
         globalQualityMenu = self.optionMenu.addMenu('全局画质 ►')
-        originQualityAction = QAction(
-            '原画', self, triggered=lambda: self.globalQuality(10000))
+        originQualityAction = QAction('原画', self, triggered=lambda: self.globalQuality(10000))
         globalQualityMenu.addAction(originQualityAction)
-        bluerayQualityAction = QAction(
-            '蓝光', self, triggered=lambda: self.globalQuality(400))
+        bluerayQualityAction = QAction('蓝光', self, triggered=lambda: self.globalQuality(400))
         globalQualityMenu.addAction(bluerayQualityAction)
-        highQualityAction = QAction(
-            '超清', self, triggered=lambda: self.globalQuality(250))
+        highQualityAction = QAction('超清', self, triggered=lambda: self.globalQuality(250))
         globalQualityMenu.addAction(highQualityAction)
-        lowQualityAction = QAction(
-            '流畅', self, triggered=lambda: self.globalQuality(80))
+        lowQualityAction = QAction('流畅', self, triggered=lambda: self.globalQuality(80))
         globalQualityMenu.addAction(lowQualityAction)
-        onlyAudio = QAction(
-            '仅播声音', self, triggered=lambda: self.globalQuality(-1))
+        onlyAudio = QAction('仅播声音(失效)', self, triggered=lambda: self.globalQuality(-1))
         globalQualityMenu.addAction(onlyAudio)
         globalAudioMenu = self.optionMenu.addMenu('全局音效 ►')
-        audioOriginAction = QAction(
-            '原始音效', self, triggered=lambda: self.globalAudioChannel(0))
+        audioOriginAction = QAction('原始音效', self, triggered=lambda: self.globalAudioChannel(0))
         globalAudioMenu.addAction(audioOriginAction)
-        audioDolbysAction = QAction(
-            '杜比音效', self, triggered=lambda: self.globalAudioChannel(5))
+        audioDolbysAction = QAction('杜比音效', self, triggered=lambda: self.globalAudioChannel(5))
         globalAudioMenu.addAction(audioDolbysAction)
         hardDecodeMenu = self.optionMenu.addMenu('解码方案 ►')
-        hardDecodeAction = QAction(
-            '硬解', self, triggered=lambda: self.setDecode(True))
+        hardDecodeAction = QAction('硬解', self, triggered=lambda: self.setDecode(True))
         hardDecodeMenu.addAction(hardDecodeAction)
-        softDecodeAction = QAction(
-            '软解', self, triggered=lambda: self.setDecode(False))
+        softDecodeAction = QAction('软解', self, triggered=lambda: self.setDecode(False))
         hardDecodeMenu.addAction(softDecodeAction)
         startLiveSetting = self.optionMenu.addMenu('开播提醒 ►')
-        enableStartLive = QAction(
-            '打开', self, triggered=lambda: self.setStartLive(True))
+        enableStartLive = QAction('打开', self, triggered=lambda: self.setStartLive(True))
         startLiveSetting.addAction(enableStartLive)
-        disableStartLive = QAction(
-            '关闭', self, triggered=lambda: self.setStartLive(False))
+        disableStartLive = QAction('关闭', self, triggered=lambda: self.setStartLive(False))
         startLiveSetting.addAction(disableStartLive)
-        cacheSizeSetting = QAction(
-            '缓存设置', self, triggered=self.openCacheSetting)
+        cacheSizeSetting = QAction('缓存设置', self, triggered=self.openCacheSetting)
         self.optionMenu.addAction(cacheSizeSetting)
-        startWithDanmuSetting = QAction(
-            '自动加载弹幕设置', self, triggered=self.openStartWithDanmuSetting)
+        startWithDanmuSetting = QAction('自动加载弹幕设置', self, triggered=self.openStartWithDanmuSetting)
         self.optionMenu.addAction(startWithDanmuSetting)
-        controlPanelAction = QAction(
-            '显示 / 隐藏控制条(H)', self, triggered=self.openControlPanel)
+        controlPanelAction = QAction('显示 / 隐藏控制条(H)', self, triggered=self.openControlPanel)
         self.optionMenu.addAction(controlPanelAction)
-        self.fullScreenAction = QAction(
-            '全屏(F) / 退出(Esc)', self, triggered=self.fullScreen)
+        self.fullScreenAction = QAction('全屏(F) / 退出(Esc)', self, triggered=self.fullScreen)
         self.optionMenu.addAction(self.fullScreenAction)
         exportConfig = QAction('导出预设', self, triggered=self.exportConfig)
         self.optionMenu.addAction(exportConfig)
@@ -585,8 +569,7 @@ class MainWindow(QMainWindow):
         versionAction = QAction('检查版本', self, triggered=self.openVersion)
         self.versionMenu.addAction(versionAction)
         otherDDMenu = self.versionMenu.addMenu('其他DD系列工具 ►')
-        DDSubtitleAction = QAction(
-            'DD烤肉机', self, triggered=self.openDDSubtitle)
+        DDSubtitleAction = QAction('DD烤肉机', self, triggered=self.openDDSubtitle)
         otherDDMenu.addAction(DDSubtitleAction)
         DDThanksAction = QAction('DD答谢机', self, triggered=self.openDDThanks)
         otherDDMenu.addAction(DDThanksAction)
@@ -604,7 +587,7 @@ class MainWindow(QMainWindow):
         # 鼠标和计时器
         self.oldMousePos = QPoint(0, 0)  # 初始化鼠标坐标
         self.hideMouseCnt = 90
-        self.mouseTrackTimer = QTimer()
+        self.mouseTrackTimer = QTimer(self)
         self.mouseTrackTimer.timeout.connect(self.checkMousePos)
         self.mouseTrackTimer.start(100)  # 0.1s检测一次
         progressText.setText('设置UI...')
@@ -622,7 +605,7 @@ class MainWindow(QMainWindow):
             self.mainLayout.addWidget(videoWidget, y, x, h, w)
             self.videoWidgetList[index].show()
         self.videoIndex = 0
-        self.setMediaTimer = QTimer()
+        self.setMediaTimer = QTimer(self)
         self.setMediaTimer.timeout.connect(self.setMedia)
         # self.setMediaTimer.start(500)  # QMediaPlayer加载慢一点 否则容易崩
         self.setMediaTimer.start(10)  # vlc
@@ -1143,7 +1126,7 @@ class MainWindow(QMainWindow):
             self, "选择保存路径", 'DD监控室预设', "*.json")[0]
         if self.savePath:  # 保存路径有效
             try:
-                with codecs.open(self.savePath, 'w', encoding='utf-8') as f:
+                with codecs.open(self.savePath, 'w', encoding='utf-8', errors='ignore') as f:
                     f.write(json.dumps(self.config, ensure_ascii=False))
                 QMessageBox.information(self, '导出预设', '导出完成', QMessageBox.Ok)
             except:
@@ -1155,11 +1138,11 @@ class MainWindow(QMainWindow):
             if os.path.getsize(jsonPath):
                 config = {}
                 try:
-                    with codecs.open(jsonPath, 'r', encoding='utf-8') as f:
+                    with codecs.open(jsonPath, 'r', encoding='utf-8', errors='ignore') as f:
                         config = json.loads(f.read())
                 except UnicodeDecodeError:
                     try:
-                        with codecs.open(jsonPath, 'r', encoding='gbk') as f:
+                        with codecs.open(jsonPath, 'r', encoding='gbk', errors='ignore') as f:
                             config = json.loads(f.read())
                     except:
                         logging.exception('json 配置导入失败')
@@ -1302,9 +1285,9 @@ if __name__ == '__main__':
     import qdarktheme
 
     app.setStyleSheet(qdarktheme.load_stylesheet())
-    font = QFont('', 14, QFont.Bold)
-    app.setFont(font)
-    # app.setFont(QFont('微软雅黑', 9))
+    # font = QFont('', 14, QFont.Bold)
+    # app.setFont(font)
+    app.setFont(QFont('微软雅黑', 9))
 
     # 日志采集初始化
     log.init_log(application_path)
@@ -1323,7 +1306,7 @@ if __name__ == '__main__':
 
     # 欢迎页面
     splash = QSplashScreen(QPixmap(os.path.join(
-        application_path, 'utils/splash.jpg')), Qt.WindowStaysOnTopHint)
+        application_path, 'utils/splash.jpg')))
     progressBar = QProgressBar(splash)
     progressBar.setMaximum(32)  # 16 * 2个播放器, 0 - 17 index
     progressBar.setGeometry(0, splash.height() - 20, splash.width(), 20)

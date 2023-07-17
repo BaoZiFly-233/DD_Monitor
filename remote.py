@@ -131,7 +131,7 @@ class remoteThread(QThread):
         def getMetal(jd):
             try:
                 medal = []
-                if jd['cmd'] == 'DANMU_MSG':
+                if 'DANMU_MSG' in jd['cmd'].upper():
                     jz = captainName[jd['info'][3][10]]
                     if jz:
                         medal.append(jz)
@@ -152,7 +152,7 @@ class remoteThread(QThread):
                 if info['datapack_type'] == 5:  # 弹幕 礼物
                     jd = info["data"]
                     try:
-                        if jd['cmd'] == 'DANMU_MSG':
+                        if 'DANMU_MSG' in jd['cmd'].upper():
                             self.message.emit(f"{jd['info'][1]}")
                         elif jd['cmd'] == 'SUPER_CHAT_MESSAGE':
                             self.message.emit(
