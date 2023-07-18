@@ -6,6 +6,7 @@ DD监控室最重要的模块之一 视频播放窗口 现已全部从QMediaPlay
 import requests
 import json
 import os
+os.add_dll_directory(os.getcwd())
 import time
 import shutil
 import random

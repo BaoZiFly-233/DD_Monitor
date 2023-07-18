@@ -1320,4 +1320,4 @@ if __name__ == '__main__':
     mainWindow.showMaximized()
     mainWindow.show()
     splash.hide()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
