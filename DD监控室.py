@@ -30,6 +30,7 @@ import dns.resolver
 from ReportException import thraedingExceptionHandler, uncaughtExceptionHandler,\
     unraisableExceptionHandler, loggingSystemInfo
 from danmu import TextOpation, ToolButton
+from checkUpdate import updateReminder, latestRemainder, checkUpdate
 
 
 # 程序所在路径
@@ -160,14 +161,14 @@ class CacheSetting(QWidget):
 class Version(QWidget):
     """版本说明窗口"""
 
-    def __init__(self):
+    def __init__(self, version):
         super(Version, self).__init__()
         self.resize(350, 150)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
-        layout.addWidget(QLabel('DD监控室 v2.10测试版'), 0, 0, 1, 2)
+        layout.addWidget(QLabel(f'DD监控室 v{version} (2023/07/21)'), 0, 0, 1, 2)
         layout.addWidget(QLabel('by 神君Channel'), 1, 0, 1, 2)
-        layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥'), 2, 0, 1, 2)
+        layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 2, 0, 1, 2)
         releases_url = QLabel('')
         releases_url.setOpenExternalLinks(True)
         releases_url.setText(_translate("MainWindow", "<html><head/><body><p><a href=\"https://space.bilibili.com/637783\">\
@@ -180,7 +181,7 @@ class Version(QWidget):
         layout.addWidget(checkButton, 0, 2, 1, 1)
 
     def checkUpdate(self):
-        QDesktopServices.openUrl(QUrl(r'https://github.com/zhimingshenjun/DD_Monitor/releases/tag/DD_Monitor'))
+        QDesktopServices.openUrl(QUrl(r'https://gitee.com/zhimingshenjun/DD_Monitor_latest/releases'))
 
 
 class HotKey(QWidget):
@@ -248,7 +249,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.setWindowTitle('DD监控室')
+        self.versionNumber = 2.11
+        self.setWindowTitle(f'DD监控室{self.versionNumber}')
         self.resize(1600, 900)
         self.maximumToken = True
         self.soloToken = False  # 记录静音除鼠标悬停窗口以外的其他所有窗口的标志位 True就是恢复所有房间声音
@@ -329,6 +331,8 @@ class MainWindow(QMainWindow):
                 logging.warning('启动时加载弹幕没有被设置，默认加载')
             if 'showStartLive' not in self.config:
                 self.config['showStartLive'] = True
+            if 'checkUpdate' not in self.config:
+                self.config['checkUpdate'] = True
             for danmuConfig in self.config['danmu']:
                 if len(danmuConfig) == 6:
                     danmuConfig.append(10)
@@ -351,6 +355,7 @@ class MainWindow(QMainWindow):
                 'saveCachePath': '',
                 'startWithDanmu': True,
                 'showStartLive': True,
+                'checkUpdate': True,
             }
         self.dumpConfig = DumpConfig(self.config)
 
@@ -363,7 +368,7 @@ class MainWindow(QMainWindow):
         self.mainLayout.setContentsMargins(0, 0, 0, 0)
         self.layoutSettingPanel = LayoutSettingPanel()
         self.layoutSettingPanel.layoutConfig.connect(self.changeLayout)
-        self.version = Version()
+        self.version = Version(self.versionNumber)
         self.cacheSetting = CacheSetting()
         self.cacheSetting.maxCacheEdit.setText(
             str(self.config['maxCacheSize'] // 1024000))
@@ -595,6 +600,9 @@ class MainWindow(QMainWindow):
         self.checkDanmmuProvider.start()
         self.loadDockLayout()
         logging.info('UI构造完毕')
+
+        if self.config['checkUpdate']:
+            self.updateChecker()
 
     def setPlayer(self):
         for index, layoutConfig in enumerate(self.config['layout']):
@@ -1247,6 +1255,25 @@ class MainWindow(QMainWindow):
             self.startLiveWindow.tipLabel.setText(startLivers)
             self.startLiveWindow.show()
             self.startLiveWindow.hideTimer.start()
+
+    def setNoMore(self):
+        self.config['checkUpdate'] = False
+
+    def updateChecker(self):
+        self.updateReminder = updateReminder()
+        self.updateReminder.noMoreSignal.connect(self.setNoMore)
+        self.checkUpdate = checkUpdate(self.versionNumber)
+        self.checkUpdate.update.connect(self.updateReminder._show)
+        self.checkUpdate.start()
+
+    def updateChecker2(self):
+        self.updateReminder = updateReminder()
+        self.updateReminder.noMoreSignal.connect(self.setNoMore)
+        self.latestReminder = latestRemainder()
+        self.checkUpdate = checkUpdate(self.versionNumber)
+        self.checkUpdate.update.connect(self.updateReminder._show)
+        self.checkUpdate.latest.connect(self.latestReminder._show)
+        self.checkUpdate.start()
 
 
 # 程序入口点

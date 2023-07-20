@@ -149,11 +149,20 @@ class remoteThread(QThread):
         if data:
             data = unpack(data)
             for info in data:
+                # if info['datapack_type'] == 3:  # 观看人数
+                #     logging.info(info['data'])
                 if info['datapack_type'] == 5:  # 弹幕 礼物
                     jd = info["data"]
                     try:
                         if 'DANMU_MSG' in jd['cmd'].upper():
-                            self.message.emit(f"{jd['info'][1]}")
+                            if jd['info'][0][13] == '{}':  # 筛掉表情包
+                                extra = jd['info'][0][15]['extra']
+                                if '"emots":null' in extra:
+                                    self.message.emit(f"{jd['info'][1]}")
+                                else:
+                                    emoji = jd['info'][0][15]['extra'].split('"emots":{"')[1].split('"')[0]
+                                    if jd['info'][1] != emoji:
+                                        self.message.emit(f"{jd['info'][1].replace(emoji, '')}")
                         elif jd['cmd'] == 'SUPER_CHAT_MESSAGE':
                             self.message.emit(
                                 f"【SC(￥{jd['data']['price']}) {getMetal(jd)} {jd['data']['user_info']['uname']}: {jd['data']['message']}】"
