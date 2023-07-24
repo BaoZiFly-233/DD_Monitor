@@ -19,12 +19,15 @@ from danmu import TextBrowser
 import vlc
 import platform
 import logging
+import m3u8
 
 
-header = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36',
-    'Referer': 'https://live.bilibili.com'
-}
+# header = {
+#     'User-Agent': 'Mozilla/5.0 BiliDroid/6.25.0 (bbcallen@gmail.com) os/android model/MuMu mobi_app/android '
+#                   'build/6250300 channel/bili innerVer/6250300 osVer/6.0.1 network/2'
+#     # 解决新版本未登录用户无法观看直播的关键就在这里 改个UA就好了 或者用Bilibili Freedoooooom/MarkII
+# }
+header = {'User-Agent': 'Bilibili Freedoooooom/MarkII'}
 
 
 class PushButton(QPushButton):
@@ -72,22 +75,23 @@ class GetMediaURL(QThread):
         self.quality = quality
 
     def getStreamUrl(self):
-        api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=%s' % (self.roomID, self.quality)
-        r = requests.get(api)
-        url = json.loads(r.text)['data']['durl'][0]['url']
-        return url
-
+        # 旧api
+        # api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=%s' % (self.roomID, self.quality)
+        # r = requests.get(api)
+        # print(r.text)
+        # url = json.loads(r.text)['data']['durl'][0]['url']
+        # return url
 
         url = "https://api.live.bilibili.com/xlive/app-room/v2/index/getRoomPlayInfo"
         onlyAudio = self.quality < 0
         params = {
             "appkey": "iVGUTjsxvpLeuDCf",
-            "build": 6215200,
+            "build": 6250300,
             "c_locale": "zh_CN",
             "channel": "bili",
             "codec": 0,
             "device": "android",
-            "device_name": "VTR-AL00",
+            "device_name": "MuMu",
             "dolby": 1,
             "format": "0,2",
             "free_type": 0,
@@ -104,67 +108,83 @@ class GetMediaURL(QThread):
             "qn": (onlyAudio and 10000) or (not onlyAudio and self.quality),
             "room_id": self.roomID,
             "s_locale": "zh_CN",
-            "statistics": "{\"appId\":1,\"platform\":3,\"version\":\"6.21.5\",\"abtest\":\"\"}",
+            "statistics": '{"appId":1,"platform":3,"version":"6.25.0","abtest":""}',
             "ts": int(time.time())
         }
         r = requests.get(url, params=params)
         j = r.json()
-        print(j)
         baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
         extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']
         host = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['host']
-        # let base_url = jqXHR.responseJSON.data.playurl_info.playurl.stream[0].format[0].codec[0].base_url
-        # let extra = jqXHR.responseJSON.data.playurl_info.playurl.stream[0].format[0].codec[0].url_info[0].extra
-        # let host = jqXHR.responseJSON.data.playurl_info.playurl.stream[0].format[0].codec[0].url_info[0].host
-        # streamURL = host + base_url + extra
         streamUrl = host + baseUrl + extra
-        print(streamUrl)
+        # print(streamUrl)
         return streamUrl
 
-
     def run(self):
-        # api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=%s' % (
-        #     self.roomID, self.quality)
-        # r = requests.get(api)
         try:
-            # url = json.loads(r.text)['data']['durl'][0]['url']
             url = self.getStreamUrl()
-            fileName = '%s/%s.flv' % (self.cacheFolder, self.id)
-            download = requests.get(url, stream=True, headers=header)
-            logging.debug(download.headers)
-            self.recordToken = True
-            contentCnt = 0
-            while True:
+            if '.flv?' in url:
+                fileName = '%s/%s.flv' % (self.cacheFolder, self.id)
+                download = requests.get(url, stream=True, headers=header)
+                logging.debug(download.headers)
+                self.recordToken = True
+                contentCnt = 0
+                while True:
+                    try:
+                        self.cacheVideo = open(fileName, 'wb')  # 等待上次缓存关闭
+                        break
+                    except:
+                        time.sleep(0.1)
+                for chunk in download.iter_content(chunk_size=512):
+                    if not self.recordToken:
+                        break
+                    if chunk:
+                        self.downloadToken = True
+                        self.cacheVideo.write(chunk)
+                        contentCnt += 1
+                        # 缓存超过用户设置的缓存大小（默认1GB）清除缓存刷新一次 原画大约要20分钟-30分钟
+                        if not contentCnt % self.maxCacheSize:
+                            self.downloadError.emit()
+                        elif contentCnt == 50:
+                            self.cacheName.emit(fileName)
+                self.cacheVideo.close()
+                time.sleep(0.1)  # 等待0.1秒确保关闭
                 try:
-                    self.cacheVideo = open(fileName, 'wb')  # 等待上次缓存关闭
-                    break
-                except:
-                    time.sleep(0.1)
-            for chunk in download.iter_content(chunk_size=512):
-                if not self.recordToken:
-                    break
-                if chunk:
-                    self.downloadToken = True
-                    self.cacheVideo.write(chunk)
-                    contentCnt += 1
-                    if not contentCnt % self.maxCacheSize:  # 缓存超过用户设置的缓存大小（默认1GB）清除缓存刷新一次 原画大约要20分钟-30分钟
-                        self.downloadError.emit()
-                    elif contentCnt == 50:
-                        self.cacheName.emit(fileName)
-            self.cacheVideo.close()
-            time.sleep(0.1)  # 等待0.1秒确保关闭
-            try:
-                # 如果备份路径有效
-                if self.saveCachePath and os.path.exists(self.saveCachePath) and os.path.getsize(fileName):
-                    # 随机命名防止重名
-                    renameFile = '%s/%s.flv' % (self.cacheFolder,
-                                                random.randint(50, 10000000))
-                    os.rename(fileName, renameFile)
-                    self.copyFile.emit(renameFile)  # 发射信号备份缓存
-                else:
-                    os.remove(fileName)  # 清除缓存
-            except Exception as e:
-                logging.error(str(e))
+                    # 如果备份路径有效
+                    if self.saveCachePath and os.path.exists(self.saveCachePath) and os.path.getsize(fileName):
+                        # 随机命名防止重名
+                        renameFile = '%s/%s.flv' % (self.cacheFolder,
+                                                    random.randint(50, 10000000))
+                        os.rename(fileName, renameFile)
+                        self.copyFile.emit(renameFile)  # 发射信号备份缓存
+                    else:
+                        os.remove(fileName)  # 清除缓存
+                except Exception as e:
+                    logging.error(str(e))
+            elif '.m3u8?' in url:
+                fileName = '%s/%s.m4s' % (self.cacheFolder, self.id)
+                host = url.split('index')[0]
+                response = requests.get(url, headers=header)
+                m3u8_obj = m3u8.loads(response.text)
+                media_urls = m3u8_obj.data['segments']
+                print(media_urls)
+                for media_url in media_urls:
+                    media_name = media_url['uri'].split('/')[-1]
+                    media_response = requests.get(host + media_url['uri'])
+                    # with open(fileName, 'ab') as f:
+                    with open('%s/%s' % (self.cacheFolder, media_name), 'ab') as f:
+                        f.write(media_response.content)
+
+
+                # logging.debug(download.headers)
+                # self.recordToken = True
+                # contentCnt = 0
+                # while True:
+                #     try:
+                #         self.cacheVideo = open(fileName, 'wb')  # 等待上次缓存关闭
+                #         break
+                #     except:
+                #         time.sleep(0.1)
         except Exception as e:
             logging.error(str(e))
             logging.exception('直播地址获取失败 / 缓存视频出错')
@@ -732,7 +752,7 @@ class VideoWidget(QFrame):
         if self.quality == 80:
             lowQuality.setIcon(self.style().standardIcon(
                 QStyle.SP_DialogApplyButton))
-        onlyAudio = chooseQuality.addAction('仅播声音(失效)')
+        onlyAudio = chooseQuality.addAction('仅播声音')
         if self.quality == -1:
             onlyAudio.setIcon(self.style().standardIcon(
                 QStyle.SP_DialogApplyButton))

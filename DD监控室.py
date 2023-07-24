@@ -535,7 +535,7 @@ class MainWindow(QMainWindow):
         globalQualityMenu.addAction(highQualityAction)
         lowQualityAction = QAction('流畅', self, triggered=lambda: self.globalQuality(80))
         globalQualityMenu.addAction(lowQualityAction)
-        onlyAudio = QAction('仅播声音(失效)', self, triggered=lambda: self.globalQuality(-1))
+        onlyAudio = QAction('仅播声音', self, triggered=lambda: self.globalQuality(-1))
         globalQualityMenu.addAction(onlyAudio)
         globalAudioMenu = self.optionMenu.addMenu('全局音效 ►')
         audioOriginAction = QAction('原始音效', self, triggered=lambda: self.globalAudioChannel(0))
@@ -1306,12 +1306,12 @@ if __name__ == '__main__':
     # 应用qss
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     app = QApplication(sys.argv)
-    # with open(os.path.join(application_path, 'utils/qdark.qss'), 'r') as f:
-    #     qss = f.read()
-    # app.setStyleSheet(qss)
-    import qdarktheme
-
-    app.setStyleSheet(qdarktheme.load_stylesheet())
+    with open(os.path.join(application_path, 'utils/qdark.qss'), 'r') as f:
+        qss = f.read()
+    app.setStyleSheet(qss)
+    # import qdarktheme
+    #
+    # app.setStyleSheet(qdarktheme.load_stylesheet())
     # font = QFont('', 14, QFont.Bold)
     # app.setFont(font)
     app.setFont(QFont('微软雅黑', 9))

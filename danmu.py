@@ -14,12 +14,19 @@ class Bar(QLabel):
         super(Bar, self).__init__()
         self.setText(text)
         self.setFixedHeight(25)
+        self.startPos = self.pos()
+        self.pressToken = False
 
     def mousePressEvent(self, event):
         self.startPos = event.pos()
+        self.pressToken = True
+
+    def mouseReleaseEvent(self, event):
+        self.pressToken = False
 
     def mouseMoveEvent(self, event):
-        self.moveSignal.emit(self.mapToParent(event.pos() - self.startPos))
+        if self.pressToken:
+            self.moveSignal.emit(self.mapToParent(event.pos() - self.startPos))
 
 
 class ToolButton(QToolButton):

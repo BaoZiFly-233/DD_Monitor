@@ -14,12 +14,18 @@ class Slider(QSlider):
         self.setOrientation(Qt.Horizontal)
         self.setFixedWidth(100)
         self.setValue(value)
+        self.pressToken = False
 
     def mousePressEvent(self, event):
-        self.updateValue(event.pos())
+        # self.updateValue(event.pos())
+        self.pressToken = True
+
+    def mouseReleaseEvent(self, event):
+        self.pressToken = False
 
     def mouseMoveEvent(self, event):
-        self.updateValue(event.pos())
+        if self.pressToken:
+            self.updateValue(event.pos())
 
     def wheelEvent(self, event):  # 把进度条的滚轮事件去了 用啥子滚轮
         pass
