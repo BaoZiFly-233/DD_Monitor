@@ -617,16 +617,20 @@ class VideoWidget(QFrame):
         #     else:
         #         self.videoFrame.resize(self.width(), new_h)
 
-        self.titleLabel.hide() if self.width() < 350 else self.titleLabel.show()
-        self.play.hide() if self.width() < 300 else self.play.show()
-        self.danmuButton.hide() if self.width() < 250 else self.danmuButton.show()
-        self.slider.hide() if self.width() < 200 else self.slider.show()
-        width = self.width() * self.horiPercent
-        self.textBrowser.resize(width, self.height() * self.vertPercent)
-        self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
-        self.moveTextBrowser()
+        try:
+            self.titleLabel.hide() if self.width() < 350 else self.titleLabel.show()
+            self.play.hide() if self.width() < 300 else self.play.show()
+            self.danmuButton.hide() if self.width() < 250 else self.danmuButton.show()
+            self.slider.hide() if self.width() < 200 else self.slider.show()
+            width = self.width() * self.horiPercent
+            self.textBrowser.resize(width, self.height() * self.vertPercent)
+            self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
+            self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
+            self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
+            self.moveTextBrowser()
+        except:
+            pass
+
 
     def moveEvent(self, QMoveEvent):  # 理论上给悬浮窗同步弹幕机用的moveEvent 但不生效 但是又不能删掉 不然交换窗口弹幕机有bug
         # videoFrame的坐标要转成globalPos
