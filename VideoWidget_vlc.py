@@ -19,7 +19,7 @@ from danmu import TextBrowser
 import vlc
 import platform
 import logging
-import m3u8
+# import m3u8
 
 
 # header = {
@@ -63,11 +63,12 @@ class GetMediaURL(QThread):
         self.saveCachePath = saveCachePath
         self.checkTimer = QTimer(self)
         self.checkTimer.timeout.connect(self.checkDownlods)
+        self.is_m3u8 = False  # m3u8标志位
 
     def checkDownlods(self):
         if self.downloadToken:
             self.downloadToken = False
-        else:
+        elif not self.is_m3u8:  # 如果不是m3u8的话就发送error信号刷新
             self.downloadError.emit()
 
     def setConfig(self, roomID, quality):
@@ -162,29 +163,9 @@ class GetMediaURL(QThread):
                 except Exception as e:
                     logging.error(str(e))
             elif '.m3u8?' in url:
-                fileName = '%s/%s.m4s' % (self.cacheFolder, self.id)
-                host = url.split('index')[0]
-                response = requests.get(url, headers=header)
-                m3u8_obj = m3u8.loads(response.text)
-                media_urls = m3u8_obj.data['segments']
-                print(media_urls)
-                for media_url in media_urls:
-                    media_name = media_url['uri'].split('/')[-1]
-                    media_response = requests.get(host + media_url['uri'])
-                    # with open(fileName, 'ab') as f:
-                    with open('%s/%s' % (self.cacheFolder, media_name), 'ab') as f:
-                        f.write(media_response.content)
-
-
-                # logging.debug(download.headers)
-                # self.recordToken = True
-                # contentCnt = 0
-                # while True:
-                #     try:
-                #         self.cacheVideo = open(fileName, 'wb')  # 等待上次缓存关闭
-                #         break
-                #     except:
-                #         time.sleep(0.1)
+                self.downloadToken = True
+                self.is_m3u8 = True
+                self.cacheName.emit(url)
         except Exception as e:
             logging.error(str(e))
             logging.exception('直播地址获取失败 / 缓存视频出错')
@@ -1036,7 +1017,7 @@ class VideoWidget(QFrame):
                 self.getMediaURL.setConfig(
                     self.roomID, self.quality)  # 设置房号和画质
                 self.getMediaURL.start()  # 开始缓存视频
-                self.getMediaURL.checkTimer.start(3000)  # 启动监测定时器
+                self.getMediaURL.checkTimer.start(5000)  # 启动监测定时器
         else:
             self.mediaStop()
 
@@ -1094,11 +1075,11 @@ class VideoWidget(QFrame):
             self.danmu.start()
             self.textBrowser.show()
         if self.hardwareDecode:
-            self.media = self.instance.media_new(
-                cacheName, 'avcodec-hw=any')  # 设置vlc并硬解播放
+            self.media = self.instance.media_new(cacheName, 'avcodec-hw=any')  # 设置vlc并硬解播放
         else:
-            self.media = self.instance.media_new(
-                cacheName, 'avcodec-hw=none')  # 软解  vlc3.0似乎不起作用?
+            self.media = self.instance.media_new(cacheName, 'avcodec-hw=none')  # 软解  vlc3.0似乎不起作用?
+        if '.m3u8?' in cacheName:  # m3u8推流直接让vlc解析地址串流播放 不下载到硬盘再读取
+            self.media.get_mrl()
         self.player.set_media(self.media)  # 设置视频
         self.player.audio_set_channel(self.audioChannel)
         self.player.play()

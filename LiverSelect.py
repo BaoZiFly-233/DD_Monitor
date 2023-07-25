@@ -596,6 +596,8 @@ class AddLiverRoomWidget(QWidget):
         self.hotLiverTable.setColumnCount(3)
         self.hotLiverTable.setRowCount(100)
         self.hotLiverTable.setVerticalHeaderLabels(['添加'] * 100)
+        for i in range(100):
+            self.hotLiverTable.setRowHeight(i, 40)
         self.hotLiverTable.setHorizontalHeaderLabels(['主播名', '直播间标题', '直播间房号'])
         self.hotLiverTable.setColumnWidth(0, 130)
         self.hotLiverTable.setColumnWidth(1, 240)
@@ -627,6 +629,8 @@ class AddLiverRoomWidget(QWidget):
         self.followsTable.setColumnCount(3)
         self.followsTable.setRowCount(500)
         self.followsTable.setVerticalHeaderLabels(['添加'] * 500)
+        for i in range(500):
+            self.followsTable.setRowHeight(i, 40)
         self.followsTable.setHorizontalHeaderLabels(['主播名', '直播间标题', '直播间房号'])
         self.followsTable.setColumnWidth(0, 130)
         self.followsTable.setColumnWidth(1, 240)
@@ -661,6 +665,8 @@ class AddLiverRoomWidget(QWidget):
             vtbs.close()
             self.hacoTable.setRowCount(len(self.vtbList))
             self.hacoTable.setVerticalHeaderLabels(['添加'] * len(self.vtbList))
+            for i in range(len(self.vtbList)):
+                self.hacoTable.setRowHeight(i, 40)
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
                     self.hacoTable.setItem(y, x, QTableWidgetItem(line[x]))
@@ -678,7 +684,7 @@ class AddLiverRoomWidget(QWidget):
 
         tab.addTab(hotLiverPage, '正在直播')
         tab.addTab(hacoPage, '个人势/箱')
-        tab.addTab(followsPage, '关注添加')
+        # tab.addTab(followsPage, '关注添加')
 
     def editChange(self):  # 提取输入文本中的数字
         if len(self.roomEdit.text()) > len(self.roomEditText):
@@ -737,6 +743,8 @@ class AddLiverRoomWidget(QWidget):
             self.hotLiverTable.setColumnCount(3)
             self.hotLiverTable.setRowCount(100)
             self.hotLiverTable.setVerticalHeaderLabels(['添加'] * 100)
+            for i in range(100):
+                self.hotLiverTable.setRowHeight(i, 40)
             self.hotLiverTable.setHorizontalHeaderLabels(['主播名', '直播间标题', '直播间房号'])
             self.hotLiverTable.setColumnWidth(0, 130)
             self.hotLiverTable.setColumnWidth(1, 240)
@@ -769,6 +777,8 @@ class AddLiverRoomWidget(QWidget):
             self.hacoTable.clear()
             self.hacoTable.setRowCount(len(self.vtbList))
             self.hacoTable.setVerticalHeaderLabels(['添加'] * len(self.vtbList))
+            for i in range(len(self.vtbList)):
+                self.hacoTable.setRowHeight(i, 40)
             self.hacoTable.setHorizontalHeaderLabels(['主播名', '直播间房号', '所属'])
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
