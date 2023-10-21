@@ -78,7 +78,8 @@ class GetMediaURL(QThread):
     def getStreamUrl(self):
         # 旧api
         # api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=%s' % (self.roomID, self.quality)
-        # r = requests.get(api)
+        # print(api)
+        # r = requests.get(api, headers=header)
         # print(r.text)
         # url = json.loads(r.text)['data']['durl'][0]['url']
         # return url
@@ -112,7 +113,7 @@ class GetMediaURL(QThread):
             "statistics": '{"appId":1,"platform":3,"version":"6.25.0","abtest":""}',
             "ts": int(time.time())
         }
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, headers=header)
         j = r.json()
         baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
         extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']
@@ -124,7 +125,11 @@ class GetMediaURL(QThread):
     def run(self):
         try:
             url = self.getStreamUrl()
-            if '.flv?' in url:
+            if '.m3u8?' in url:
+                self.downloadToken = True
+                self.is_m3u8 = True
+                self.cacheName.emit(url)
+            elif '.flv?' in url:
                 fileName = '%s/%s.flv' % (self.cacheFolder, self.id)
                 download = requests.get(url, stream=True, headers=header)
                 logging.debug(download.headers)
@@ -162,10 +167,7 @@ class GetMediaURL(QThread):
                         os.remove(fileName)  # 清除缓存
                 except Exception as e:
                     logging.error(str(e))
-            elif '.m3u8?' in url:
-                self.downloadToken = True
-                self.is_m3u8 = True
-                self.cacheName.emit(url)
+
         except Exception as e:
             logging.error(str(e))
             logging.exception('直播地址获取失败 / 缓存视频出错')
@@ -1067,17 +1069,7 @@ class VideoWidget(QFrame):
         self.retryTimes = 0
         self.cacheName = cacheName
         self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        self.danmu.setRoomID(self.roomID)
-        try:
-            self.danmu.message.disconnect(self.playDanmu)
-        except:
-            pass
-            # logging.exception('停止弹幕出错')
-        if self.startWithDanmu:
-            self.danmu.message.connect(self.playDanmu)
-            self.danmu.terminate()
-            self.danmu.start()
-            self.textBrowser.show()
+
         if self.hardwareDecode:
             self.media = self.instance.media_new(cacheName, 'avcodec-hw=any')  # 设置vlc并硬解播放
         else:
@@ -1091,6 +1083,18 @@ class VideoWidget(QFrame):
         self.checkPlaying.start(1000)  # 启动播放卡顿检测定时器
         self.audioTimer.start()  # 检测音量是否正确
         self.refreshTimeStampTimer.start()  # 开始刷新直播时长
+
+        self.danmu.setRoomID(self.roomID)
+        try:
+            self.danmu.message.disconnect(self.playDanmu)
+        except:
+            pass
+            # logging.exception('停止弹幕出错')
+        if self.startWithDanmu:
+            self.danmu.message.connect(self.playDanmu)
+            self.danmu.terminate()
+            self.danmu.start()
+            self.textBrowser.show()
 
     def copyCache(self, copyFile):
         title = self.oldTitle if self.oldTitle else self.title
@@ -1151,7 +1155,8 @@ class VideoWidget(QFrame):
             self.uname = '未定义'
         else:
             r = requests.get(
-                r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID)
+                r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID,
+            headers=header)
             data = json.loads(r.text)
             if data['message'] == '房间已加密':
                 self.title = '房间已加密'

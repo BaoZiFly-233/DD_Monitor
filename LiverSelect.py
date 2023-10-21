@@ -144,7 +144,7 @@ class RecordThread(QThread):
         self.reconnectCount = 0
         api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=10000' % self.roomID
         try:
-            r = requests.get(api)
+            r = requests.get(api, headers=header)
             url = json.loads(r.text)['data']['durl'][0]['url']
             download = requests.get(url, stream=True, headers=header)
             self.recordToken = True
@@ -178,9 +178,9 @@ class DownloadImage(QThread):
     def run(self):
         try:
             if self.W == 60:
-                r = requests.get(self.url + '@100w_100h.jpg')
+                r = requests.get(self.url + '@100w_100h.jpg', headers=header)
             else:
-                r = requests.get(self.url)
+                r = requests.get(self.url, headers=header)
             img = QPixmap.fromImage(QImage.fromData(r.content))
             self.img.emit(img.scaled(self.W, self.H, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
             if self.keyFrame:
@@ -422,7 +422,7 @@ class GetHotLiver(QThread):
                 pageSummary = []
                 for p in range(1, 6):
                     api = 'https://api.live.bilibili.com/xlive/web-interface/v1/second/getList?platform=web&parent_area_id=%s&page=%s' % (area, p)
-                    r = requests.get(api)
+                    r = requests.get(api, headers=header)
                     data = json.loads(r.text)['data']['list']
                     if data:
                         for info in data:
@@ -900,7 +900,8 @@ class CollectLiverInfo(QThread):
                                 break
                         try:
                             if not exist:
-                                r = requests.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID)
+                                r = requests.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
+                                                 headers=header)
                                 r.encoding = 'utf8'
                                 banData = json.loads(r.text)['data']
                                 if banData:
@@ -967,7 +968,8 @@ class LiverPanel(QWidget):
         for roomID, topToken in roomDict.items():  # 如果id不在老列表里面 则添加
             if len(roomID) <= 5:  # 查询短号
                 try:
-                    r = requests.get('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID)
+                    r = requests.get('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
+                                     headers=header)
                     data = json.loads(r.text)['data']
                     roomID = str(data['room_info']['room_id'])
                 except:

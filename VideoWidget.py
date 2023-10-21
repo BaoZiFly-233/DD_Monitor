@@ -9,6 +9,9 @@ from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from remote import remoteThread
 
 
+header = {'User-Agent': 'Bilibili Freedoooooom/MarkII'}
+
+
 class Bar(QLabel):
     moveSignal = Signal(QPoint)
 
@@ -224,7 +227,7 @@ class GetMediaURL(QThread):
             "statistics": "{\"appId\":1,\"platform\":3,\"version\":\"6.21.5\",\"abtest\":\"\"}",
             "ts": int(time.time())
         }
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, headers=header)
         j = r.json()
         baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
         extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']
@@ -721,7 +724,8 @@ class VideoWidget(QWidget):
             uname = '未定义'
         else:
             r = requests.get(
-                r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID)
+                r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID,
+                headers=header)
             data = json.loads(r.text)
             if data['message'] == '房间已加密':
                 title = '房间已加密'
