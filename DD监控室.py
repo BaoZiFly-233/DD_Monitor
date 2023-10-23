@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 2.13
+        self.versionNumber = 2.14
         self.setWindowTitle(f'DD监控室{self.versionNumber}')
         self.resize(1600, 900)
         self.maximumToken = True
