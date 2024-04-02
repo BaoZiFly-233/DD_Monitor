@@ -113,7 +113,11 @@ class GetMediaURL(QThread):
             "statistics": '{"appId":1,"platform":3,"version":"6.25.0","abtest":""}',
             "ts": int(time.time())
         }
-        r = requests.get(url, params=params, headers=header)
+        cookies = {
+            'SESSDATA': '67bfe20f%2C1727631196%2C51f58%2A42CjAk6w30405j6TdylJoN69THA4VShiQ3U0mqXWHzCPOeY6aFGGRhwiNdXI5bmw1R6DMSVlkwc0ZVRmZVLTVraDVGTlNQV0dPem1PVUNFVllEQzFndUJvQVQ5MFdEdDdWcHJ1T19kNnJqY2txNFQ4M0dyaWJaQUYtbm9HS3VvVEt4YUUwS3hzVUl3IIEC'
+        }
+
+        r = requests.get(url, params=params, headers=header, cookies=cookies)
         j = r.json()
         baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
         extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']

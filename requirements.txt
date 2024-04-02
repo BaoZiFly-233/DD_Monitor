@@ -8,3 +8,5 @@ python-vlc
 requests
 urllib3
 pyinstaller
+aiohttp
+brotli
