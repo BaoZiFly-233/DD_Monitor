@@ -29,6 +29,7 @@ from ReportException import thraedingExceptionHandler, uncaughtExceptionHandler,
     unraisableExceptionHandler, loggingSystemInfo
 from danmu import TextOpation, ToolButton
 from checkUpdate import updateReminder, latestRemainder, checkUpdate
+from webBrowser import Browser
 
 
 # 程序所在路径
@@ -375,6 +376,9 @@ class MainWindow(QMainWindow):
         self.hotKey = HotKey()
         self.pay = pay()
         self.startLiveWindow = StartLiveWindow()
+        self.loginBrowser = Browser()
+        self.loginBrowser.hide()
+        self.loginBrowser.sessionData.connect(self.updateSessionData)
 
         # ---- 内嵌/弹出播放器初始化 ----
         self.videoWidgetList = []
@@ -586,6 +590,10 @@ class MainWindow(QMainWindow):
         # killAction = QAction('自尽(测试)', self, triggered=lambda a: 0 / 0)
         # self.payMenu.addAction(killAction)
         progressText.setText('设置关于菜单...')
+
+        self.loginMenu = self.menuBar().addMenu('B站登录')
+        loginAction = QAction('扫码登录', self, triggered=self.openLoginPage)
+        self.loginMenu.addAction(loginAction)
 
         # 鼠标和计时器
         self.oldMousePos = QPoint(0, 0)  # 初始化鼠标坐标
@@ -964,6 +972,14 @@ class MainWindow(QMainWindow):
     def openCacheSetting(self):
         self.cacheSetting.hide()
         self.cacheSetting.show()
+
+    def openLoginPage(self):
+        self.loginBrowser.show()
+
+    def updateSessionData(self, sessionData):
+        self.sessionData = sessionData
+        logging.info('session:::')
+        logging.info(self.sessionData)
 
     def setCache(self, setting):
         maxCache, savePath = setting
