@@ -51,7 +51,7 @@ class GetMediaURL(QThread):
     copyFile = Signal(str)
     downloadError = Signal()
 
-    def __init__(self, id, cacheFolder, maxCacheSize, saveCachePath):
+    def __init__(self, id, cacheFolder, maxCacheSize, saveCachePath, sessionData):
         super(GetMediaURL, self).__init__()
         self.id = id
         self.cacheFolder = cacheFolder
@@ -61,6 +61,7 @@ class GetMediaURL(QThread):
         self.downloadToken = False
         self.maxCacheSize = maxCacheSize
         self.saveCachePath = saveCachePath
+        self.sessionData = sessionData
         self.checkTimer = QTimer(self)
         self.checkTimer.timeout.connect(self.checkDownlods)
         self.is_m3u8 = False  # m3u8标志位
@@ -71,9 +72,10 @@ class GetMediaURL(QThread):
         elif not self.is_m3u8:  # 如果不是m3u8的话就发送error信号刷新
             self.downloadError.emit()
 
-    def setConfig(self, roomID, quality):
+    def setConfig(self, roomID, quality, sessionData):
         self.roomID = roomID
         self.quality = quality
+        self.sessionData = sessionData
 
     def getStreamUrl(self):
         # 旧api
@@ -114,7 +116,7 @@ class GetMediaURL(QThread):
             "ts": int(time.time())
         }
         cookies = {
-            'SESSDATA': '67bfe20f%2C1727631196%2C51f58%2A42CjAk6w30405j6TdylJoN69THA4VShiQ3U0mqXWHzCPOeY6aFGGRhwiNdXI5bmw1R6DMSVlkwc0ZVRmZVLTVraDVGTlNQV0dPem1PVUNFVllEQzFndUJvQVQ5MFdEdDdWcHJ1T19kNnJqY2txNFQ4M0dyaWJaQUYtbm9HS3VvVEt4YUUwS3hzVUl3IIEC'
+            'SESSDATA': self.sessionData
         }
 
         r = requests.get(url, params=params, headers=header, cookies=cookies)
@@ -253,7 +255,7 @@ class VideoWidget(QFrame):
 
     def __init__(self, id, volume, cacheFolder, top=False, title='', resize=[],
                  textSetting=[True, 20, 2, 6, 0, '【 [ {', 10, 0], maxCacheSize=2048000,
-                 saveCachePath='', startWithDanmu=True, hardwareDecode=True):
+                 saveCachePath='', startWithDanmu=True, hardwareDecode=True, sessionData=''):
         super(VideoWidget, self).__init__()
         self.setAcceptDrops(True)
         self.installEventFilter(self)
@@ -273,6 +275,7 @@ class VideoWidget(QFrame):
         self.volumeAmplify = 1.0  # 音量加倍
         self.muted = False
         self.hardwareDecode = hardwareDecode
+        self.sessionData = sessionData
         self.leftButtonPress = False
         self.rightButtonPress = False
         self.fullScreen = False
@@ -436,7 +439,7 @@ class VideoWidget(QFrame):
         # ---- IO 交互设置 ----
         # 单开线程获取视频流
         self.getMediaURL = GetMediaURL(
-            self.id, cacheFolder, maxCacheSize, saveCachePath)
+            self.id, cacheFolder, maxCacheSize, saveCachePath, self.sessionData)
         self.getMediaURL.cacheName.connect(self.setMedia)
         self.getMediaURL.copyFile.connect(self.copyCache)
         self.getMediaURL.downloadError.connect(self.mediaReload)
@@ -1024,8 +1027,7 @@ class VideoWidget(QFrame):
             self.playerRestart()
             self.setTitle()  # 同时获取最新直播状态
             if self.liveStatus == 1:  # 直播中
-                self.getMediaURL.setConfig(
-                    self.roomID, self.quality)  # 设置房号和画质
+                self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData)  # 设置房号和画质
                 self.getMediaURL.start()  # 开始缓存视频
                 self.getMediaURL.checkTimer.start(5000)  # 启动监测定时器
         else:

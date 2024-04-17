@@ -248,7 +248,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 2.15
+        self.versionNumber = 2.16
         self.setWindowTitle(f'DD监控室{self.versionNumber}')
         self.resize(1600, 900)
         self.maximumToken = True
@@ -332,6 +332,8 @@ class MainWindow(QMainWindow):
                 self.config['showStartLive'] = True
             if 'checkUpdate' not in self.config:
                 self.config['checkUpdate'] = True
+            if 'sessionData' not in self.config:
+                self.config['sessionData'] = ''
             for danmuConfig in self.config['danmu']:
                 if len(danmuConfig) == 6:
                     danmuConfig.append(10)
@@ -355,6 +357,7 @@ class MainWindow(QMainWindow):
                 'startWithDanmu': True,
                 'showStartLive': True,
                 'checkUpdate': True,
+                'sessionData': '',
             }
         self.dumpConfig = DumpConfig(self.config)
 
@@ -377,8 +380,10 @@ class MainWindow(QMainWindow):
         self.pay = pay()
         self.startLiveWindow = StartLiveWindow()
         self.loginBrowser = Browser()
-        self.loginBrowser.hide()
+        self.loginBrowser.show()
+        # self.loginBrowser.hide()
         self.loginBrowser.sessionData.connect(self.updateSessionData)
+        self.loginBrowser.login.connect(self.updateLogin)
 
         # ---- 内嵌/弹出播放器初始化 ----
         self.videoWidgetList = []
@@ -393,7 +398,8 @@ class MainWindow(QMainWindow):
                                                     maxCacheSize=self.config['maxCacheSize'],
                                                     saveCachePath=self.config['saveCachePath'],
                                                     startWithDanmu=self.config['startWithDanmu'],
-                                                    hardwareDecode=self.config['hardwareDecode']))
+                                                    hardwareDecode=self.config['hardwareDecode'],
+                                                    sessionData=self.config['sessionData']))
             vlcProgressCounter += 1
             progressBar.setValue(vlcProgressCounter)
             self.videoWidgetList[i].mutedChanged.connect(self.mutedChanged)
@@ -418,7 +424,8 @@ class MainWindow(QMainWindow):
                                                        maxCacheSize=self.config['maxCacheSize'],
                                                        saveCachePath=self.config['saveCachePath'],
                                                        startWithDanmu=self.config['startWithDanmu'],
-                                                       hardwareDecode=self.config['hardwareDecode']))
+                                                       hardwareDecode=self.config['hardwareDecode'],
+                                                       sessionData=self.config['sessionData']))
             self.popVideoWidgetList[i].closePopWindow.connect(
                 self.closePopWindow)
             vlcProgressCounter += 1
@@ -978,8 +985,18 @@ class MainWindow(QMainWindow):
 
     def updateSessionData(self, sessionData):
         self.sessionData = sessionData
-        logging.info('session:::')
-        logging.info(self.sessionData)
+        self.config['sessionData'] = self.sessionData
+        for videoWidget in self.videoWidgetList:
+            videoWidget.sessionData = self.sessionData
+        self.globalMediaReload()
+
+    def updateLogin(self, login):
+        if not login:
+            self.setWindowTitle(f'DD监控室{self.versionNumber} - 未登录')
+        else:
+            self.setWindowTitle(f'DD监控室{self.versionNumber} - 已登录')
+            self.loginBrowser.hide()
+            # self.globalMediaReload()
 
     def setCache(self, setting):
         maxCache, savePath = setting
@@ -1061,6 +1078,7 @@ class MainWindow(QMainWindow):
         self.hide()
         self.layoutSettingPanel.close()
         self.liverPanel.addLiverRoomWidget.close()
+        self.loginBrowser.close()
         for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
             videoWidget.getMediaURL.recordToken = False  # 关闭缓存并清除
             videoWidget.getMediaURL.checkTimer.stop()

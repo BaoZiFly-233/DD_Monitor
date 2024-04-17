@@ -9,6 +9,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkCookieJar
 
 class Browser(QWidget):
     sessionData = Signal(str)
+    login = Signal(bool)
     def __init__(self):
         super().__init__()
         self.resize(1000, 600)
@@ -19,17 +20,25 @@ class Browser(QWidget):
         self.cookie_store.cookieAdded.connect(self.onCookieAdd)
         webpage = QWebEnginePage(profile, self.browser)
         self.browser.setPage(webpage)
-        self.browser.load(QUrl(r'https://account.bilibili.com/big'))
+        self.browser.load(QUrl(r'https://account.bilibili.com/account/home'))
         self.layout = QGridLayout()
         self.layout.addWidget(self.browser)
         self.setLayout(self.layout)
+        self.browser.loadFinished.connect(self.onLoadFinished)
+        self.loginToken = False
+
+    def onLoadFinished(self):
+        if self.browser.page().title() == '账号登录':
+            self.login.emit(False)
+        else:
+            self.login.emit(True)
 
     def onCookieAdd(self, cookie):
-        print(cookie)
         name = cookie.name().data().decode('utf-8')  # 先获取cookie的名字，再把编码处理一下
         value = cookie.value().data().decode('utf-8')  # 先获取cookie值，再把编码处理一下
-        if name == 'SESSDATA':
+        if name == 'SESSDATA' and not self.loginToken:
             self.sessionData.emit(value)
+            self.loginToken = True
 
 
 if __name__ == '__main__':
