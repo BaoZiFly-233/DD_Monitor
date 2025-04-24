@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
 
         # 主播添加窗口
         self.liverPanel = LiverPanel(self.config['roomid'], application_path)
-        self.liverPanel.addLiverRoomWidget.getHotLiver.start()
+        # self.liverPanel.addLiverRoomWidget.getHotLiver.start()
         self.liverPanel.addToWindow.connect(self.addCoverToPlayer)
         self.liverPanel.dumpConfig.connect(self.dumpConfig.start)  # 保存config
         self.liverPanel.refreshIDList.connect(

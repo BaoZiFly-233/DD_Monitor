@@ -6,7 +6,7 @@ DD监控室最重要的模块之一 视频播放窗口 现已全部从QMediaPlay
 import requests
 import json
 import os
-# os.add_dll_directory(os.getcwd())
+os.add_dll_directory(os.getcwd())
 import time
 import shutil
 import random
@@ -19,6 +19,7 @@ from danmu import TextBrowser
 import vlc
 import platform
 import logging
+from datetime import datetime
 # import m3u8
 
 
@@ -27,7 +28,10 @@ import logging
 #                   'build/6250300 channel/bili innerVer/6250300 osVer/6.0.1 network/2'
 #     # 解决新版本未登录用户无法观看直播的关键就在这里 改个UA就好了 或者用Bilibili Freedoooooom/MarkII
 # }
-header = {'User-Agent': 'Bilibili Freedoooooom/MarkII'}
+# header = {'User-Agent': 'Bilibili Freedoooooom/MarkII'}
+header = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
 
 
 class PushButton(QPushButton):
@@ -444,7 +448,7 @@ class VideoWidget(QFrame):
         self.getMediaURL.copyFile.connect(self.copyCache)
         self.getMediaURL.downloadError.connect(self.mediaReload)
 
-        self.danmu = remoteThread(self.roomID)
+        self.danmu = remoteThread(self.roomID, self.sessionData)
 
         # 导出配置
         self.exportCache = ExportCache()
@@ -1160,9 +1164,17 @@ class VideoWidget(QFrame):
             self.title = '未定义的直播间'
             self.uname = '未定义'
         else:
+            # r = requests.get(
+            #     r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID,
+            # headers=header)
+            params = {
+                'req_biz': 'web_room_componet',
+                'room_ids': [str(self.roomID)]  # 多个同参数用列表表示
+            }
             r = requests.get(
-                r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID,
-            headers=header)
+                r'https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomBaseInfo',
+                params=params, headers=header, cookies={'SESSDATA': self.sessionData}
+            )
             data = json.loads(r.text)
             if data['message'] == '房间已加密':
                 self.title = '房间已加密'
@@ -1171,11 +1183,11 @@ class VideoWidget(QFrame):
                 self.title = '房间好像不见了-_-？'
                 self.uname = '未定义'
             else:
-                data = data['data']
-                self.liveStatus = data['room_info']['live_status']
-                self.liveStartTime = data['room_info']['live_start_time']
-                self.title = data['room_info']['title']
-                self.uname = data['anchor_info']['base_info']['uname']
+                data = data['data']['by_room_ids'][str(self.roomID)]
+                self.liveStatus = data['live_status']
+                self.liveStartTime = time.mktime(datetime.strptime(data['live_time'], "%Y-%m-%d %H:%M:%S").timetuple())
+                self.title = data['title']
+                self.uname = data['uname']
                 if self.liveStatus != 1:
                     self.uname = '（未开播）' + self.uname
         self.topLabel.setText(

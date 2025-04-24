@@ -69,13 +69,13 @@ headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36
 class remoteThread(QThread):
     message = Signal(str)
 
-    def __init__(self, roomID):
+    def __init__(self, roomID, sessionData):
         super(remoteThread, self).__init__()
         self.live = None
         self.roomID = roomID
         if len(self.roomID) <= 4 and self.roomID != '0':
             html = requests.get(r'https://api.live.bilibili.com/room/v1/Room/room_init?id=%s' % self.roomID,
-                                headers=headers).json()
+                                headers=headers, cookies={'SESSDATA': self.sessionData}).json()
             logging.info(html)
             self.roomID = html['data']['room_id']
         self.timer = QTimer()
@@ -227,5 +227,7 @@ class remoteThread(QThread):
         #     asyncio.get_event_loop().run_until_complete(self.startup(remote))
         # except:
         #     logging.exception('弹幕主循环出错')
-        self.live = blive(int(self.roomID))
-        asyncio.run(self.live.main())
+
+        # self.live = blive(int(self.roomID))
+        # asyncio.run(self.live.main())
+        pass

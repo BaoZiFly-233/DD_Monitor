@@ -538,7 +538,7 @@ class AddLiverRoomWidget(QWidget):
     """添加直播间 - 独立弹窗"""
     roomList = Signal(dict)
 
-    def __init__(self,application_path):
+    def __init__(self, application_path):
         super(AddLiverRoomWidget, self).__init__()
         self.application_path = application_path
         self.resize(600, 900)
