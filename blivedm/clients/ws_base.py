@@ -15,7 +15,7 @@ from .. import handlers, utils
 logger = logging.getLogger('blivedm')
 
 USER_AGENT = (
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 )
 
 HEADER_STRUCT = struct.Struct('>I2H2I')
@@ -98,7 +98,6 @@ class WebSocketClientBase:
         else:
             self._session = session
             self._own_session = False
-            assert self._session.loop is asyncio.get_event_loop()  # noqa
 
         self._heartbeat_interval = heartbeat_interval
 

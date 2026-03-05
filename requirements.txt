@@ -1,12 +1,15 @@
-aiowebsocket
 certifi
 chardet
 dnspython
 idna
 PySide6
-python-vlc
+python-mpv
 requests
 urllib3
 pyinstaller
 aiohttp
 brotli
+qrcode[pil]
+pure-protobuf~=3.1.2
+yarl
+bilibili-api-python

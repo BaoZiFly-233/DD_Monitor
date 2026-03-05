@@ -25,7 +25,13 @@ class checkUpdate(QThread):
             if 'DD监控室' in line and 'class="title"' in line:
                 link, version = line.split('">')
                 link = 'https://gitee.com/' + link.split('href="/')[1]
-                version = float(version.split('室')[1].split('<')[0])
+                version_str = version.split('室')[1].split('<')[0].strip()
+                # 提取版本号中的数字部分（如 "2.16应急版" -> "2.16"）
+                import re
+                match = re.search(r'[\d.]+', version_str)
+                if not match:
+                    return
+                version = float(match.group())
                 print(version, self.version)
                 if version > self.version:
                     print('检测到新版本')

@@ -20,16 +20,17 @@ from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
 # from VideoWidget import PushButton, Slider, VideoWidget  # 已弃用
-from VideoWidget_vlc import PushButton, Slider, VideoWidget
+# from VideoWidget_vlc import PushButton, Slider, VideoWidget  # VLC 版本已弃用
+from VideoWidget_mpv import PushButton, Slider, VideoWidget
 from LiverSelect import LiverPanel
 from pay import pay
-import codecs
 import dns.resolver
 from ReportException import thraedingExceptionHandler, uncaughtExceptionHandler,\
     unraisableExceptionHandler, loggingSystemInfo
 from danmu import TextOpation, ToolButton
 from checkUpdate import updateReminder, latestRemainder, checkUpdate
-from webBrowser import Browser
+# from webBrowser import Browser  # 已弃用，改用扫码登录
+from login import QRLoginWidget
 
 
 # 程序所在路径
@@ -207,7 +208,7 @@ class DumpConfig(QThread):
     def run(self):
         try:
             configJSONPath = os.path.join(application_path, r'utils/config.json')
-            with codecs.open(configJSONPath, 'w', encoding='utf-8', errors='ignore') as f:
+            with open(configJSONPath, 'w', encoding='utf-8', errors='ignore') as f:
                 f.write(json.dumps(self.config, ensure_ascii=False))
         except Exception as e:
             logging.error(str(e))
@@ -220,7 +221,7 @@ class DumpConfig(QThread):
                 self.backupNumber = 1
             # with open(configJSONPath, 'w') as f:
             #     f.write(json.dumps(self.config, ensure_ascii=False))
-            with codecs.open(configJSONPath, 'w', encoding='utf-8', errors='ignore') as f:
+            with open(configJSONPath, 'w', encoding='utf-8', errors='ignore') as f:
                 f.write(json.dumps(self.config, ensure_ascii=False))
         except Exception as e:
             logging.error(str(e))
@@ -263,7 +264,7 @@ class MainWindow(QMainWindow):
         if os.path.exists(self.configJSONPath):
             if os.path.getsize(self.configJSONPath):
                 try:
-                    with codecs.open(self.configJSONPath, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(self.configJSONPath, 'r', encoding='utf-8', errors='ignore') as f:
                         self.config = json.loads(f.read())
                     # self.config = json.loads(open(self.configJSONPath).read())
                 except Exception as e:
@@ -279,7 +280,7 @@ class MainWindow(QMainWindow):
                     if os.path.getsize(self.configJSONPath):  # 如过备份文件有效
                         try:
                             self.config = json.loads(
-                                codecs.open(self.configJSONPath, 'r', encoding='utf-8', errors='ignore').read())
+                                open(self.configJSONPath, 'r', encoding='utf-8', errors='ignore').read())
                             break
                         except Exception as e:
                             logging.error(str(e))
@@ -379,16 +380,20 @@ class MainWindow(QMainWindow):
         self.hotKey = HotKey()
         self.pay = pay()
         self.startLiveWindow = StartLiveWindow()
-        self.loginBrowser = Browser()
-        self.loginBrowser.show()
-        # self.loginBrowser.hide()
+        self.loginBrowser = QRLoginWidget()
+        # 启动时如果有已保存的 sessionData，验证登录状态
+        if self.config['sessionData']:
+            self.loginBrowser.setSessionData(self.config['sessionData'])
+        else:
+            self.loginBrowser.show()
         self.loginBrowser.sessionData.connect(self.updateSessionData)
         self.loginBrowser.login.connect(self.updateLogin)
+        self.loginBrowser.userInfoReady.connect(self.onUserInfoReady)
 
         # ---- 内嵌/弹出播放器初始化 ----
         self.videoWidgetList = []
         self.popVideoWidgetList = []
-        vlcProgressCounter = 1
+        progressCounter = 1
         for i in range(16):
             if len(self.config['danmu'][i]) < 8:
                 self.config['danmu'][i].append(3)
@@ -400,8 +405,8 @@ class MainWindow(QMainWindow):
                                                     startWithDanmu=self.config['startWithDanmu'],
                                                     hardwareDecode=self.config['hardwareDecode'],
                                                     sessionData=self.config['sessionData']))
-            vlcProgressCounter += 1
-            progressBar.setValue(vlcProgressCounter)
+            progressCounter += 1
+            progressBar.setValue(progressCounter)
             self.videoWidgetList[i].mutedChanged.connect(self.mutedChanged)
             self.videoWidgetList[i].volumeChanged.connect(self.volumeChanged)
             self.videoWidgetList[i].addMedia.connect(self.addMedia)
@@ -428,11 +433,11 @@ class MainWindow(QMainWindow):
                                                        sessionData=self.config['sessionData']))
             self.popVideoWidgetList[i].closePopWindow.connect(
                 self.closePopWindow)
-            vlcProgressCounter += 1
-            progressBar.setValue(vlcProgressCounter)
+            progressCounter += 1
+            progressBar.setValue(progressCounter)
             progressText.setText('设置第%s个悬浮窗播放器...' % str(i + 1))
             app.processEvents()
-            logging.info("VLC设置完毕 %s / 16" % str(i + 1))
+            logging.info("播放器设置完毕 %s / 16" % str(i + 1))
         # 设置所有播放器布局
         self.setPlayer()
 
@@ -628,8 +633,7 @@ class MainWindow(QMainWindow):
         self.videoIndex = 0
         self.setMediaTimer = QTimer(self)
         self.setMediaTimer.timeout.connect(self.setMedia)
-        # self.setMediaTimer.start(500)  # QMediaPlayer加载慢一点 否则容易崩
-        self.setMediaTimer.start(10)  # vlc
+        self.setMediaTimer.start(10)  # MPV 延迟初始化，无需长等待
 
     def setMedia(self):
         if self.videoIndex == 16:
@@ -665,10 +669,9 @@ class MainWindow(QMainWindow):
         fromWidth, fromHeight = fromVideo.width(), fromVideo.height()
         toWidth, toHeight = toVideo.width(), toVideo.height()
         if 3 < abs(fromWidth - toWidth) or 3 < abs(fromHeight - toHeight):  # 有主次关系的播放窗交换同时交换音量和弹幕设置
-            fromMuted = 2 if fromVideo.player.audio_get_mute() else 1
-            toMuted = 2 if toVideo.player.audio_get_mute() else 1
-            fromVolume, toVolume = fromVideo.player.audio_get_volume(
-            ), toVideo.player.audio_get_volume()  # 音量值
+            fromMuted = 2 if fromVideo.get_mute() else 1
+            toMuted = 2 if toVideo.get_mute() else 1
+            fromVolume, toVolume = fromVideo.get_volume(), toVideo.get_volume()
             fromVideo.mediaMute(toMuted)  # 交换静音设置
             fromVideo.setVolume(toVolume)  # 交换音量
             toVideo.mediaMute(fromMuted)
@@ -817,8 +820,7 @@ class MainWindow(QMainWindow):
 
     def globalSetVolume(self, value):
         for videoWidget in self.videoWidgetList:
-            videoWidget.player.audio_set_volume(
-                int(value * videoWidget.volumeAmplify))
+            videoWidget.set_volume_direct(int(value * videoWidget.volumeAmplify))
             videoWidget.volume = value
             videoWidget.slider.setValue(value)
         self.config['volume'] = [value] * 16
@@ -927,8 +929,7 @@ class MainWindow(QMainWindow):
 
     def globalAudioChannel(self, audioChannel):
         for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.audioChannel = audioChannel
-            videoWidget.player.audio_set_channel(audioChannel)
+            videoWidget.set_audio_channel(audioChannel)
         self.config['audioChannel'] = [audioChannel] * 16
         # self.dumpConfig.start()
 
@@ -986,8 +987,10 @@ class MainWindow(QMainWindow):
     def updateSessionData(self, sessionData):
         self.sessionData = sessionData
         self.config['sessionData'] = self.sessionData
-        for videoWidget in self.videoWidgetList:
+        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
             videoWidget.sessionData = self.sessionData
+        self.liverPanel.setSessionData(self.sessionData)
+        self.dumpConfig.start()
         self.globalMediaReload()
 
     def updateLogin(self, login):
@@ -995,8 +998,19 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f'DD监控室{self.versionNumber} - 未登录')
         else:
             self.setWindowTitle(f'DD监控室{self.versionNumber} - 已登录')
-            self.loginBrowser.hide()
-            # self.globalMediaReload()
+
+    def onUserInfoReady(self, info):
+        """登录成功后收到用户信息，更新标题并自动获取关注列表"""
+        uname = info.get('uname', '')
+        uid = info.get('uid', 0)
+        self.setWindowTitle(f'DD监控室{self.versionNumber} - {uname}')
+        # 确保 liverPanel 已持有 sessionData（启动恢复 session 时不会触发 updateSessionData）
+        sessdata = getattr(self, 'sessionData', '') or self.config.get('sessionData', '')
+        if sessdata:
+            self.liverPanel.setSessionData(sessdata)
+        # 自动填入 UID 并获取关注列表
+        if uid:
+            self.liverPanel.autoFetchFollows(str(uid))
 
     def setCache(self, setting):
         maxCache, savePath = setting
@@ -1032,8 +1046,6 @@ class MainWindow(QMainWindow):
         self.pay.thankToBoss.start()
 
     def checkMousePos(self):
-        # for videoWidget in self.videoWidgetList:  # vlc的播放会直接音量最大化 实在没地方放了 写在这里实时强制修改它的音量
-        #     videoWidget.player.audio_set_volume(int(videoWidget.volume * videoWidget.volumeAmplify))
         newMousePos = QCursor.pos()
         if newMousePos != self.oldMousePos:
             self.setCursor(Qt.ArrowCursor)  # 鼠标动起来就显示
@@ -1078,6 +1090,7 @@ class MainWindow(QMainWindow):
         self.hide()
         self.layoutSettingPanel.close()
         self.liverPanel.addLiverRoomWidget.close()
+        self.liverPanel.collectLiverInfo.stop()
         self.loginBrowser.close()
         for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
             videoWidget.getMediaURL.recordToken = False  # 关闭缓存并清除
@@ -1166,7 +1179,7 @@ class MainWindow(QMainWindow):
             self, "选择保存路径", 'DD监控室预设', "*.json")[0]
         if self.savePath:  # 保存路径有效
             try:
-                with codecs.open(self.savePath, 'w', encoding='utf-8', errors='ignore') as f:
+                with open(self.savePath, 'w', encoding='utf-8', errors='ignore') as f:
                     f.write(json.dumps(self.config, ensure_ascii=False))
                 QMessageBox.information(self, '导出预设', '导出完成', QMessageBox.Ok)
             except:
@@ -1178,11 +1191,11 @@ class MainWindow(QMainWindow):
             if os.path.getsize(jsonPath):
                 config = {}
                 try:
-                    with codecs.open(jsonPath, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(jsonPath, 'r', encoding='utf-8', errors='ignore') as f:
                         config = json.loads(f.read())
                 except UnicodeDecodeError:
                     try:
-                        with codecs.open(jsonPath, 'r', encoding='gbk', errors='ignore') as f:
+                        with open(jsonPath, 'r', encoding='gbk', errors='ignore') as f:
                             config = json.loads(f.read())
                     except:
                         logging.exception('json 配置导入失败')
@@ -1336,7 +1349,7 @@ if __name__ == '__main__':
     os.mkdir(cacheFolder)
 
     # 应用qss
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    # Qt6 默认启用高 DPI，无需手动设置 AA_EnableHighDpiScaling
     app = QApplication(sys.argv)
     with open(os.path.join(application_path, 'utils/qdark.qss'), 'r') as f:
         qss = f.read()
@@ -1354,14 +1367,12 @@ if __name__ == '__main__':
     sys.unraisablehook = unraisableExceptionHandler
     threading.excepthook = thraedingExceptionHandler
     loggingSystemInfo()
-    # vlc 版本信息log
-    import vlc
-    vlc_libvlc_env = os.getenv('PYTHON_VLC_LIB_PATH', '')
-    vlc_plugin_env = os.getenv('PYTHON_VLC_MODULE_PATH', '')
-    logging.info(f"libvlc env: PYTHON_VLC_LIB_PATH={vlc_libvlc_env}")
-    logging.info(f"plugin env: PYTHON_VLC_MODULE_PATH={vlc_plugin_env}")
-    logging.info(f"libvlc path: {vlc.dll._name}")
-    logging.info(f"vlc version: {vlc.libvlc_get_version()}")
+    # MPV 信息log
+    try:
+        import mpv
+        logging.info(f"python-mpv 已加载")
+    except (ImportError, OSError) as e:
+        logging.warning(f"python-mpv 加载失败: {e}")
 
     # 欢迎页面
     splash = QSplashScreen(QPixmap(os.path.join(

@@ -2,7 +2,7 @@
 DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 包含主播开播/下播检测和刷新展示 置顶排序 录制管理等功能
 """
-import requests, json, time, codecs, logging, os
+import requests, json, time, logging, os
 from PySide6.QtWidgets import * 	# QAction,QFileDialog
 from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
@@ -409,7 +409,11 @@ class CoverLabel(QLabel):
 
 
 class GetHotLiver(QThread):
-    """获取指定分区的 热榜"""
+    """获取指定分区的热榜
+
+    使用 room/v1/Area/getListByAreaID 接口（无需 WBI 签名），
+    替代原 xlive/web-interface/v1/second/getList（已要求 WBI，返回 -352）。
+    """
     roomInfoSummary = Signal(list)
 
     def __init__(self):
@@ -418,70 +422,99 @@ class GetHotLiver(QThread):
     def run(self):
         try:
             roomInfoSummary = []
+            # parentAreaId: 9=虚拟, 2=网游, 3=手游, 6=单机, 1=娱乐
             for area in [9, 2, 3, 6, 1]:
                 pageSummary = []
                 for p in range(1, 6):
-                    api = 'https://api.live.bilibili.com/xlive/web-interface/v1/second/getList?platform=web&parent_area_id=%s&page=%s' % (area, p)
-                    r = requests.get(api, headers=header)
-                    data = json.loads(r.text)['data']['list']
+                    api = (
+                        'https://api.live.bilibili.com/room/v1/Area/getListByAreaID'
+                        f'?areaId=0&sort=online&pageSize=30&page={p}&parentAreaId={area}'
+                    )
+                    r = requests.get(api, headers=header, timeout=10)
+                    resp = r.json()
+                    if resp.get('code') != 0:
+                        logging.warning(f'热榜 API 返回错误: area={area} page={p} code={resp.get("code")}')
+                        break
+                    data = resp.get('data', [])
                     if data:
                         for info in data:
                             pageSummary.append([info['uname'], info['title'], str(info['roomid'])])
+                    else:
+                        break  # 没有更多数据
                     time.sleep(0.1)
                 roomInfoSummary.append(pageSummary)
             if roomInfoSummary:
                 self.roomInfoSummary.emit(roomInfoSummary)
-        except:
+        except Exception:
             logging.exception('房间信息获取失败')
 
 
 class GetFollows(QThread):
     """获取指定用户的关注列表
-    TODO: 换用
-        + 获取关注列表：bilibili_api.user.get_followings_g(uid)
-        + 获取直播间地址：bilibili_api.user.get_live_info(uid)
+    需要登录 cookie (SESSDATA) 才能查询关注列表
     """
     roomInfoSummary = Signal(list)
 
     def __init__(self):
         super(GetFollows, self).__init__()
         self.uid = None
+        self.sessionData = ''
 
     def setUID(self, uid):
         self.uid = uid
+
+    def setSessionData(self, sessionData):
+        self.sessionData = sessionData if sessionData else ''
 
     def run(self):
         if self.uid:
             followsIDs = set()
             roomIDList = []
-            burp0_headers = {"Connection": "close",
-                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36 Edg/88.0.705.68",
-                             "DNT": "1", "Accept": "*/*", "Sec-Fetch-Site": "same-site",
-                             "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "script",
-                             "Referer": "https://space.bilibili.com/", "Accept-Encoding": "gzip, deflate",
-                             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"}
-            for p in range(1, 6):
-                urls = [f"https://api.bilibili.com:443/x/relation/followings?vmid={self.uid}&pn={p}&ps=50&order=desc&jsonp=jsonp",
-                        f"https://api.bilibili.com:443/x/relation/followings?vmid={self.uid}&pn={p}&ps=50&order=asc&jsonp=jsonp"]
-                for burp0_url in urls:
-                    r = requests.get(burp0_url, headers=burp0_headers)
-                    followList = json.loads(r.text)['data']['list']
-                    if followList:
-                        for i in followList:
-                            followsIDs.add(i['mid'])
+            req_headers = {
+                "Connection": "close",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://space.bilibili.com/",
+            }
+            cookies = {}
+            if self.sessionData:
+                cookies['SESSDATA'] = self.sessionData
+            try:
+                for p in range(1, 11):
+                    url = f"https://api.bilibili.com/x/relation/followings?vmid={self.uid}&pn={p}&ps=50&order=desc"
+                    r = requests.get(url, headers=req_headers, cookies=cookies)
+                    resp_data = r.json()
+                    if resp_data['code'] != 0:
+                        logging.warning(f'获取关注列表失败: {resp_data.get("message", "未知错误")}')
+                        break
+                    followList = resp_data['data']['list']
+                    if not followList:
+                        break
+                    for i in followList:
+                        followsIDs.add(i['mid'])
+                    time.sleep(0.3)
+            except Exception as e:
+                logging.exception('获取关注列表出错')
+
             followsIDs = list(followsIDs)
             if followsIDs:
-                data = json.dumps({'uids': followsIDs})
-                r = requests.post(r'https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids', data=data, headers=header)
-                r.encoding = 'utf8'
-                data = json.loads(r.text)['data']
-                for followID in followsIDs:
-                    for uid, info in data.items():
-                        if uid == str(followID):
-                            roomIDList.append([info['uname'], info['title'], str(info['room_id'])])
-                            break
+                try:
+                    data = json.dumps({'uids': followsIDs})
+                    r = requests.post(
+                        r'https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids',
+                        data=data, headers=header, cookies=cookies
+                    )
+                    r.encoding = 'utf8'
+                    data = json.loads(r.text)['data']
+                    for followID in followsIDs:
+                        for uid, info in data.items():
+                            if uid == str(followID):
+                                roomIDList.append([info['uname'], info['title'], str(info['room_id'])])
+                                break
+                except Exception:
+                    logging.exception('批量获取直播间状态失败')
             else:
-                logging.error('未获取到有效房号列表或房号列表为空')
+                logging.error('未获取到有效关注列表（需要登录或 UID 无效）')
             if roomIDList:
                 self.roomInfoSummary.emit(roomIDList)
 
@@ -655,7 +688,7 @@ class AddLiverRoomWidget(QWidget):
         self.hacoTable.setColumnCount(3)
         try:
             self.vtbList = []
-            vtbs = codecs.open(os.path.join(self.application_path,'utils/vtb.csv'), 'r', encoding='utf-8')
+            vtbs = open(os.path.join(self.application_path, 'utils/vtb.csv'), 'r', encoding='utf-8')
             for line in vtbs:
                 line = line.strip()
                 if line:
@@ -684,7 +717,7 @@ class AddLiverRoomWidget(QWidget):
 
         tab.addTab(hotLiverPage, '正在直播')
         tab.addTab(hacoPage, '个人势/箱')
-        # tab.addTab(followsPage, '关注添加')
+        tab.addTab(followsPage, '关注添加')
 
     def editChange(self):  # 提取输入文本中的数字
         if len(self.roomEdit.text()) > len(self.roomEditText):
@@ -767,7 +800,7 @@ class AddLiverRoomWidget(QWidget):
 
     def collectVTBList(self, vtbList):
         try:
-            vtbs = codecs.open(os.path.join(self.application_path, 'utils/vtb.csv'), 'w', encoding='utf-8')
+            vtbs = open(os.path.join(self.application_path, 'utils/vtb.csv'), 'w', encoding='utf-8')
             for line in vtbList:
                 vtbs.write(line)
             vtbs.close()
@@ -823,9 +856,18 @@ class AddLiverRoomWidget(QWidget):
         except:
             logging.exception('hacoAdd 失败')
 
+    def setSessionData(self, sessionData):
+        """接收登录凭据，传递给 GetFollows"""
+        self.sessionData = sessionData if sessionData else ''
+        self.getFollows.setSessionData(self.sessionData)
+
     def checkFollows(self):
         if self.uidEdit.text().isdigit():
+            if self.getFollows.isRunning():
+                logging.warning('关注列表查询正在进行中，请稍候')
+                return
             self.getFollows.setUID(self.uidEdit.text())
+            self.getFollows.setSessionData(getattr(self, 'sessionData', ''))
             self.getFollows.start()
 
     def collectFollowLiverInfo(self, info):
@@ -865,13 +907,19 @@ class CollectLiverInfo(QThread):
     def __init__(self, roomIDList):
         super(CollectLiverInfo, self).__init__()
         self.roomIDList = roomIDList
+        self._running = False
 
     def setRoomIDList(self, roomIDList):
         self.roomIDList = roomIDList
 
+    def stop(self):
+        """优雅停止轮询"""
+        self._running = False
+
     def run(self):
         logging.debug("Collecting Liver Info...")
-        while 1:
+        self._running = True
+        while self._running:
             try:
                 liverInfo = []
                 data = json.dumps({'ids': self.roomIDList})  # 根据直播间房号批量获取直播间信息
@@ -886,20 +934,18 @@ class CollectLiverInfo(QThread):
                 r.encoding = 'utf8'
                 data = json.loads(r.text)['data']
                 if data:
+                    # 构建 room_id → info 字典，O(n) 查找替代 O(n*m) 嵌套循环
+                    room_info_map = {info['room_id']: (uid, info) for uid, info in data.items()}
                     for roomID in self.roomIDList:
-                        exist = False
-                        for uid, info in data.items():
-                            if roomID == info['room_id']:
-                                title = info['title']
-                                uname = info['uname']
-                                face = info['face']
-                                liveStatus = info['live_status']
-                                keyFrame = info['keyframe']
-                                exist = True
-                                liverInfo.append([uid, str(roomID), uname, face, liveStatus, keyFrame, title])
-                                break
+                        matched = room_info_map.get(roomID)
+                        if matched:
+                            uid, info = matched
+                            liverInfo.append([uid, str(roomID), info['uname'], info['face'],
+                                              info['live_status'], info['keyframe'], info['title']])
+                        else:
+                            pass  # fallback 单独查询
                         try:
-                            if not exist:
+                            if not matched:
                                 r = requests.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
                                                  headers=header)
                                 r.encoding = 'utf8'
@@ -916,7 +962,11 @@ class CollectLiverInfo(QThread):
                             logging.error(str(e))
                 if liverInfo:
                     self.liverInfo.emit(liverInfo)
-                time.sleep(60)  # 冷却时间
+                # 可中断的冷却等待（每秒检查一次停止标志）
+                for _ in range(60):
+                    if not self._running:
+                        break
+                    time.sleep(1)
             except Exception as e:
                 logging.error(str(e))
 
@@ -957,8 +1007,22 @@ class LiverPanel(QWidget):
         self.collectLiverInfo.liverInfo.connect(self.refreshRoomPanel)
         self.collectLiverInfo.start()
 
+    def setSessionData(self, sessionData):
+        """接收登录凭据，传递给 AddLiverRoomWidget"""
+        self.addLiverRoomWidget.setSessionData(sessionData)
+
+    def autoFetchFollows(self, uid):
+        """自动获取关注列表并添加到面板（登录后自动触发）"""
+        sessdata = getattr(self.addLiverRoomWidget, 'sessionData', '')
+        self.addLiverRoomWidget.getFollows.setUID(uid)
+        self.addLiverRoomWidget.getFollows.setSessionData(sessdata)
+        if not self.addLiverRoomWidget.getFollows.isRunning():
+            logging.info(f'自动获取 UID={uid} 的关注列表 (sessdata={"有" if sessdata else "无"})')
+            self.addLiverRoomWidget.getFollows.start()
+
     def openLiverRoomPanel(self):
-        self.addLiverRoomWidget.getHotLiver.start()
+        if not self.addLiverRoomWidget.getHotLiver.isRunning():
+            self.addLiverRoomWidget.getHotLiver.start()
         self.addLiverRoomWidget.hide()
         self.addLiverRoomWidget.show()
 
