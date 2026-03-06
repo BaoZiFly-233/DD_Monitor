@@ -18,7 +18,7 @@ from PySide6.QtWidgets import * 	# QAction,QFileDialog
 from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
-from VideoWidget_mpv import PushButton, Slider, VideoWidget
+from VideoWidget_mpv import PushButton, Slider, VideoWidget, prepare_mpv_runtime
 from LiverSelect import LiverPanel
 from danmu import TextOpation, ToolButton
 from login import QRLoginWidget
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 2.26
+        self.versionNumber = 2.27
         self.setWindowTitle(f'DD监控室{self.versionNumber}')
         self.resize(1600, 900)
         self.maximumToken = True
@@ -341,7 +341,7 @@ class MainWindow(QMainWindow):
         else:  # 默认和备份 json 配置均读取失败
             self.config = {
                 # 置顶显示
-                'roomid': {'21396545': False, '21402309': False, '22384516': False, '8792912': False},
+                'roomid': {},
                 'layout': [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1)],
                 'player': ['0'] * 16,
                 'quality': [80] * 16,
@@ -1395,6 +1395,7 @@ if __name__ == '__main__':
     _sysInfoThread.start()
     # MPV 信息log
     try:
+        prepare_mpv_runtime()
         import mpv
         logging.info(f"python-mpv 已加载")
     except (ImportError, OSError) as e:

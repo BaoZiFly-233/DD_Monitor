@@ -9,15 +9,15 @@ on:
       app_version:
         description: 'Release version used in package name'
         required: true
-        default: '2.26'
+        default: '2.27'
       release_tag:
         description: 'Git tag for this release'
         required: true
-        default: 'v2.26'
+        default: 'v2.27'
       release_name:
         description: 'GitHub Release display name'
         required: true
-        default: 'DDMonitor 2.26 复活版'
+        default: 'DDMonitor 2.27 启动与隐私热修复版'
 
 jobs:
   prepare:
@@ -37,7 +37,7 @@ jobs:
           else
             RELEASE_TAG="${GITHUB_REF_NAME}"
             APP_VERSION="${RELEASE_TAG#v}"
-            RELEASE_NAME="DDMonitor ${APP_VERSION} 复活版"
+            RELEASE_NAME="DDMonitor ${APP_VERSION} 启动与隐私热修复版"
           fi
 
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"

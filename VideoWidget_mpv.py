@@ -5,6 +5,7 @@ DD监控室视频播放窗口 - MPV 内核版本
 """
 import json
 import os
+import sys
 import time
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
@@ -17,8 +18,48 @@ import warnings
 from datetime import datetime
 import http_utils
 
-# 确保 libmpv-2.dll 可被找到（将项目目录加入 PATH）
-os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
+_MPV_DLL_HANDLES = []
+
+
+def prepare_mpv_runtime():
+    candidate_dirs = []
+
+    def add_candidate(path):
+        if not path:
+            return
+        abs_path = os.path.abspath(path)
+        if os.path.isdir(abs_path) and abs_path not in candidate_dirs:
+            candidate_dirs.append(abs_path)
+
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    add_candidate(module_dir)
+    add_candidate(os.path.dirname(module_dir))
+
+    if getattr(sys, 'frozen', False):
+        add_candidate(os.path.dirname(sys.executable))
+
+    add_candidate(getattr(sys, '_MEIPASS', None))
+
+    for base_dir in tuple(candidate_dirs):
+        add_candidate(os.path.join(base_dir, 'mpv'))
+
+    current_path = os.environ.get("PATH", "")
+    path_entries = [entry for entry in current_path.split(os.pathsep) if entry]
+    prepend_entries = [entry for entry in candidate_dirs if entry not in path_entries]
+    if prepend_entries:
+        os.environ["PATH"] = os.pathsep.join(prepend_entries + path_entries)
+
+    if os.name == 'nt' and hasattr(os, 'add_dll_directory'):
+        for candidate_dir in candidate_dirs:
+            try:
+                _MPV_DLL_HANDLES.append(os.add_dll_directory(candidate_dir))
+            except (FileNotFoundError, OSError):
+                continue
+
+    return candidate_dirs
+
+
+prepare_mpv_runtime()
 
 try:
     import mpv
