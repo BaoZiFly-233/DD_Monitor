@@ -77,8 +77,8 @@ jobs:
             Where-Object { $_.name -match '^mpv-dev-x86_64-.*\.7z$' -and $_.name -notmatch '-v3-' } |
             Select-Object -First 1
 
-          if (-not $runtimeAsset) { throw '未找到 x64 的 mpv runtime 发布资产' }
-          if (-not $devAsset) { throw '未找到 x64 的 mpv dev 发布资产' }
+          if (-not $runtimeAsset) { throw 'mpv runtime asset for x64 was not found' }
+          if (-not $devAsset) { throw 'mpv dev asset for x64 was not found' }
 
           $downloadDir = Join-Path $env:RUNNER_TEMP 'mpv-download'
           $runtimeDir = Join-Path $env:RUNNER_TEMP 'mpv-runtime'
@@ -96,7 +96,7 @@ jobs:
           & 7z x $devArchive "-o$devDir" -y | Out-Host
 
           $mpvDll = Join-Path $devDir 'libmpv-2.dll'
-          if (-not (Test-Path $mpvDll)) { throw "未找到 libmpv-2.dll: $mpvDll" }
+          if (-not (Test-Path $mpvDll)) { throw "libmpv-2.dll was not found: $mpvDll" }
 
           "MPV_DLL=$mpvDll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MPV_RUNTIME_DIR=$runtimeDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
