@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-B站扫码登录模块 - 轻量级实现
+B站扫码登录模块
 使用 B站 passport API 生成二维码，用户扫码后获取登录凭据
-替代原有的 QWebEngineView 浏览器登录方式
+支持账号管理：登录/登出、用户信息展示
+
+核心设计：不使用显式状态机，从数据推导 UI
+  _user_info 非空 → 已登录，显示账号面板
+  _sessdata 非空且 _user_info 为空 → 验证中
+  都为空 → 未登录，显示扫码面板
 """
 import logging
-import requests
+from urllib.parse import urlparse, parse_qs
+import http_utils
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
-from PySide6.QtGui import QPixmap, QImage, QFont
-from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
+from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath
+from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout,
+                                QFrame)
 
 try:
     import qrcode
@@ -17,24 +24,29 @@ except ImportError:
     HAS_QRCODE = False
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    **http_utils.DEFAULT_HEADERS,
     'Referer': 'https://www.bilibili.com',
 }
 
 
 class FetchUserInfo(QThread):
-    """后台获取用户信息"""
-    userInfo = Signal(dict)  # {'uid': int, 'uname': str, 'face': str}
+    """后台验证 session 并获取用户信息
 
-    def __init__(self, sessdata=''):
+    信号 userInfo 返回值约定：
+    - {'uid':..., 'uname':..., ...}  → 验证成功
+    - {'_expired': True}             → API 明确返回未登录
+    - {'_error': True}               → 网络错误，session 可能仍有效
+    """
+    userInfo = Signal(dict)
+
+    def __init__(self):
         super().__init__()
-        self.sessdata = sessdata
+        self.sessdata = ''
 
     def run(self):
         try:
             cookies = {'SESSDATA': self.sessdata} if self.sessdata else {}
-            resp = requests.get(
+            resp = http_utils.get(
                 'https://api.bilibili.com/x/web-interface/nav',
                 headers=HEADERS, cookies=cookies, timeout=10
             )
@@ -45,20 +57,101 @@ class FetchUserInfo(QThread):
                     'uid': info['mid'],
                     'uname': info['uname'],
                     'face': info.get('face', ''),
+                    'level': info.get('level_info', {}).get('current_level', 0),
                 })
             else:
-                logging.warning(f'获取用户信息失败: code={data["code"]}')
+                logging.warning(f'session 验证失败: code={data["code"]}')
+                self.userInfo.emit({'_expired': True})
         except Exception:
-            logging.exception('获取用户信息失败')
+            logging.exception('验证登录状态失败（网络错误）')
+            self.userInfo.emit({'_error': True})
 
+
+class FetchAvatar(QThread):
+    """后台下载头像（线程安全：用 QImage 跨线程，主线程转 QPixmap）"""
+    avatarReady = Signal(QImage)
+
+    def __init__(self):
+        super().__init__()
+        self.url = ''
+
+    def run(self):
+        if not self.url:
+            return
+        try:
+            r = http_utils.get(self.url + '@100w_100h.jpg', timeout=10)
+            qimage = QImage.fromData(r.content)
+            if not qimage.isNull():
+                self.avatarReady.emit(qimage)
+        except Exception:
+            logging.exception('下载头像失败')
+
+
+class FetchQRCode(QThread):
+    """后台获取二维码（避免阻塞主线程）"""
+    qrcodeReady = Signal(str, str)  # (qrcode_key, url)
+    fetchError = Signal(str)        # 错误消息
+
+    def run(self):
+        try:
+            resp = http_utils.get(
+                'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
+                headers=HEADERS, timeout=10)
+            data = resp.json()
+            if data['code'] != 0:
+                self.fetchError.emit(f'获取失败: {data["message"]}')
+                return
+            self.qrcodeReady.emit(data['data']['qrcode_key'], data['data']['url'])
+        except Exception:
+            logging.exception('获取二维码失败')
+            self.fetchError.emit('网络错误，请点击刷新')
+
+
+class PollLoginStatus(QThread):
+    """后台轮询登录状态（避免阻塞主线程）"""
+    loginSuccess = Signal(object, dict)   # (response, result_data)
+    qrExpired = Signal()
+    qrScanned = Signal()
+    pollError = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.qrcode_key = ''
+
+    def run(self):
+        if not self.qrcode_key:
+            return
+        try:
+            resp = http_utils.get(
+                'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
+                params={'qrcode_key': self.qrcode_key},
+                headers=HEADERS, timeout=10)
+            result = resp.json()['data']
+            code = result['code']
+
+            if code == 0:
+                self.loginSuccess.emit(resp, result)
+            elif code == 86038:
+                self.qrExpired.emit()
+            elif code == 86090:
+                self.qrScanned.emit()
+        except Exception:
+            logging.exception('轮询登录状态失败')
+            self.pollError.emit()
+
+
+# ---------------------------------------------------------------------------
+# QRLoginWidget
+# ---------------------------------------------------------------------------
 
 class QRLoginWidget(QWidget):
-    """扫码登录窗口
+    """扫码登录 / 账号管理窗口
 
     信号:
-    - sessionData(str): 登录成功后发射 SESSDATA
-    - login(bool): 登录状态变化
-    - userInfoReady(dict): 用户信息就绪 {'uid': int, 'uname': str, 'face': str}
+      sessionData(str)    登录/登出时发射 SESSDATA（空串=登出）
+      login(bool)         登录状态变化
+      credentialReady(dict) 完整凭据（SESSDATA, bili_jct 等）
+      userInfoReady(dict) 用户信息就绪
     """
     sessionData = Signal(str)
     login = Signal(bool)
@@ -67,232 +160,444 @@ class QRLoginWidget(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('扫码登录 Bilibili')
+        self.setWindowTitle('B站账号')
         self.setFixedSize(320, 480)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
+        # ---- 核心数据（UI 从这些字段推导）----
+        self._sessdata = ''      # 有值 = 有凭据
+        self._user_info = {}     # 有值 = 已确认登录
+        self._avatarPixmap = None
         self._qrcode_key = ''
         self._credential = {}
-        self._logged_in = False
-        self._sessdata = ''
-        self._user_info = {}
 
+        # ---- 后台线程 ----
         self._fetchUserInfo = FetchUserInfo()
         self._fetchUserInfo.userInfo.connect(self._onUserInfo)
+        self._fetchAvatar = FetchAvatar()
+        self._fetchAvatar.avatarReady.connect(self._onAvatarReady)
+        self._fetchQRCodeThread = FetchQRCode()
+        self._fetchQRCodeThread.qrcodeReady.connect(self._onQRCodeReady)
+        self._fetchQRCodeThread.fetchError.connect(self._onQRCodeError)
+        self._pollLoginThread = PollLoginStatus()
+        self._pollLoginThread.loginSuccess.connect(self._onQRLoginSuccess)
+        self._pollLoginThread.qrExpired.connect(self._onQRExpired)
+        self._pollLoginThread.qrScanned.connect(self._onQRScanned)
 
-        # 布局
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(10)
+        # ---- 布局 ----
+        self._mainLayout = QVBoxLayout(self)
+        self._mainLayout.setAlignment(Qt.AlignCenter)
+        self._mainLayout.setSpacing(10)
 
-        self.titleLabel = QLabel('请使用 Bilibili 客户端扫码登录')
-        self.titleLabel.setFont(QFont('微软雅黑', 11))
-        self.titleLabel.setAlignment(Qt.AlignCenter)
-        self.titleLabel.setWordWrap(True)
-        layout.addWidget(self.titleLabel)
+        self._buildLoggedInPanel()
+        self._buildVerifyingPanel()
+        self._buildQRPanel()
 
-        # 用户信息面板（登录后显示）
-        self.userPanel = QWidget()
-        userLayout = QHBoxLayout(self.userPanel)
-        userLayout.setContentsMargins(10, 5, 10, 5)
-        self.avatarLabel = QLabel()
-        self.avatarLabel.setFixedSize(48, 48)
-        self.avatarLabel.setStyleSheet('border-radius: 24px; border: 2px solid #3daee9;')
-        self.avatarLabel.setAlignment(Qt.AlignCenter)
-        userLayout.addWidget(self.avatarLabel)
-        self.unameLabel = QLabel('')
-        self.unameLabel.setFont(QFont('微软雅黑', 12, QFont.Bold))
-        userLayout.addWidget(self.unameLabel)
-        self.userPanel.hide()
-        layout.addWidget(self.userPanel)
-
-        # 二维码区域
-        self.qrLabel = QLabel()
-        self.qrLabel.setFixedSize(260, 260)
-        self.qrLabel.setAlignment(Qt.AlignCenter)
-        self.qrLabel.setStyleSheet('border: 1px solid #555; background: white;')
-        layout.addWidget(self.qrLabel, alignment=Qt.AlignCenter)
-
-        self.statusLabel = QLabel('')
-        self.statusLabel.setFont(QFont('微软雅黑', 10))
-        self.statusLabel.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.statusLabel)
-
-        self.refreshBtn = QPushButton('刷新二维码')
-        self.refreshBtn.setFixedHeight(36)
-        self.refreshBtn.setStyleSheet('background-color:#3daee9;border-width:1px')
-        self.refreshBtn.clicked.connect(self._onRefreshClick)
-        layout.addWidget(self.refreshBtn)
-
-        # 轮询定时器
+        # 轮询定时器（仅触发后台线程，不阻塞主线程）
         self._pollTimer = QTimer(self)
-        self._pollTimer.timeout.connect(self._pollLoginStatus)
+        self._pollTimer.timeout.connect(self._doPollLogin)
         self._pollTimer.setInterval(2000)
+
+    # ================================================================
+    # UI 构建（只在 __init__ 中调用一次）
+    # ================================================================
+
+    def _buildLoggedInPanel(self):
+        self._loggedInPanel = QFrame()
+        self._loggedInPanel.setFrameShape(QFrame.StyledPanel)
+        self._loggedInPanel.setStyleSheet(
+            'QFrame { border: 1px solid #444; border-radius: 8px; padding: 10px; }')
+        lay = QVBoxLayout(self._loggedInPanel)
+        lay.setAlignment(Qt.AlignCenter)
+        lay.setSpacing(12)
+
+        title = QLabel('Bilibili 账号管理')
+        title.setFont(QFont('微软雅黑', 12, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
+
+        self._avatarLabel = QLabel()
+        self._avatarLabel.setFixedSize(80, 80)
+        self._avatarLabel.setAlignment(Qt.AlignCenter)
+        self._resetAvatarPlaceholder()
+        lay.addWidget(self._avatarLabel, alignment=Qt.AlignCenter)
+
+        self._unameLabel = QLabel()
+        self._unameLabel.setFont(QFont('微软雅黑', 14, QFont.Bold))
+        self._unameLabel.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._unameLabel)
+
+        self._uidLabel = QLabel()
+        self._uidLabel.setFont(QFont('微软雅黑', 10))
+        self._uidLabel.setAlignment(Qt.AlignCenter)
+        self._uidLabel.setStyleSheet('color: #888;')
+        lay.addWidget(self._uidLabel)
+
+        dot = QLabel('● 已登录')
+        dot.setFont(QFont('微软雅黑', 10))
+        dot.setAlignment(Qt.AlignCenter)
+        dot.setStyleSheet('color: #00CC00;')
+        lay.addWidget(dot)
+
+        for text, color, slot in [
+            ('退出登录', '#c0392b', self._onLogout),
+            ('切换账号', '#2980b9', self._onLogout),
+        ]:
+            btn = QPushButton(text)
+            btn.setFixedHeight(36)
+            btn.setStyleSheet(
+                f'QPushButton {{ background-color: {color}; border-radius: 4px; color: white; }}'
+                f'QPushButton:hover {{ background-color: {color}; opacity: 0.8; }}')
+            btn.clicked.connect(slot)
+            lay.addWidget(btn)
+
+        self._loggedInPanel.hide()
+        self._mainLayout.addWidget(self._loggedInPanel)
+
+    def _buildVerifyingPanel(self):
+        self._verifyingPanel = QWidget()
+        lay = QVBoxLayout(self._verifyingPanel)
+        lay.setAlignment(Qt.AlignCenter)
+        lay.setSpacing(16)
+
+        self._verifyingLabel = QLabel('正在验证登录状态...')
+        self._verifyingLabel.setFont(QFont('微软雅黑', 12))
+        self._verifyingLabel.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._verifyingLabel)
+
+        self._verifyingHint = QLabel('请稍候')
+        self._verifyingHint.setFont(QFont('微软雅黑', 10))
+        self._verifyingHint.setAlignment(Qt.AlignCenter)
+        self._verifyingHint.setStyleSheet('color: #888;')
+        lay.addWidget(self._verifyingHint)
+
+        retryBtn = QPushButton('重试')
+        retryBtn.setFixedHeight(36)
+        retryBtn.setStyleSheet(
+            'QPushButton { background-color: #3daee9; border-radius: 4px; color: white; }'
+            'QPushButton:hover { background-color: #5bc0de; }')
+        retryBtn.clicked.connect(self._retryVerify)
+        lay.addWidget(retryBtn)
+
+        self._verifyingPanel.hide()
+        self._mainLayout.addWidget(self._verifyingPanel)
+
+    def _buildQRPanel(self):
+        self._qrPanel = QWidget()
+        lay = QVBoxLayout(self._qrPanel)
+        lay.setAlignment(Qt.AlignCenter)
+        lay.setSpacing(10)
+
+        self._qrTitle = QLabel('请使用 Bilibili 客户端扫码登录')
+        self._qrTitle.setFont(QFont('微软雅黑', 11))
+        self._qrTitle.setAlignment(Qt.AlignCenter)
+        self._qrTitle.setWordWrap(True)
+        lay.addWidget(self._qrTitle)
+
+        self._qrLabel = QLabel()
+        self._qrLabel.setFixedSize(260, 260)
+        self._qrLabel.setAlignment(Qt.AlignCenter)
+        self._qrLabel.setStyleSheet('border: 1px solid #555; background: white;')
+        lay.addWidget(self._qrLabel, alignment=Qt.AlignCenter)
+
+        self._qrStatus = QLabel()
+        self._qrStatus.setFont(QFont('微软雅黑', 10))
+        self._qrStatus.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._qrStatus)
+
+        refreshBtn = QPushButton('刷新二维码')
+        refreshBtn.setFixedHeight(36)
+        refreshBtn.setStyleSheet(
+            'QPushButton { background-color: #3daee9; border-radius: 4px; color: white; }'
+            'QPushButton:hover { background-color: #5bc0de; }')
+        refreshBtn.clicked.connect(self._fetchQRCode)
+        lay.addWidget(refreshBtn)
+
+        self._qrPanel.hide()
+        self._mainLayout.addWidget(self._qrPanel)
+
+    # ================================================================
+    # 唯一的 UI 同步入口 — 从数据推导该显示什么
+    # ================================================================
+
+    def _syncUI(self):
+        """根据 _user_info / _sessdata 决定显示哪个面板。
+        这是所有面板切换的唯一入口。"""
+        logging.info(f'[LOGIN] _syncUI: _user_info={bool(self._user_info)}, '
+                     f'_sessdata={"有" if self._sessdata else "空"}(len={len(self._sessdata)})')
+        self._loggedInPanel.hide()
+        self._verifyingPanel.hide()
+        self._qrPanel.hide()
+        self._pollTimer.stop()
+
+        if self._user_info:
+            # ---- 已登录 ----
+            uname = self._user_info.get('uname', '已登录')
+            uid = self._user_info.get('uid', '')
+            level = self._user_info.get('level', 0)
+            self._unameLabel.setText(uname)
+            self._uidLabel.setText(f'UID: {uid}   Lv.{level}')
+            if self._avatarPixmap and not self._avatarPixmap.isNull():
+                self._avatarLabel.setPixmap(self._avatarPixmap)
+                self._avatarLabel.setStyleSheet('')
+            else:
+                self._avatarLabel.setText(uname[:1] if uname else '?')
+                self._resetAvatarPlaceholder()
+            self.setWindowTitle(f'B站账号 - {uname}')
+            self._loggedInPanel.show()
+
+        elif self._sessdata:
+            # ---- 有凭据，验证中 ----
+            self.setWindowTitle('B站账号 - 验证中')
+            self._verifyingLabel.setText('正在验证登录状态...')
+            self._verifyingHint.setText('请稍候')
+            self._verifyingPanel.show()
+            # 如果线程不在跑，启动验证
+            if not self._fetchUserInfo.isRunning():
+                self._startVerify()
+
+        else:
+            # ---- 无凭据，扫码 ----
+            self.setWindowTitle('B站账号')
+            self._qrPanel.show()
+            self._fetchQRCode()
+
+    # ================================================================
+    # 公开接口
+    # ================================================================
 
     def show(self):
         super().show()
-        if self._logged_in:
-            self._showLoggedInState()
-        else:
-            self.fetchQRCode()
+        self._syncUI()
 
     def setSessionData(self, sessdata):
-        """从外部（如配置恢复）设置 SESSDATA 并验证登录状态"""
-        if sessdata:
-            self._sessdata = sessdata
-            self._fetchUserInfo.sessdata = sessdata
-            if not self._fetchUserInfo.isRunning():
-                self._fetchUserInfo.start()
+        """从外部（如配置恢复）设置 SESSDATA 并启动验证
 
-    def fetchQRCode(self):
-        """获取登录二维码"""
-        self.userPanel.hide()
-        self.qrLabel.show()
-        self.statusLabel.setText('正在获取二维码...')
-        self.statusLabel.setStyleSheet('')
-        self.refreshBtn.setText('刷新二维码')
+        兼容旧版 config 中保存的 URL 编码值（%2C → , 等）
+        """
+        if not sessdata:
+            return
+        # 防御性 URL 解码：旧版本可能保存了 URL 编码的 SESSDATA
+        if '%' in sessdata:
+            from urllib.parse import unquote
+            decoded = unquote(sessdata)
+            logging.info(f'[LOGIN] setSessionData: URL 解码 {sessdata[:30]}... → {decoded[:30]}...')
+            sessdata = decoded
+        self._sessdata = sessdata
+        self._startVerify()
+
+    def isLoggedIn(self):
+        return bool(self._user_info)
+
+    # ================================================================
+    # 内部：验证流程
+    # ================================================================
+
+    def _startVerify(self):
+        """启动后台验证（如果未在运行）"""
+        self._fetchUserInfo.sessdata = self._sessdata
+        if not self._fetchUserInfo.isRunning():
+            self._fetchUserInfo.start()
+
+    def _retryVerify(self):
+        """重试按钮"""
+        if self._sessdata:
+            self._verifyingLabel.setText('正在验证登录状态...')
+            self._verifyingHint.setText('请稍候')
+            self._startVerify()
+
+    def _onUserInfo(self, info):
+        """FetchUserInfo 回调 — 区分成功/过期/网络错误"""
+        logging.info(f'[LOGIN] _onUserInfo 回调: keys={list(info.keys())}, '
+                     f'_expired={info.get("_expired")}, _error={info.get("_error")}')
+        if info.get('_expired'):
+            # API 明确说未登录 → 清除凭据
+            logging.warning('session 已过期，需要重新登录')
+            self._sessdata = ''
+            self._user_info = {}
+            self._avatarPixmap = None
+            self.sessionData.emit('')
+            self.login.emit(False)
+
+        elif info.get('_error'):
+            # 网络问题 → 保留 sessdata 不清除
+            logging.warning('网络错误，保留现有凭据')
+            if self.isVisible():
+                self._verifyingLabel.setText('网络错误')
+                self._verifyingHint.setText('请点击重试')
+
+            # 不清除 _sessdata，不发信号，不切面板
+            return
+
+        else:
+            # 验证成功
+            self._user_info = info
+            uname = info.get('uname', '')
+            logging.info(f'登录用户: {uname} (UID: {info.get("uid", "?")})')
+            self.userInfoReady.emit(info)
+
+            # 下载头像
+            face_url = info.get('face', '')
+            if face_url:
+                self._fetchAvatar.url = face_url
+                if not self._fetchAvatar.isRunning():
+                    self._fetchAvatar.start()
+
+        # 成功和过期都需要刷新 UI
+        if self.isVisible():
+            self._syncUI()
+
+    def _onAvatarReady(self, qimage):
+        """头像下载完成 → 裁剪为圆形并缓存"""
+        pixmap = QPixmap.fromImage(qimage)
+        scaled = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._avatarPixmap = self._makeCircularPixmap(scaled, 80)
+        # 直接更新 label（不走 _syncUI 避免整体刷新）
+        self._avatarLabel.setPixmap(self._avatarPixmap)
+        self._avatarLabel.setStyleSheet('')
+
+    # ================================================================
+    # 内部：QR 登录流程
+    # ================================================================
+
+    def _fetchQRCode(self):
+        """获取并显示二维码（后台线程执行，不阻塞 UI）"""
+        self._qrStatus.setText('正在获取二维码...')
+        self._qrStatus.setStyleSheet('')
         self._pollTimer.stop()
-        try:
-            resp = requests.get(
-                'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
-                headers=HEADERS, timeout=10
-            )
-            data = resp.json()
-            if data['code'] != 0:
-                self.statusLabel.setText(f'获取失败: {data["message"]}')
-                return
-            qr_url = data['data']['url']
-            self._qrcode_key = data['data']['qrcode_key']
-            self._renderQRCode(qr_url)
-            self.statusLabel.setText('请使用 Bilibili 客户端扫描二维码')
-            self._pollTimer.start()
-        except Exception:
-            logging.exception('获取二维码失败')
-            self.statusLabel.setText('网络错误，请点击刷新')
+        if not self._fetchQRCodeThread.isRunning():
+            self._fetchQRCodeThread.start()
 
-    def _renderQRCode(self, url):
-        """将 URL 渲染为二维码图片"""
+    def _onQRCodeReady(self, qrcode_key, url):
+        """二维码获取成功回调"""
+        self._qrcode_key = qrcode_key
+        self._renderQR(url)
+        self._qrStatus.setText('请使用 Bilibili 客户端扫描二维码')
+        self._pollTimer.start()
+
+    def _onQRCodeError(self, msg):
+        """二维码获取失败回调"""
+        self._qrStatus.setText(msg)
+
+    def _renderQR(self, url):
         if HAS_QRCODE:
             qr = qrcode.QRCode(version=1, box_size=8, border=2)
             qr.add_data(url)
             qr.make(fit=True)
-            img = qr.make_image(fill_color='black', back_color='white')
-            img = img.convert('RGB')
-            data = img.tobytes('raw', 'RGB')
-            qimage = QImage(data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimage)
-            self.qrLabel.setPixmap(pixmap.scaled(
-                self.qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            img = qr.make_image(fill_color='black', back_color='white').convert('RGB')
+            raw = img.tobytes('raw', 'RGB')
+            qimg = QImage(raw, img.width, img.height, img.width * 3, QImage.Format_RGB888)
+            pm = QPixmap.fromImage(qimg)
+            self._qrLabel.setPixmap(pm.scaled(
+                self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
-            self.qrLabel.setText('请先安装 qrcode 库:\npip install qrcode[pil]')
+            self._qrLabel.setText('需要安装 qrcode:\npip install qrcode[pil]')
 
-    def _pollLoginStatus(self):
-        """轮询扫码登录状态"""
+    def _doPollLogin(self):
+        """定时器回调：启动后台轮询线程（不阻塞主线程）"""
         if not self._qrcode_key:
             return
-        try:
-            resp = requests.get(
-                'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
-                params={'qrcode_key': self._qrcode_key},
-                headers=HEADERS, timeout=10
-            )
-            data = resp.json()['data']
-            code = data['code']
+        if self._pollLoginThread.isRunning():
+            return  # 上一次轮询还没结束，跳过
+        self._pollLoginThread.qrcode_key = self._qrcode_key
+        self._pollLoginThread.start()
 
-            if code == 0:  # 登录成功
-                self._pollTimer.stop()
-                self._logged_in = True
+    def _onQRExpired(self):
+        """二维码过期回调"""
+        self._pollTimer.stop()
+        self._qrStatus.setText('二维码已过期，请点击刷新')
+        self._qrStatus.setStyleSheet('color: #CC0000;')
 
-                # 从 URL 参数中提取凭据
-                url = data.get('url', '')
-                self._credential = self._parseCookiesFromURL(url)
+    def _onQRScanned(self):
+        """已扫码回调"""
+        self._qrStatus.setText('已扫码，请在手机上确认登录')
+        self._qrStatus.setStyleSheet('color: #3399FF;')
 
-                # 从 response cookies 或 URL 参数中提取 SESSDATA
-                sessdata = self._credential.get('SESSDATA', '')
-                if not sessdata:
-                    for cookie in resp.cookies:
-                        if cookie.name == 'SESSDATA':
-                            sessdata = cookie.value
-                            break
+    def _onQRLoginSuccess(self, resp, result):
+        """扫码登录成功处理"""
+        self._pollTimer.stop()
+        # 解析凭据（URL 解码）
+        url = result.get('url', '')
+        self._credential = self._parseCookiesFromURL(url)
+        logging.info(f'[LOGIN] 登录成功 URL 参数: {list(self._credential.keys())}')
 
-                if sessdata:
-                    self._sessdata = sessdata
-                    self.sessionData.emit(sessdata)
-                    self.login.emit(True)
-                    self.credentialReady.emit(self._credential)
+        # 提取 SESSDATA：优先 response cookies，其次 URL 参数
+        sessdata = ''
+        source = ''
+        for cookie in resp.cookies:
+            if cookie.name == 'SESSDATA':
+                sessdata = cookie.value
+                source = 'resp.cookies'
+                break
+        if not sessdata:
+            sessdata = self._credential.get('SESSDATA', '')
+            source = 'URL参数'
 
-                    # 获取用户信息
-                    self._fetchUserInfo.sessdata = sessdata
-                    self._fetchUserInfo.start()
+        logging.info(f'[LOGIN] SESSDATA 来源={source}, 长度={len(sessdata)}, '
+                     f'前20字符={sessdata[:20]}')
 
-                    self.statusLabel.setText('登录成功！正在获取用户信息...')
-                    self.statusLabel.setStyleSheet('color: #00CC00;')
-                else:
-                    self.statusLabel.setText('登录成功但获取凭据失败，请重试')
-                    self._logged_in = False
+        if not sessdata:
+            self._qrStatus.setText('登录成功但获取凭据失败，请重试')
+            logging.error('[LOGIN] 登录成功但 SESSDATA 为空!')
+            return
 
-            elif code == 86038:  # 二维码已失效
-                self._pollTimer.stop()
-                self.statusLabel.setText('二维码已过期，请点击刷新')
-                self.statusLabel.setStyleSheet('color: #CC0000;')
+        self._sessdata = sessdata
+        logging.info(f'[LOGIN] 发射 sessionData 信号 (len={len(sessdata)})')
+        self.sessionData.emit(sessdata)
+        self.login.emit(True)
+        self.credentialReady.emit(self._credential)
 
-            elif code == 86090:  # 已扫码未确认
-                self.statusLabel.setText('已扫码，请在手机上确认登录')
-                self.statusLabel.setStyleSheet('color: #3399FF;')
+        self._qrStatus.setText('登录成功！正在获取用户信息...')
+        self._qrStatus.setStyleSheet('color: #00CC00;')
 
-            elif code == 86101:  # 未扫码
-                pass
+        # 启动用户信息验证
+        self._startVerify()
 
-        except Exception:
-            logging.exception('轮询登录状态失败')
+    # ================================================================
+    # 登出
+    # ================================================================
 
-    def _onUserInfo(self, info):
-        """用户信息获取成功"""
-        self._user_info = info
-        logging.info(f'登录用户: {info["uname"]} (UID: {info["uid"]})')
-        self.userInfoReady.emit(info)
-        self._showLoggedInState()
-        QTimer.singleShot(2000, self.hide)
+    def _onLogout(self):
+        self._sessdata = ''
+        self._user_info = {}
+        self._credential = {}
+        self._avatarPixmap = None
+        self._resetAvatarPlaceholder()
+        self.sessionData.emit('')
+        self.login.emit(False)
+        self._syncUI()
 
-    def _showLoggedInState(self):
-        """显示已登录状态"""
-        self.qrLabel.hide()
-        self.userPanel.show()
-        uname = self._user_info.get('uname', '已登录')
-        uid = self._user_info.get('uid', '')
-        self.unameLabel.setText(f'{uname}\nUID: {uid}')
-        self.avatarLabel.setText(uname[:1] if uname else '?')
-        self.avatarLabel.setStyleSheet(
-            'border-radius: 24px; border: 2px solid #00CC00; '
-            'background-color: #3daee9; color: white; font-size: 20px;'
-        )
-        self.statusLabel.setText('已登录')
-        self.statusLabel.setStyleSheet('color: #00CC00;')
-        self.refreshBtn.setText('切换账号')
-        self.titleLabel.setText('Bilibili 账号管理')
+    # ================================================================
+    # 工具方法
+    # ================================================================
 
-    def _onRefreshClick(self):
-        """刷新按钮点击"""
-        if self._logged_in:
-            # 已登录状态下点击 = 切换账号
-            self._logged_in = False
-            self._user_info = {}
-            self.userPanel.hide()
-            self.qrLabel.show()
-            self.titleLabel.setText('请使用 Bilibili 客户端扫码登录')
-        self.fetchQRCode()
+    def _resetAvatarPlaceholder(self):
+        self._avatarLabel.setPixmap(QPixmap())
+        self._avatarLabel.setText('?')
+        self._avatarLabel.setStyleSheet(
+            'border-radius: 40px; border: 2px solid #555; '
+            'background-color: #3daee9; color: white; font-size: 28px;')
 
     @staticmethod
-    def _parseCookiesFromURL(url: str) -> dict:
-        """从登录成功的 redirect URL 中解析 cookie 参数"""
+    def _makeCircularPixmap(src, size):
+        target = QPixmap(size, size)
+        target.fill(Qt.transparent)
+        painter = QPainter(target)
+        painter.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addEllipse(0, 0, size, size)
+        painter.setClipPath(path)
+        painter.drawPixmap((size - src.width()) // 2, (size - src.height()) // 2, src)
+        painter.end()
+        return target
+
+    @staticmethod
+    def _parseCookiesFromURL(url):
+        """从登录成功 URL 解析参数（自动 URL 解码）"""
         result = {}
-        if '?' not in url:
-            return result
-        query = url.split('?', 1)[1]
-        for param in query.split('&'):
-            if '=' in param:
-                key, value = param.split('=', 1)
-                result[key] = value
+        parsed = urlparse(url)
+        for key, values in parse_qs(parsed.query, keep_blank_values=True).items():
+            result[key] = values[0] if values else ''
         return result
 
     def closeEvent(self, event):

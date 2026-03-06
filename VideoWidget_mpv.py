@@ -3,22 +3,19 @@ DD监控室视频播放窗口 - MPV 内核版本
 使用 python-mpv 库直接播放直播流 URL，无需本地 FLV 缓存下载
 相比 VLC 版本：启动更快，CPU 占用更低，支持更多格式
 """
-import requests
 import json
 import os
 import time
-import shutil
-import random
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
 from CommonWidget import Slider
 from remote import remoteThread
 from danmu import TextBrowser, MpvDanmakuRenderer
-import platform
 import logging
 import warnings
 from datetime import datetime
+import http_utils
 
 # 确保 libmpv-2.dll 可被找到（将项目目录加入 PATH）
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -30,10 +27,7 @@ except (ImportError, OSError):
     HAS_MPV = False
     logging.warning('python-mpv 未安装或 libmpv 未找到')
 
-header = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
+header = http_utils.DEFAULT_HEADERS
 
 
 class PushButton(QPushButton):
@@ -61,9 +55,8 @@ class GetStreamURL(QThread):
         self.roomID = '0'
         self.quality = 250
         self.sessionData = sessionData if sessionData else ''
-        # 兼容性属性 - DD监控室.py closeEvent 中会访问这些属性
+        # 兼容性属性桩（DD监控室.py closeEvent 中会访问）
         self.recordToken = False
-        self.checkTimer = QTimer(self)
 
     def setConfig(self, roomID, quality, sessionData):
         self.roomID = roomID
@@ -104,7 +97,7 @@ class GetStreamURL(QThread):
         if self.sessionData:
             cookies['SESSDATA'] = self.sessionData
 
-        r = requests.get(url, params=params, headers=header, cookies=cookies)
+        r = http_utils.get(url, params=params, headers=header, cookies=cookies)
         j = r.json()
         baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
         extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']
@@ -120,6 +113,62 @@ class GetStreamURL(QThread):
             logging.error(str(e))
             logging.exception('直播地址获取失败')
             self.downloadError.emit()
+
+
+class FetchRoomInfo(QThread):
+    """后台获取房间信息，避免阻塞主线程"""
+    roomInfo = Signal(dict)
+
+    def __init__(self):
+        super().__init__()
+        self.roomID = '0'
+        self.sessionData = ''
+
+    def setConfig(self, roomID, sessionData=''):
+        self.roomID = roomID
+        self.sessionData = sessionData
+
+    def run(self):
+        if self.roomID == '0':
+            self.roomInfo.emit({'roomID': self.roomID, 'error': 'no_room'})
+            return
+        params = {
+            'req_biz': 'web_room_componet',
+            'room_ids': [str(self.roomID)]
+        }
+        cookies = {}
+        if self.sessionData:
+            cookies['SESSDATA'] = self.sessionData
+        try:
+            r = http_utils.get(
+                'https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomBaseInfo',
+                params=params, headers=header, cookies=cookies
+            )
+            data = r.json()
+            result = {'roomID': self.roomID}
+            if data['message'] == '房间已加密':
+                result['title'] = '房间已加密'
+                result['uname'] = '房号: %s' % self.roomID
+                result['live_status'] = 0
+            elif not data['data']:
+                result['title'] = '房间好像不见了-_-？'
+                result['uname'] = '未定义'
+                result['live_status'] = 0
+            else:
+                info = data['data']['by_room_ids'][str(self.roomID)]
+                result['live_status'] = info['live_status']
+                result['live_time'] = info['live_time']
+                result['title'] = info['title']
+                result['uname'] = info['uname']
+            self.roomInfo.emit(result)
+        except Exception as e:
+            logging.error(str(e))
+            self.roomInfo.emit({
+                'roomID': self.roomID,
+                'title': '获取信息失败',
+                'uname': '房号: %s' % self.roomID,
+                'live_status': 0,
+            })
 
 
 class VideoFrame(QFrame):
@@ -141,39 +190,6 @@ class VideoFrame(QFrame):
     def mouseDoubleClickEvent(self, QMouseEvent):
         self.doubleClicked.emit()
 
-
-class ExportCache(QThread):
-    """导出缓存的视频（兼容保留）"""
-    finish = Signal(list)
-
-    def __init__(self):
-        super(ExportCache, self).__init__()
-        self.ori = ''
-        self.dst = ''
-        self.cut = False
-
-    def setArgs(self, ori, dst):
-        self.ori, self.dst = ori, dst
-
-    def run(self):
-        try:
-            if self.cut:
-                shutil.move(self.ori, self.dst)
-                self.cut = False
-            else:
-                shutil.copy(self.ori, self.dst)
-                self.finish.emit([True, self.dst])
-        except Exception:
-            logging.exception('导出缓存失败')
-            self.finish.emit([False, self.dst])
-
-
-class ExportTip(QWidget):
-    """导出提示"""
-
-    def __init__(self):
-        super(ExportTip, self).__init__()
-        self.resize(600, 100)
 
 
 class VideoWidget(QFrame):
@@ -375,16 +391,19 @@ class VideoWidget(QFrame):
         self.getMediaURL.streamUrl.connect(self.setMedia)
         self.getMediaURL.downloadError.connect(self.mediaReload)
 
-        self.danmu = remoteThread(self.roomID, self.sessionData)
+        self.fetchRoomInfo = FetchRoomInfo()
+        self.fetchRoomInfo.roomInfo.connect(self._onRoomInfo)
 
-        self.exportCache = ExportCache()
-        self.exportCache.finish.connect(self.exportFinish)
-        self.exportTip = ExportTip()
+        self.danmu = remoteThread(self.roomID, self.sessionData)
+        self._danmuPendingRestart = False
+        self.danmu.finished.connect(self._onDanmuFinished)
 
         # ---- 定时器 ----
+        # moveTimer: 按需启动，位置稳定后自动停止（避免 32 窗口空转）
         self.moveTimer = QTimer(self)
         self.moveTimer.timeout.connect(self.initTextPos)
-        self.moveTimer.start(50)
+        self.moveTimer.setSingleShot(False)
+        self.moveTimer.setInterval(50)
 
         self.checkPlaying = QTimer(self)
         self.checkPlaying.timeout.connect(self.checkPlayStatus)
@@ -580,12 +599,16 @@ class VideoWidget(QFrame):
             self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
             self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
             self.moveTextBrowser()
+            if not self.moveTimer.isActive():
+                self.moveTimer.start()
         except Exception:
             pass
 
     def moveEvent(self, QMoveEvent):
         videoPos = self.mapToGlobal(self.videoFrame.pos())
         self.textBrowser.move(videoPos + self.textPosDelta)
+        if not self.moveTimer.isActive():
+            self.moveTimer.start()
 
     def moveTextBrowser(self, point=None):
         videoPos = self.mapToGlobal(self.videoFrame.pos())
@@ -759,13 +782,6 @@ class VideoWidget(QFrame):
             self.mediaStop()
             self.textBrowser.hide()
 
-    def exportFinish(self, result):
-        self.exportTip.hide()
-        if result[0]:
-            QMessageBox.information(self, '导出完成', result[1], QMessageBox.Ok)
-        else:
-            QMessageBox.information(self, '导出失败', result[1], QMessageBox.Ok)
-
     # ==== 音量控制 ====
 
     def _applyVolume(self):
@@ -794,10 +810,7 @@ class VideoWidget(QFrame):
         if self.textBrowser.isHidden():
             self.textBrowser.show()
             if not self.startWithDanmu:
-                self.danmu.message.connect(self.playDanmu)
-                self.danmu.stop()
-                self.danmu.wait(500)
-                self.danmu.start()
+                self._restartDanmu()
                 self.textSetting[0] = True
                 self.startWithDanmu = True
         else:
@@ -878,10 +891,7 @@ class VideoWidget(QFrame):
         self.checkPlaying.stop()
         if self.roomID != '0':
             self.playerRestart()
-            self.setTitle()
-            if self.liveStatus == 1:
-                self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData)
-                self.getMediaURL.start()
+            self.setTitle()  # 异步获取房间信息，播放在 _onRoomInfo 回调中触发
         else:
             self.mediaStop()
 
@@ -901,7 +911,6 @@ class VideoWidget(QFrame):
         if deleteMedia:
             self.deleteMedia.emit(self.id)
         self.getMediaURL.recordToken = False
-        self.getMediaURL.checkTimer.stop()
         self.checkPlaying.stop()
         self.stopDanmu()
         self.refreshTimeStampTimer.stop()
@@ -917,14 +926,30 @@ class VideoWidget(QFrame):
 
     def stopDanmu(self):
         self._safe_disconnect_danmu()
+        self._danmuPendingRestart = False
         self.danmu.stop()
-        self.danmu.wait(1000)
+        # 非阻塞：不调用 wait()，线程收到 stop 信号后退出，
+        # finished 信号会触发 _onDanmuFinished
+
+    def _restartDanmu(self):
+        """内部：请求重启弹幕线程（如果线程在运行则等 finished 信号）"""
+        self.danmu.setRoomID(self.roomID)
+        self._safe_disconnect_danmu()
+        self.danmu.message.connect(self.playDanmu)
+        if self.danmu.isRunning():
+            self._danmuPendingRestart = True
+            self.danmu.stop()
+        else:
+            self.danmu.start()
+
+    def _onDanmuFinished(self):
+        """弹幕线程结束回调 — 处理待重启请求"""
+        if self._danmuPendingRestart:
+            self._danmuPendingRestart = False
+            self.danmu.start()
 
     def reloadDanmu(self):
-        self.stopDanmu()
-        self.danmu.setRoomID(self.roomID)
-        self.danmu.message.connect(self.playDanmu)
-        self.danmu.start()
+        self._restartDanmu()
 
     def setMedia(self, url):
         """播放直播流 - MPV 直接播放 URL，无需本地缓存"""
@@ -947,14 +972,9 @@ class VideoWidget(QFrame):
         self.checkPlaying.start(3000)
         self.refreshTimeStampTimer.start()
 
-        # 启动弹幕
-        self.danmu.setRoomID(self.roomID)
-        self._safe_disconnect_danmu()
+        # 启动弹幕（非阻塞：通过 finished 信号处理重启）
         if self.startWithDanmu:
-            self.danmu.message.connect(self.playDanmu)
-            self.danmu.stop()
-            self.danmu.wait(500)
-            self.danmu.start()
+            self._restartDanmu()
             self.textBrowser.show()
 
     def copyCache(self, copyFile):
@@ -987,6 +1007,7 @@ class VideoWidget(QFrame):
             self._mpv = None
 
     def setTitle(self):
+        """异步获取房间信息（不阻塞主线程）"""
         if self.title != '未定义的直播间':
             self.oldTitle = self.title
         if self.uname != '未定义':
@@ -994,39 +1015,38 @@ class VideoWidget(QFrame):
         if self.roomID == '0':
             self.title = '未定义的直播间'
             self.uname = '未定义'
+            self._updateTitleLabels()
         else:
-            params = {
-                'req_biz': 'web_room_componet',
-                'room_ids': [str(self.roomID)]
-            }
-            cookies = {}
-            if self.sessionData:
-                cookies['SESSDATA'] = self.sessionData
+            self.fetchRoomInfo.setConfig(self.roomID, self.sessionData)
+            if not self.fetchRoomInfo.isRunning():
+                self.fetchRoomInfo.start()
+
+    def _onRoomInfo(self, result):
+        """房间信息回调（主线程执行）- 获取到房间信息后自动触发播放"""
+        # 确保结果与当前房间匹配
+        if str(result.get('roomID', '')) != str(self.roomID):
+            return
+        self.title = result.get('title', '获取信息失败')
+        self.uname = result.get('uname', '房号: %s' % self.roomID)
+        self.liveStatus = result.get('live_status', 0)
+        live_time = result.get('live_time', '')
+        if live_time:
             try:
-                r = requests.get(
-                    r'https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomBaseInfo',
-                    params=params, headers=header, cookies=cookies
-                )
-                data = json.loads(r.text)
-                if data['message'] == '房间已加密':
-                    self.title = '房间已加密'
-                    self.uname = '房号: %s' % self.roomID
-                elif not data['data']:
-                    self.title = '房间好像不见了-_-？'
-                    self.uname = '未定义'
-                else:
-                    data = data['data']['by_room_ids'][str(self.roomID)]
-                    self.liveStatus = data['live_status']
-                    self.liveStartTime = time.mktime(
-                        datetime.strptime(data['live_time'], "%Y-%m-%d %H:%M:%S").timetuple())
-                    self.title = data['title']
-                    self.uname = data['uname']
-                    if self.liveStatus != 1:
-                        self.uname = '（未开播）' + self.uname
-            except Exception as e:
-                logging.error(str(e))
-                self.title = '获取信息失败'
-                self.uname = '房号: %s' % self.roomID
+                self.liveStartTime = time.mktime(
+                    datetime.strptime(live_time, "%Y-%m-%d %H:%M:%S").timetuple())
+            except (ValueError, OSError):
+                self.liveStartTime = 0
+        if self.liveStatus != 1 and self.uname and not self.uname.startswith('（未开播）'):
+            self.uname = '（未开播）' + self.uname
+        self._updateTitleLabels()
+        # 直播中则自动开始播放
+        if self.liveStatus == 1 and self.roomID != '0':
+            self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData)
+            if not self.getMediaURL.isRunning():
+                self.getMediaURL.start()
+
+    def _updateTitleLabels(self):
+        """更新标题和标签文字"""
         self.topLabel.setText(
             ('    窗口%s  %s' % (self.id + 1, self.title))[:20])
         self.titleLabel.setText(self.uname)

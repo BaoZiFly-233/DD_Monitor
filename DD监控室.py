@@ -5,7 +5,6 @@ DD监控室主界面进程 包含对所有子页面的初始化、排版管理
 新增全局鼠标坐标跟踪 用于刷新鼠标交互效果
 """
 import log
-import ctypes
 
 import os
 import sys
@@ -19,17 +18,9 @@ from PySide6.QtWidgets import * 	# QAction,QFileDialog
 from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
-# from VideoWidget import PushButton, Slider, VideoWidget  # 已弃用
-# from VideoWidget_vlc import PushButton, Slider, VideoWidget  # VLC 版本已弃用
 from VideoWidget_mpv import PushButton, Slider, VideoWidget
 from LiverSelect import LiverPanel
-from pay import pay
-import dns.resolver
-from ReportException import thraedingExceptionHandler, uncaughtExceptionHandler,\
-    unraisableExceptionHandler, loggingSystemInfo
 from danmu import TextOpation, ToolButton
-from checkUpdate import updateReminder, latestRemainder, checkUpdate
-# from webBrowser import Browser  # 已弃用，改用扫码登录
 from login import QRLoginWidget
 
 
@@ -233,9 +224,10 @@ class CheckDanmmuProvider(QThread):
 
     def __init__(self):
         super(CheckDanmmuProvider,self).__init__()
-    
+
     def run(self):
         try:
+            import dns.resolver
             anwsers = dns.resolver.resolve('broadcastlv.chat.bilibili.com', 'A')
             danmu_ip = anwsers[0].to_text()
             logging.info("弹幕IP: %s" % danmu_ip)
@@ -335,6 +327,12 @@ class MainWindow(QMainWindow):
                 self.config['checkUpdate'] = True
             if 'sessionData' not in self.config:
                 self.config['sessionData'] = ''
+            # 兼容旧版：URL 解码 sessionData（旧版本可能保存了 %2C 等编码字符）
+            if self.config['sessionData'] and '%' in self.config['sessionData']:
+                from urllib.parse import unquote
+                old_val = self.config['sessionData']
+                self.config['sessionData'] = unquote(old_val)
+                logging.info(f'[LOGIN] config sessionData URL 解码: {old_val[:30]}... → {self.config["sessionData"][:30]}...')
             for danmuConfig in self.config['danmu']:
                 if len(danmuConfig) == 6:
                     danmuConfig.append(10)
@@ -378,17 +376,18 @@ class MainWindow(QMainWindow):
         self.cacheSetting.savePathEdit.setText(self.config['saveCachePath'])
         self.cacheSetting.setting.connect(self.setCache)
         self.hotKey = HotKey()
-        self.pay = pay()
+        self._pay = None  # 延迟创建
         self.startLiveWindow = StartLiveWindow()
         self.loginBrowser = QRLoginWidget()
+        # 先连接信号，再触发验证（确保回调到达时信号已就绪）
+        self.loginBrowser.sessionData.connect(self.updateSessionData)
+        self.loginBrowser.login.connect(self.updateLogin)
+        self.loginBrowser.userInfoReady.connect(self.onUserInfoReady)
         # 启动时如果有已保存的 sessionData，验证登录状态
         if self.config['sessionData']:
             self.loginBrowser.setSessionData(self.config['sessionData'])
         else:
             self.loginBrowser.show()
-        self.loginBrowser.sessionData.connect(self.updateSessionData)
-        self.loginBrowser.login.connect(self.updateLogin)
-        self.loginBrowser.userInfoReady.connect(self.onUserInfoReady)
 
         # ---- 内嵌/弹出播放器初始化 ----
         self.videoWidgetList = []
@@ -603,16 +602,16 @@ class MainWindow(QMainWindow):
         # self.payMenu.addAction(killAction)
         progressText.setText('设置关于菜单...')
 
-        self.loginMenu = self.menuBar().addMenu('B站登录')
-        loginAction = QAction('扫码登录', self, triggered=self.openLoginPage)
-        self.loginMenu.addAction(loginAction)
+        self.loginMenu = self.menuBar().addMenu('B站账号')
+        self.loginAction = QAction('扫码登录', self, triggered=self.openLoginPage)
+        self.loginMenu.addAction(self.loginAction)
 
         # 鼠标和计时器
         self.oldMousePos = QPoint(0, 0)  # 初始化鼠标坐标
         self.hideMouseCnt = 90
         self.mouseTrackTimer = QTimer(self)
         self.mouseTrackTimer.timeout.connect(self.checkMousePos)
-        self.mouseTrackTimer.start(100)  # 0.1s检测一次
+        self.mouseTrackTimer.start(200)  # 0.2s检测一次（降低开销）
         progressText.setText('设置UI...')
         self.checkDanmmuProvider = CheckDanmmuProvider()
         self.checkDanmmuProvider.start()
@@ -633,7 +632,7 @@ class MainWindow(QMainWindow):
         self.videoIndex = 0
         self.setMediaTimer = QTimer(self)
         self.setMediaTimer.timeout.connect(self.setMedia)
-        self.setMediaTimer.start(10)  # MPV 延迟初始化，无需长等待
+        self.setMediaTimer.start(100)  # 每 100ms 初始化一个播放窗口
 
     def setMedia(self):
         if self.videoIndex == 16:
@@ -985,25 +984,43 @@ class MainWindow(QMainWindow):
         self.loginBrowser.show()
 
     def updateSessionData(self, sessionData):
+        logging.info(f'[LOGIN] updateSessionData: len={len(sessionData)}, '
+                     f'前20字符={sessionData[:20] if sessionData else "空"}')
+        if not sessionData:
+            import traceback
+            logging.warning('[LOGIN] *** sessionData 被清空！调用栈: ***\n'
+                            + ''.join(traceback.format_stack()))
         self.sessionData = sessionData
-        self.config['sessionData'] = self.sessionData
+        self.config['sessionData'] = sessionData
         for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.sessionData = self.sessionData
-        self.liverPanel.setSessionData(self.sessionData)
+            videoWidget.sessionData = sessionData
+        self.liverPanel.setSessionData(sessionData)
         self.dumpConfig.start()
-        self.globalMediaReload()
+        if sessionData:
+            self.globalMediaReload()
 
     def updateLogin(self, login):
         if not login:
             self.setWindowTitle(f'DD监控室{self.versionNumber} - 未登录')
+            if hasattr(self, 'loginAction'):
+                self.loginAction.setText('扫码登录')
+            # 登出：清除 sessionData
+            self.config['sessionData'] = ''
+            for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
+                videoWidget.sessionData = ''
+            self.dumpConfig.start()
         else:
             self.setWindowTitle(f'DD监控室{self.versionNumber} - 已登录')
+            if hasattr(self, 'loginAction'):
+                self.loginAction.setText('账号管理')
 
     def onUserInfoReady(self, info):
         """登录成功后收到用户信息，更新标题并自动获取关注列表"""
         uname = info.get('uname', '')
         uid = info.get('uid', 0)
         self.setWindowTitle(f'DD监控室{self.versionNumber} - {uname}')
+        if hasattr(self, 'loginAction'):
+            self.loginAction.setText(f'账号管理 ({uname})')
         # 确保 liverPanel 已持有 sessionData（启动恢复 session 时不会触发 updateSessionData）
         sessdata = getattr(self, 'sessionData', '') or self.config.get('sessionData', '')
         if sessdata:
@@ -1041,19 +1058,23 @@ class MainWindow(QMainWindow):
         self.hotKey.show()
 
     def openFeed(self):
-        self.pay.hide()
-        self.pay.show()
-        self.pay.thankToBoss.start()
+        if self._pay is None:
+            from pay import pay
+            self._pay = pay()
+        self._pay.hide()
+        self._pay.show()
+        self._pay.thankToBoss.start()
 
     def checkMousePos(self):
         newMousePos = QCursor.pos()
         if newMousePos != self.oldMousePos:
             self.setCursor(Qt.ArrowCursor)  # 鼠标动起来就显示
             self.oldMousePos = newMousePos
-            self.hideMouseCnt = 20  # 刷新隐藏鼠标的间隔
+            self.hideMouseCnt = 10  # 刷新隐藏鼠标的间隔（200ms * 10 = 2s）
         if self.hideMouseCnt > 0:
             self.hideMouseCnt -= 1
-        else:
+        elif self.hideMouseCnt == 0:
+            self.hideMouseCnt = -1  # 标记已隐藏，避免重复操作
             self.setCursor(Qt.BlankCursor)  # 计数归零隐藏鼠标
             for videoWidget in self.videoWidgetList:
                 videoWidget.topLabel.hide()  # 隐藏播放窗口的控制条
@@ -1093,8 +1114,7 @@ class MainWindow(QMainWindow):
         self.liverPanel.collectLiverInfo.stop()
         self.loginBrowser.close()
         for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.getMediaURL.recordToken = False  # 关闭缓存并清除
-            videoWidget.getMediaURL.checkTimer.stop()
+            videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
             videoWidget.mediaStop(deleteMedia=False)  # 不要清除播放窗记录
             videoWidget.close()
@@ -1122,8 +1142,7 @@ class MainWindow(QMainWindow):
             if videoWidget.roomID != '0':
                 videoWidget.mediaPlay(2)  # 显示的窗口播放
         for videoWidget in self.videoWidgetList[index + 1:]:  # 被隐藏起来的窗口
-            videoWidget.getMediaURL.recordToken = False  # 关闭缓存并清除
-            videoWidget.getMediaURL.checkTimer.stop()
+            videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
         self.config['layout'] = layoutConfig
         self.dumpConfig.start()
@@ -1182,7 +1201,7 @@ class MainWindow(QMainWindow):
                 with open(self.savePath, 'w', encoding='utf-8', errors='ignore') as f:
                     f.write(json.dumps(self.config, ensure_ascii=False))
                 QMessageBox.information(self, '导出预设', '导出完成', QMessageBox.Ok)
-            except:
+            except Exception:
                 logging.exception('json 配置导出失败')
 
     def importConfig(self):
@@ -1197,10 +1216,10 @@ class MainWindow(QMainWindow):
                     try:
                         with open(jsonPath, 'r', encoding='gbk', errors='ignore') as f:
                             config = json.loads(f.read())
-                    except:
+                    except Exception:
                         logging.exception('json 配置导入失败')
                         config = {}
-                except:
+                except Exception:
                     logging.exception('json 配置导入失败')
                     config = {}
                 if config:  # 如果能成功读取到config文件
@@ -1305,25 +1324,18 @@ class MainWindow(QMainWindow):
         self.config['checkUpdate'] = False
 
     def updateChecker(self):
+        from checkUpdate import updateReminder, checkUpdate
         self.updateReminder = updateReminder()
         self.updateReminder.noMoreSignal.connect(self.setNoMore)
         self.checkUpdate = checkUpdate(self.versionNumber)
         self.checkUpdate.update.connect(self.updateReminder._show)
-        self.checkUpdate.start()
-
-    def updateChecker2(self):
-        self.updateReminder = updateReminder()
-        self.updateReminder.noMoreSignal.connect(self.setNoMore)
-        self.latestReminder = latestRemainder()
-        self.checkUpdate = checkUpdate(self.versionNumber)
-        self.checkUpdate.update.connect(self.updateReminder._show)
-        self.checkUpdate.latest.connect(self.latestReminder._show)
         self.checkUpdate.start()
 
 
 # 程序入口点
 if __name__ == '__main__':
     # 平台相关 patch
+    import ctypes
     if platform.system() == 'Windows':
         ctypes.windll.kernel32.SetDllDirectoryW(None)
     if getattr(sys, 'frozen', False):
@@ -1342,7 +1354,7 @@ if __name__ == '__main__':
         for cacheFolder in os.listdir(cachePath):
             shutil.rmtree(os.path.join(
                 application_path, 'cache/%s' % cacheFolder))
-    except:
+    except Exception:
         logging.exception('清除缓存失败')
     cacheFolder = os.path.join(
         application_path, 'cache/%d' % time.time())  # 初始化缓存文件夹
@@ -1354,19 +1366,18 @@ if __name__ == '__main__':
     with open(os.path.join(application_path, 'utils/qdark.qss'), 'r') as f:
         qss = f.read()
     app.setStyleSheet(qss)
-    # import qdarktheme
-    #
-    # app.setStyleSheet(qdarktheme.load_stylesheet())
-    # font = QFont('', 14, QFont.Bold)
-    # app.setFont(font)
     app.setFont(QFont('微软雅黑', 9))
 
     # 日志采集初始化
     log.init_log(application_path)
+    from ReportException import thraedingExceptionHandler, uncaughtExceptionHandler,\
+        unraisableExceptionHandler, loggingSystemInfo
     sys.excepthook = uncaughtExceptionHandler
     sys.unraisablehook = unraisableExceptionHandler
     threading.excepthook = thraedingExceptionHandler
-    loggingSystemInfo()
+    # 系统信息收集延迟到后台线程
+    _sysInfoThread = threading.Thread(target=loggingSystemInfo, daemon=True)
+    _sysInfoThread.start()
     # MPV 信息log
     try:
         import mpv

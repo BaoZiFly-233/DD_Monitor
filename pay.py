@@ -1,26 +1,33 @@
 """
 赞助页弹窗
 """
-import requests
+import http_utils
 from PySide6.QtWidgets import * 	# QAction,QFileDialog
 from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
 
 
 class DownloadImage(QThread):
-    """下载图片 - 二维码"""
+    """下载图片 - 二维码（线程安全：QImage 传递，主线程转 QPixmap）"""
     img = Signal(QPixmap)
+    _imgReady = Signal(QImage)
 
     def __init__(self):
         super(DownloadImage, self).__init__()
+        self._imgReady.connect(self._onImageReady)
 
     def run(self):
         try:
-            r = requests.get(r'https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png')
-            img = QPixmap.fromImage(QImage.fromData(r.content))
-            self.img.emit(img)
+            r = http_utils.get(r'https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png')
+            qimage = QImage.fromData(r.content)
+            if not qimage.isNull():
+                self._imgReady.emit(qimage)
         except Exception as e:
             print(str(e))
+
+    def _onImageReady(self, qimage):
+        """主线程回调"""
+        self.img.emit(QPixmap.fromImage(qimage))
 
 
 class thankToBoss(QThread):
@@ -31,19 +38,21 @@ class thankToBoss(QThread):
         super(thankToBoss, self).__init__(parent)
 
     def run(self):
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.221 Safari/537.36 SE 2.X MetaSr 1.0'}
-        response = requests.get(r'https://github.com/jiafangjun/DD_KaoRou2/blob/master/感谢石油王.csv', headers=headers)
-        bossList = []
-        html = response.text.split('\n')
-        for cnt, line in enumerate(html):
-            if 'RMB<' in line:
-                boss = html[cnt - 1].split('>')[1].split('<')[0]
-                rmb = line.split('>')[1].split('<')[0]
-                bossList.append([boss, rmb])
-        if bossList:
-            self.bossList.emit(bossList)
-        else:
-            self.bossList.emit([['名单列表获取失败', '']])
+        try:
+            response = http_utils.get(r'https://github.com/jiafangjun/DD_KaoRou2/blob/master/感谢石油王.csv')
+            bossList = []
+            html = response.text.split('\n')
+            for cnt, line in enumerate(html):
+                if 'RMB<' in line:
+                    boss = html[cnt - 1].split('>')[1].split('<')[0]
+                    rmb = line.split('>')[1].split('<')[0]
+                    bossList.append([boss, rmb])
+            if bossList:
+                self.bossList.emit(bossList)
+            else:
+                self.bossList.emit([['名单列表获取失败', '']])
+        except Exception as e:
+            print(str(e))
 
 
 class pay(QDialog):

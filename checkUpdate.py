@@ -1,4 +1,5 @@
-import requests
+import re
+import http_utils
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import QDesktopServices
@@ -15,11 +16,12 @@ class checkUpdate(QThread):
     def run(self):
         token = False
         infos = ''
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36'
-                                 '(KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36 QIHU 360SE'}
         try:
-            html = requests.get(r'https://gitee.com/zhimingshenjun/DD_Monitor_latest/releases', headers=headers, timeout=5)
-        except requests.exceptions.RequestException:
+            html = http_utils.get(
+                r'https://gitee.com/zhimingshenjun/DD_Monitor_latest/releases',
+                timeout=5
+            )
+        except Exception:
             return
         for line in html.text.split('\n'):
             if 'DD监控室' in line and 'class="title"' in line:
@@ -27,7 +29,6 @@ class checkUpdate(QThread):
                 link = 'https://gitee.com/' + link.split('href="/')[1]
                 version_str = version.split('室')[1].split('<')[0].strip()
                 # 提取版本号中的数字部分（如 "2.16应急版" -> "2.16"）
-                import re
                 match = re.search(r'[\d.]+', version_str)
                 if not match:
                     return
@@ -81,7 +82,6 @@ class updateReminder(QWidget):
         yesButton = QPushButton('是')
         yesButton.clicked.connect(self.openURL)
         yesButton.clicked.connect(self.close)
-        # yesButton.setStyleSheet('background-color:#87CEFA')
         self.layout.addWidget(yesButton, 4, 2, 1, 1)
 
     def _show(self, link, version, infos):

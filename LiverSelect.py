@@ -2,15 +2,14 @@
 DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 包含主播开播/下播检测和刷新展示 置顶排序 录制管理等功能
 """
-import requests, json, time, logging, os
+import json, time, logging, os
 from PySide6.QtWidgets import * 	# QAction,QFileDialog
 from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
+import http_utils
 
 
-header = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'
-}
+header = http_utils.DEFAULT_HEADERS
 
 
 class CardLabel(QLabel):
@@ -105,7 +104,7 @@ class PushButton(QPushButton):
 #         self.roomID = roomID
 #
 #     def run(self):
-#         r = requests.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID)
+#         r = http_utils.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID)
 #         self.data.emit(json.loads(r.text))
 
 
@@ -144,9 +143,9 @@ class RecordThread(QThread):
         self.reconnectCount = 0
         api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=10000' % self.roomID
         try:
-            r = requests.get(api, headers=header)
+            r = http_utils.get(api, headers=header)
             url = json.loads(r.text)['data']['durl'][0]['url']
-            download = requests.get(url, stream=True, headers=header)
+            download = http_utils.get(url, stream=True, headers=header)
             self.recordToken = True
             self.downloadTime = 0  # 初始化下载时间为0s
             self.cacheVideo = open(self.savePath, 'wb')
@@ -157,20 +156,22 @@ class RecordThread(QThread):
                     self.downloadToken = True
                     self.cacheVideo.write(chunk)
             self.cacheVideo.close()
-        except:
+        except Exception:
             logging.exception("下载视频到缓存失败")
 
 
 class DownloadImage(QThread):
-    """下载图片"""
+    """下载图片（线程安全：使用 QImage 传递，主线程转 QPixmap）"""
     img = Signal(QPixmap)
     img_origin = Signal(QPixmap)
+    _imgReady = Signal(QImage, int, int, bool)  # image, w, h, hasOrigin
 
     def __init__(self, scaleW, scaleH, keyFrame=False):
         super(DownloadImage, self).__init__()
         self.W = scaleW
         self.H = scaleH
         self.keyFrame = keyFrame
+        self._imgReady.connect(self._onImageReady)
 
     def setUrl(self, url):
         self.url = url
@@ -178,15 +179,22 @@ class DownloadImage(QThread):
     def run(self):
         try:
             if self.W == 60:
-                r = requests.get(self.url + '@100w_100h.jpg', headers=header)
+                r = http_utils.get(self.url + '@100w_100h.jpg', headers=header)
             else:
-                r = requests.get(self.url, headers=header)
-            img = QPixmap.fromImage(QImage.fromData(r.content))
-            self.img.emit(img.scaled(self.W, self.H, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
-            if self.keyFrame:
-                self.img_origin.emit(img)
+                r = http_utils.get(self.url, headers=header)
+            # QImage 是线程安全的，QPixmap 不是
+            qimage = QImage.fromData(r.content)
+            if not qimage.isNull():
+                self._imgReady.emit(qimage, self.W, self.H, self.keyFrame)
         except Exception as e:
             logging.error(str(e))
+
+    def _onImageReady(self, qimage, w, h, hasOrigin):
+        """主线程回调：将 QImage 转换为 QPixmap"""
+        pixmap = QPixmap.fromImage(qimage)
+        self.img.emit(pixmap.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
+        if hasOrigin:
+            self.img_origin.emit(pixmap)
 
 
 class CoverLabel(QLabel):
@@ -430,7 +438,7 @@ class GetHotLiver(QThread):
                         'https://api.live.bilibili.com/room/v1/Area/getListByAreaID'
                         f'?areaId=0&sort=online&pageSize=30&page={p}&parentAreaId={area}'
                     )
-                    r = requests.get(api, headers=header, timeout=10)
+                    r = http_utils.get(api, headers=header, timeout=10)
                     resp = r.json()
                     if resp.get('code') != 0:
                         logging.warning(f'热榜 API 返回错误: area={area} page={p} code={resp.get("code")}')
@@ -482,7 +490,7 @@ class GetFollows(QThread):
             try:
                 for p in range(1, 11):
                     url = f"https://api.bilibili.com/x/relation/followings?vmid={self.uid}&pn={p}&ps=50&order=desc"
-                    r = requests.get(url, headers=req_headers, cookies=cookies)
+                    r = http_utils.get(url, headers=req_headers, cookies=cookies)
                     resp_data = r.json()
                     if resp_data['code'] != 0:
                         logging.warning(f'获取关注列表失败: {resp_data.get("message", "未知错误")}')
@@ -500,7 +508,7 @@ class GetFollows(QThread):
             if followsIDs:
                 try:
                     data = json.dumps({'uids': followsIDs})
-                    r = requests.post(
+                    r = http_utils.post(
                         r'https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids',
                         data=data, headers=header, cookies=cookies
                     )
@@ -509,7 +517,11 @@ class GetFollows(QThread):
                     for followID in followsIDs:
                         for uid, info in data.items():
                             if uid == str(followID):
-                                roomIDList.append([info['uname'], info['title'], str(info['room_id'])])
+                                roomIDList.append([
+                                    info['uname'], info['title'],
+                                    str(info['room_id']),
+                                    info.get('live_status', 0)  # 直播状态
+                                ])
                                 break
                 except Exception:
                     logging.exception('批量获取直播间状态失败')
@@ -530,7 +542,7 @@ class DownloadVTBList(QThread):
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36'}
-            r = requests.get(r'https://github.com/zhimingshenjun/DD_Monitor/blob/master/utils/vtb.csv', headers=headers)
+            r = http_utils.get(r'https://github.com/zhimingshenjun/DD_Monitor/blob/master/utils/vtb.csv', headers=headers)
             # r.encoding = 'utf8'
             vtbList = []
             html = r.text.split('\n')
@@ -542,7 +554,7 @@ class DownloadVTBList(QThread):
                     vtbList.append('%s,%s,%s\n' % (vtbID, roomID, haco))
             if vtbList:
                 self.vtbList.emit(vtbList)
-        except:
+        except Exception:
             logging.exception("vtbs 列表获取失败")
 
 
@@ -703,7 +715,7 @@ class AddLiverRoomWidget(QWidget):
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
                     self.hacoTable.setItem(y, x, QTableWidgetItem(line[x]))
-        except:
+        except Exception:
             logging.exception('vtb.csv 解析失败')
 
         self.hacoTable.setHorizontalHeaderLabels(['主播名', '直播间房号', '所属'])
@@ -746,7 +758,8 @@ class AddLiverRoomWidget(QWidget):
 
     def closeEvent(self, event):
         if self.getHotLiver.isRunning():
-            self.getHotLiver.terminate()
+            self.getHotLiver.quit()
+            self.getHotLiver.wait(2000)
 
     def collectHotLiverInfo(self, info):
         self.hotLiverDict = {}
@@ -759,7 +772,7 @@ class AddLiverRoomWidget(QWidget):
                     if page == self.currentPage:
                         try:
                             self.hotLiverTable.setItem(y, x, QTableWidgetItem(txt))
-                        except:
+                        except Exception:
                             logging.exception('热门直播表插入失败')
 
     def switchHotLiver(self, index):
@@ -772,23 +785,28 @@ class AddLiverRoomWidget(QWidget):
                 else:
                     button.pushToken = False
                     button.setStyleSheet('background-color:#31363b;border-width:1px')
-            self.hotLiverTable.clear()
-            self.hotLiverTable.setColumnCount(3)
-            self.hotLiverTable.setRowCount(100)
-            self.hotLiverTable.setVerticalHeaderLabels(['添加'] * 100)
-            for i in range(100):
-                self.hotLiverTable.setRowHeight(i, 40)
-            self.hotLiverTable.setHorizontalHeaderLabels(['主播名', '直播间标题', '直播间房号'])
-            self.hotLiverTable.setColumnWidth(0, 130)
-            self.hotLiverTable.setColumnWidth(1, 240)
-            self.hotLiverTable.setColumnWidth(2, 130)
-            hotLiverList = self.hotLiverDict[index]
-            for y, line in enumerate(hotLiverList):
-                for x, txt in enumerate(line):
-                    try:
-                        self.hotLiverTable.setItem(y, x, QTableWidgetItem(txt))
-                    except:
-                        logging.exception('热门直播表更换失败')
+            self._fillHotLiverTable(index)
+
+    def _fillHotLiverTable(self, index):
+        """填充热门直播表格数据"""
+        hotLiverList = self.hotLiverDict.get(index, [])
+        rowCount = max(len(hotLiverList), 30)
+        self.hotLiverTable.clearContents()
+        self.hotLiverTable.setColumnCount(3)
+        self.hotLiverTable.setRowCount(rowCount)
+        self.hotLiverTable.setVerticalHeaderLabels(['添加'] * rowCount)
+        for i in range(rowCount):
+            self.hotLiverTable.setRowHeight(i, 40)
+        self.hotLiverTable.setHorizontalHeaderLabels(['主播名', '直播间标题', '直播间房号'])
+        self.hotLiverTable.setColumnWidth(0, 130)
+        self.hotLiverTable.setColumnWidth(1, 240)
+        self.hotLiverTable.setColumnWidth(2, 130)
+        for y, line in enumerate(hotLiverList):
+            for x, txt in enumerate(line):
+                try:
+                    self.hotLiverTable.setItem(y, x, QTableWidgetItem(txt))
+                except Exception:
+                    logging.exception('热门直播表填充失败')
 
     def refreshHacoList(self):
         self.refreshButton.clicked.disconnect(self.refreshHacoList)
@@ -817,7 +835,7 @@ class AddLiverRoomWidget(QWidget):
                 for x in range(3):
                     self.hacoTable.setItem(y, x, QTableWidgetItem(line[x]))
             QMessageBox.information(self, '更新VUP名单', '更新完成', QMessageBox.Ok)
-        except:
+        except Exception:
             logging.exception('vtb.csv 写入失败')
             QMessageBox.information(self, '更新VUP名单', '更新失败 请检查网络', QMessageBox.Ok)
         self.refreshButton.setText('更新名单')
@@ -842,7 +860,7 @@ class AddLiverRoomWidget(QWidget):
             if roomID not in addedRoomID:
                 addedRoomID += ' %s' % roomID
                 self.roomEdit.setText(addedRoomID)
-        except:
+        except Exception:
             logging.exception('热门主播添加失败')
 
     def hacoAdd(self, row):
@@ -853,7 +871,7 @@ class AddLiverRoomWidget(QWidget):
                 if roomID not in addedRoomID:
                     addedRoomID += ' %s' % roomID
                     self.roomEdit.setText(addedRoomID)
-        except:
+        except Exception:
             logging.exception('hacoAdd 失败')
 
     def setSessionData(self, sessionData):
@@ -872,12 +890,23 @@ class AddLiverRoomWidget(QWidget):
 
     def collectFollowLiverInfo(self, info):
         self.followLiverList = []
-        for y, line in enumerate(info):
+        # 按直播状态排序：直播中排前面
+        sorted_info = sorted(info, key=lambda x: x[3] if len(x) > 3 else 0, reverse=True)
+        self.followsTable.setRowCount(max(len(sorted_info), 500))
+        self.followsTable.setVerticalHeaderLabels(['添加'] * self.followsTable.rowCount())
+        for y, line in enumerate(sorted_info):
             self.followLiverList.append(line[2])
-            for x, txt in enumerate(line):
+            live_status = line[3] if len(line) > 3 else 0
+            for x in range(3):  # 只显示前3列（uname, title, room_id）
                 try:
-                    self.followsTable.setItem(y, x, QTableWidgetItem(txt))
-                except:
+                    item = QTableWidgetItem(line[x])
+                    if live_status == 1:
+                        # 直播中：绿色高亮
+                        item.setForeground(QColor('#7FFFD4'))
+                        if x == 0:
+                            item.setText('● ' + line[x])  # 名字前加直播指示
+                    self.followsTable.setItem(y, x, item)
+                except Exception:
                     logging.exception('关注列表添加失败')
 
     def followLiverAdd(self, row):
@@ -887,7 +916,7 @@ class AddLiverRoomWidget(QWidget):
             if roomID not in addedRoomID:
                 addedRoomID += ' %s' % roomID
                 self.roomEdit.setText(addedRoomID)
-        except:
+        except Exception:
             logging.exception('关注列表添加失败')
 
 
@@ -923,14 +952,14 @@ class CollectLiverInfo(QThread):
             try:
                 liverInfo = []
                 data = json.dumps({'ids': self.roomIDList})  # 根据直播间房号批量获取直播间信息
-                r = requests.post(r'https://api.live.bilibili.com/room/v2/Room/get_by_ids', data=data, headers=header)
+                r = http_utils.post(r'https://api.live.bilibili.com/room/v2/Room/get_by_ids', data=data, headers=header)
                 r.encoding = 'utf8'
                 data = json.loads(r.text)['data']
                 uidList = []
                 for roomID in data:
                     uidList.append(data[roomID]['uid'])
                 data = json.dumps({'uids': uidList})
-                r = requests.post(r'https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids', data=data, headers=header)
+                r = http_utils.post(r'https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids', data=data, headers=header)
                 r.encoding = 'utf8'
                 data = json.loads(r.text)['data']
                 if data:
@@ -946,14 +975,14 @@ class CollectLiverInfo(QThread):
                             pass  # fallback 单独查询
                         try:
                             if not matched:
-                                r = requests.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
+                                r = http_utils.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
                                                  headers=header)
                                 r.encoding = 'utf8'
                                 banData = json.loads(r.text)['data']
                                 if banData:
                                     try:
                                         uname = banData['anchor_info']['base_info']['uname']
-                                    except:
+                                    except (KeyError, TypeError):
                                         uname = ''
                                 else:
                                     uname = ''
@@ -1032,11 +1061,11 @@ class LiverPanel(QWidget):
         for roomID, topToken in roomDict.items():  # 如果id不在老列表里面 则添加
             if len(roomID) <= 5:  # 查询短号
                 try:
-                    r = requests.get('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
+                    r = http_utils.get('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % roomID,
                                      headers=header)
                     data = json.loads(r.text)['data']
                     roomID = str(data['room_info']['room_id'])
-                except:
+                except Exception:
                     logging.exception('房间号查询失败')
             if roomID not in self.roomIDDict:
                 newID.append(roomID)
@@ -1055,8 +1084,8 @@ class LiverPanel(QWidget):
             self.coverList[-1].changeTopToken.connect(self.changeTop)
             self.roomIDDict[str(roomID)] = False  # 添加普通卡片 字符串类型
         self.collectLiverInfo.setRoomIDList(list(map(int, self.roomIDDict.keys())))  # 更新需要刷新的房间列表
-        self.collectLiverInfo.terminate()
-        self.collectLiverInfo.wait()
+        self.collectLiverInfo.stop()
+        # 非阻塞：不调用 wait()，CollectLiverInfo.run() 内部 1 秒粒度检查 _running 标志
         self.collectLiverInfo.start()
         self.dumpConfig.emit()  # 发送保存config信号
         self.refreshPanel()

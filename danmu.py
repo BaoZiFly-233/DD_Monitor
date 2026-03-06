@@ -1,7 +1,6 @@
 """将弹幕机分离出来单独开发
 """
 import os
-import time
 import logging
 import tempfile
 
@@ -215,9 +214,8 @@ class MpvDanmakuRenderer:
         self._opacity = 200       # 0-255
         self._max_lane_ratio = 0.55
 
-        # 临时 ASS 文件
-        fd, self._ass_path = tempfile.mkstemp(suffix='.ass', prefix='dd_danmaku_')
-        os.close(fd)
+        # 临时 ASS 文件（延迟创建，避免 32 个窗口启动时创建 32 个临时文件）
+        self._ass_path = ''
         self._sub_loaded = False
 
         # 批量刷新定时器（避免每条弹幕都写文件+reload）
@@ -231,9 +229,16 @@ class MpvDanmakuRenderer:
         self._cleanup_timer.timeout.connect(self._cleanup)
         self._cleanup_timer.setInterval(5000)
 
+    def _ensureAssFile(self):
+        """延迟创建临时 ASS 文件"""
+        if not self._ass_path:
+            fd, self._ass_path = tempfile.mkstemp(suffix='.ass', prefix='dd_danmaku_')
+            os.close(fd)
+
     def setMpv(self, mpv_instance):
         """绑定 MPV 播放器实例"""
         self._mpv = mpv_instance
+        self._ensureAssFile()
         # 写入初始空 ASS 文件
         self._writeAss()
 
@@ -330,7 +335,7 @@ class MpvDanmakuRenderer:
     def cleanup_file(self):
         """清理临时文件（程序退出时调用）"""
         try:
-            if os.path.exists(self._ass_path):
+            if self._ass_path and os.path.exists(self._ass_path):
                 os.unlink(self._ass_path)
         except OSError:
             pass
