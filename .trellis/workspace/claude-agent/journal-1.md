@@ -58,3 +58,61 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Login SESSDATA URL编码根因修复
+
+**Date**: 2026-03-06
+**Task**: Login SESSDATA URL编码根因修复
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 问题根因
+
+用户发现登录后重启 app 会丢失登录状态。经分析发现完整的 bug 链：
+
+1. 旧版 `_parseCookiesFromURL()` 用 `split('=')` 保存 SESSDATA，未做 URL 解码
+2. SESSDATA 含 `%2C`（逗号）和 `%2A`（星号）等编码字符
+3. 重启后 URL 编码的 SESSDATA 原样发给 B站 API → API 拒绝 → `_expired`
+4. 触发 `sessionData('')` 清空信号 → config.json 被覆写为空
+5. 备份轮转机制（DumpConfig）把清空后的值写入 config.json + 备份1
+6. 备份2/3 仍保留着旧的 URL 编码值
+
+这也解释了之前观察到的 **45ms 清空之谜**：验证线程用 URL 编码值调 API → 被拒 → 立即清空。
+
+## 修复内容
+
+| 文件 | 修改 |
+|------|------|
+| `login.py` | `setSessionData()` 增加 URL 解码防护（`%` 检测 + `unquote()`） |
+| `DD监控室.py` | config 加载时对 sessionData 做 URL 解码（兼容旧版存储） |
+| `utils/config.json` | 从备份2恢复 URL 解码后的 SESSDATA（有效期至 2026-09-02） |
+
+## 关键发现
+
+- config_备份2/3.json 保留了 URL 编码的 SESSDATA，是恢复线索
+- SESSDATA 中的时间戳 `1788323934` → 2026-09-02，session 仍有效
+- 双重 URL 解码防护：DD监控室.py 加载时 + login.py 接收时
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ffe75db` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

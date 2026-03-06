@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-03-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~60 | Active |
+| `journal-1.md` | ~118 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits |
 |---|------|-------|---------|
+| 2 | 2026-03-06 | Login SESSDATA URL编码根因修复 | `ffe75db` |
 | 1 | 2026-03-06 | 弹幕渲染重写+VLC移除+blivedm升级+bilibili-api集成 | `317d261` |
 <!-- @@@/auto:session-history -->
 
