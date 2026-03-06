@@ -470,3 +470,62 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 制定 Git 提交与文档编写规范
+
+**Date**: 2026-03-06
+**Task**: 制定 Git 提交与文档编写规范
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 产出
+
+通过逐步与用户确认偏好，制定了项目级的 Git 提交与文档编写强制规范。
+
+### 新增文件
+
+**`.trellis/spec/guides/git-and-docs-guidelines.md`** — 完整规范文档，包含：
+
+| 章节 | 内容 |
+|------|------|
+| Git Commit 规范 | `type(scope): 中文简述` + body 含「为什么改」「改了什么」；子任务完成+测试通过+review 后立即 commit + push |
+| Release Notes 规范 | 中文、正式但亲切、用户视角；必须包含与上一版本区别和 bug 修复；附结构模板和正反面示例 |
+| README 规范 | 中文、项目展示型；必须说明与原项目 DD_Monitor 的关系和区别；附结构模板 |
+| 检查清单 | Commit 前 / Release 前 / README 更新前的逐项检查 |
+
+### 修改文件
+
+- **`AGENTS.md`**: 追加 Git 和文档强制规则摘要，确保 Cursor/Codex 等所有 AI 入口可见
+- **`.trellis/spec/guides/index.md`**: 注册新规范文档到 guides 索引
+
+### 用户确认的偏好
+
+- Commit: Conventional Commits 英文前缀 + 中文描述 + body 必填
+- Release Notes: 正式但亲切，含历史版本对比和 bug 修复
+- README: 项目展示型，纯中文，必须解释与原项目区别
+- 提交时机: 子任务完成 + 测试通过 + review 完成后
+- 提交后必须 push
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `none` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

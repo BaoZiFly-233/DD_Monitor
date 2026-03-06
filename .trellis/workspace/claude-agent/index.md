@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-03-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~472 | Active |
+| `journal-1.md` | ~531 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits |
 |---|------|-------|---------|
+| 8 | 2026-03-06 | 制定 Git 提交与文档编写规范 | none |
 | 7 | 2026-03-06 | 弹幕OpenGL渲染方案调研与规划 | none |
 | 6 | 2026-03-06 | 启动崩溃定位与列表流式加载收尾 | - |
 | 5 | 2026-03-06 | 重构规划 v2：深度调查 + mpv弹幕方案 + bilibili-api融合规划 | - |
