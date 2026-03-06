@@ -346,3 +346,127 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 启动崩溃定位与列表流式加载收尾
+
+**Date**: 2026-03-06
+**Task**: 启动崩溃定位与列表流式加载收尾
+
+### Summary
+
+定位并修复启动阶段的 AttributeError 崩溃，补齐当前列表流式加载缺失的关注页实现与凭据透传。
+
+### Main Changes
+
+﻿## 根因分析
+
+本次会话先按系统化排障流程复现了“启动软件，加载后就崩”的问题，最终在日志中定位到真实炸点：
+
+- `AddLiverRoomWidget` 初始化时把 `GetFollows.roomInfoChunk` 连接到了不存在的 `collectFollowLiverChunk`。
+- 因为这个连接发生在主窗口构造阶段，所以程序会在 UI 尚未完全进入可用状态前直接抛出 `AttributeError` 并退出。
+- 这不是播放器或弹幕导致的崩溃，而是上一次“当前列表流式加载”改造存在半截落盘：信号接好了，但对应槽函数、关注表刷新逻辑、`tabWidget` 变量替换和凭据透传没有完整收尾。
+
+## 主要修改
+
+- `LiverSelect.py`
+  - 补回 `GetHotLiver.areaLoaded -> collectHotLiverChunk` 的连接，恢复热门列表增量更新链路。
+  - 补回 `collectFollowLiverChunk()`，让关注列表支持按块接收数据。
+  - 新增 `_fillFollowTable()`，统一关注列表的全量/增量渲染逻辑。
+  - 将“只对当前正在看的列表生效”的约束落实到 tab 切换逻辑：只有当前页可见时才即时刷新表格。
+  - 查询关注前先清空 `followRoomInfo` 和 `followLiverList`，避免旧数据与新请求混杂。
+  - 补回 `AddLiverRoomWidget.setCredential()`，并在 `setSessionData()`、`checkFollows()` 中同步把 credential 传给 `GetFollows` / `GetHotLiver`。
+  - 修正 `tab.addTab(...)` 为 `self.tabWidget.addTab(...)`，避免后续再次因未定义变量崩溃。
+  - 在关闭添加直播间窗口时同时等待 `getFollows` 线程，降低窗口关闭后残留信号回调风险。
+
+## 验证
+
+- [OK] 复现启动崩溃，并从 `logs/log-2026-03-06.txt` 抓到未捕获异常：`AttributeError: 'AddLiverRoomWidget' object has no attribute 'collectFollowLiverChunk'`
+- [OK] `python -m py_compile "LiverSelect.py" "VideoWidget_mpv.py" "DD监控室.py"`
+- [OK] 启动 `python "DD监控室.py"` 两次，均能持续运行到超时结束，日志中不再出现 `UNCAUGHT EXCEPTION`、`AttributeError`、`NameError`
+- [OK] 日志确认程序可进入 UI 完成和登录后自动拉取关注列表阶段
+
+## Review 结论
+
+- 这次崩溃的直接根因是“跨层流式改动只完成了一半”，属于典型的信号槽和 UI 刷新路径未闭环。
+- 当前实现已经满足“仅当前可见列表流式刷新”的功能要求，但关注列表仍采用“每来一批就整表排序重绘”的方式，功能正确，性能和观感还有继续优化空间。
+- `GetHotLiver` / `GetFollows` 仍基于 `QThread.run()` 自管流程，`quit()` 不能立刻打断进行中的网络请求；这不是本次崩溃点，但仍是后续可继续收敛的稳定性风险。
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 7: 弹幕OpenGL渲染方案调研与规划
+
+**Date**: 2026-03-06
+**Task**: 弹幕OpenGL渲染方案调研与规划
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 调研内容
+
+并行研究了三个方向：
+
+| 方向 | 结论 |
+|------|------|
+| **KikoPlay 弹幕渲染** | QPainterPath 预渲染 → OpenGL 纹理缓存 → GPU 合成。CacheWorker 独立线程、MD5 缓存 key、纹理图集、碰撞预测布局引擎 |
+| **bilibili-api-python** | 已深度集成（直播流/热榜/关注/凭据续期），无需额外引入 |
+| **Richasy/bili-kernel** | 纯 C#/.NET 库，无法集成到 Python 项目，仅可作 API 参考 |
+
+## 产出
+
+编写了详细的弹幕 OpenGL 渲染引擎重构规划：
+
+**`docs/plans/danmaku-opengl-overlay-plan.md`** — 6 阶段实施计划：
+1. Phase 1: MpvGLWidget — MPV render API 替换 wid 嵌入
+2. Phase 2: DanmakuCache — 纹理预渲染与缓存（MD5 + LRU）
+3. Phase 3: DanmakuLayout — 三种布局引擎 + 碰撞预测
+4. Phase 4: DanmakuRenderer — OpenGL 合成引擎
+5. Phase 5: 集成到 VideoWidget
+6. Phase 6: 性能优化（全局缓存共享、批量绘制、纹理图集）
+
+## 关键发现
+
+- python-mpv 1.0.8 完整支持 `MpvRenderContext` + OpenGL render API
+- 当前 osd-overlay 方案瓶颈：每帧 IPC 传 ASS 文本 + MPV 解析
+- KikoPlay 实际用 OpenGL 纹理（非简单 QPainter overlay），CacheWorker 独立线程预渲染
+- 32 窗口可共享全局 DanmakuCache，高频弹幕只渲染一次
+
+**新增文件**: `docs/plans/danmaku-opengl-overlay-plan.md`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `none` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
