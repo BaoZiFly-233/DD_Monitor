@@ -11,14 +11,14 @@ if /I not "%TARGET_ARCH%"=="x64" if /I not "%TARGET_ARCH%"=="x86" (
 echo Usage: scripts\build_win.bat [x64^|x86]
 echo.
 echo Optional env vars:
-echo   APP_VERSION=2.27
+echo   APP_VERSION=2.26
 echo   MPV_DLL=D:/path/to/libmpv-2.dll
 echo   MPV_RUNTIME_DIR=D:/path/to/mpv-runtime-dir
 exit /b 1
 )
 
 set "APP_VERSION=%APP_VERSION%"
-if "%APP_VERSION%"=="" set "APP_VERSION=2.27"
+if "%APP_VERSION%"=="" set "APP_VERSION=2.26"
 
 set "DIST_NAME=DDMonitor"
 set "DIST_DIR=%ROOT_DIR%dist\%DIST_NAME%"
@@ -52,8 +52,7 @@ if not exist "%DIST_DIR%" (
 )
 
 if not exist "%DIST_DIR%\logs" mkdir "%DIST_DIR%\logs"
-if not exist "%DIST_DIR%\utils" mkdir "%DIST_DIR%\utils"
-if exist "%ROOT_DIR%utils\danmu.png" copy /Y "%ROOT_DIR%utils\danmu.png" "%DIST_DIR%\utils\danmu.png" >nul
+if exist "%ROOT_DIR%utils" xcopy "%ROOT_DIR%utils" "%DIST_DIR%\utils\" /E /I /Y >nul
 if exist "%DIST_DIR%\utils\config.json" del /F /Q "%DIST_DIR%\utils\config.json"
 if exist "%DIST_DIR%\utils\config_*.json" del /F /Q "%DIST_DIR%\utils\config_*.json"
 copy /Y "%MPV_DLL%" "%DIST_DIR%\libmpv-2.dll" >nul
