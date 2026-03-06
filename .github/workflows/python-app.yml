@@ -1,82 +1,141 @@
-name: DDMonitor Build
+name: DDMonitor Release
 
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Release version used in package name'
+        required: true
+        default: '2.26'
+      release_tag:
+        description: 'Git tag for this release'
+        required: true
+        default: 'v2.26'
+      release_name:
+        description: 'GitHub Release display name'
+        required: true
+        default: 'DDMonitor 2.26 复活版'
 
 jobs:
-  build-linux:
-
+  prepare:
     runs-on: ubuntu-latest
-
+    outputs:
+      app_version: ${{ steps.vars.outputs.app_version }}
+      release_tag: ${{ steps.vars.outputs.release_tag }}
+      release_name: ${{ steps.vars.outputs.release_name }}
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Update pip
-      run: python -m pip install --upgrade pip
-    - name: Install Packages
-      run: pip install -r requirements.txt
-    - name: Build
-      run: "scripts/build_linux.sh"
-    - name: Archive Build
-      uses: actions/upload-artifact@v2
-      with:
-        name: ddmonitor-linux-build
-        path: dist/DDMonitor
-  
-  build-windows:
+      - id: vars
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            APP_VERSION='${{ inputs.app_version }}'
+            RELEASE_TAG='${{ inputs.release_tag }}'
+            RELEASE_NAME='${{ inputs.release_name }}'
+          else
+            RELEASE_TAG='${GITHUB_REF_NAME}'
+            APP_VERSION="${RELEASE_TAG#v}"
+            RELEASE_NAME="DDMonitor ${APP_VERSION} 复活版"
+          fi
 
+          echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+
+  build-windows-x64:
+    needs: prepare
     runs-on: windows-latest
-    env:
-     PYTHON_VLC_MODULE_PATH: ${{github.workspace}}\\vlc-3.0.12
-     PYTHON_VLC_LIB_PATH: ${{github.workspace}}\\vlc-3.0.12\\libvlc.dll
+    permissions:
+      contents: read
     steps:
-    - uses: actions/checkout@v2
-    - uses: suisei-cn/actions-download-file@v1
-      id: downloadVLC
-      name: Download VLC
-      with:
-        url: "https://download.videolan.org/pub/videolan/vlc/last/win64/vlc-3.0.12-win64.zip"
-        target: .
-    - name: Extract VLC
-      run: |
-        powershell.exe Expand-Archive -Path vlc-3.0.12-win64.zip -DestinationPath .
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Update pip
-      run: python -m pip install --upgrade pip
-    - name: Install Packages
-      run: pip install -r requirements.txt
-    - name: Build
-      run: "scripts/build_win.bat"
-    - name: Archive Build
-      uses: actions/upload-artifact@v2
-      with:
-        name: ddmonitor-windows-build
-        path: dist/DDMonitor
-    
-  build-macos:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    runs-on: macos-latest
+      - name: Set up Python 3.11 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
 
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download MPV runtime files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
+          $runtimeAsset = $release.assets |
+            Where-Object { $_.name -match '^mpv-x86_64-.*\.7z$' -and $_.name -notmatch '-v3-' } |
+            Select-Object -First 1
+          $devAsset = $release.assets |
+            Where-Object { $_.name -match '^mpv-dev-x86_64-.*\.7z$' -and $_.name -notmatch '-v3-' } |
+            Select-Object -First 1
+
+          if (-not $runtimeAsset) { throw '未找到 x64 的 mpv runtime 发布资产' }
+          if (-not $devAsset) { throw '未找到 x64 的 mpv dev 发布资产' }
+
+          $downloadDir = Join-Path $env:RUNNER_TEMP 'mpv-download'
+          $runtimeDir = Join-Path $env:RUNNER_TEMP 'mpv-runtime'
+          $devDir = Join-Path $env:RUNNER_TEMP 'mpv-dev'
+          New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $devDir | Out-Null
+
+          $runtimeArchive = Join-Path $downloadDir $runtimeAsset.name
+          $devArchive = Join-Path $downloadDir $devAsset.name
+          Invoke-WebRequest -Uri $runtimeAsset.browser_download_url -OutFile $runtimeArchive
+          Invoke-WebRequest -Uri $devAsset.browser_download_url -OutFile $devArchive
+
+          & 7z x $runtimeArchive "-o$runtimeDir" -y | Out-Host
+          & 7z x $devArchive "-o$devDir" -y | Out-Host
+
+          $mpvDll = Join-Path $devDir 'libmpv-2.dll'
+          if (-not (Test-Path $mpvDll)) { throw "未找到 libmpv-2.dll: $mpvDll" }
+
+          "MPV_DLL=$mpvDll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MPV_RUNTIME_DIR=$runtimeDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build release package
+        shell: cmd
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+          MPV_DLL: ${{ env.MPV_DLL }}
+          MPV_RUNTIME_DIR: ${{ env.MPV_RUNTIME_DIR }}
+        run: scripts\build_win.bat x64
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddmonitor-windows-x64
+          path: release/DDMonitor-${{ needs.prepare.outputs.app_version }}-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    needs:
+      - prepare
+      - build-windows-x64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Update pip
-      run: python -m pip install --upgrade pip
-    - name: Install Packages
-      run: pip install -r requirements.txt
-    - name: Build
-      run: "scripts/build_macos.sh"
-    - name: Archive Build
-      uses: actions/upload-artifact@v2
-      with:
-        name: ddmonitor-macos-build
-        path: dist/DDMonitor
-  
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ddmonitor-windows-x64
+          path: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.prepare.outputs.release_name }}
+          generate_release_notes: true
+          files: release-assets/*.zip
+          fail_on_unmatched_files: true

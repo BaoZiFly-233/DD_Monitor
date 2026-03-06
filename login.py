@@ -10,12 +10,13 @@ B站扫码登录模块
   都为空 → 未登录，显示扫码面板
 """
 import logging
+import time
 from urllib.parse import urlparse, parse_qs
 import http_utils
-from PySide6.QtCore import Qt, Signal, QTimer, QThread
-from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath
+from PySide6.QtCore import Qt, Signal, QTimer, QThread, QUrl
+from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout,
-                                QFrame)
+                                QFrame, QMessageBox)
 
 try:
     import qrcode
@@ -170,6 +171,7 @@ class QRLoginWidget(QWidget):
         self._avatarPixmap = None
         self._qrcode_key = ''
         self._credential = {}
+        self._destructiveGuardUntil = 0.0
 
         # ---- 后台线程 ----
         self._fetchUserInfo = FetchUserInfo()
@@ -240,11 +242,15 @@ class QRLoginWidget(QWidget):
         lay.addWidget(dot)
 
         for text, color, slot in [
+            ('打开用户主页', '#27ae60', self._openUserSpace),
+            ('切换账号', '#2980b9', self._onSwitchAccount),
             ('退出登录', '#c0392b', self._onLogout),
-            ('切换账号', '#2980b9', self._onLogout),
         ]:
             btn = QPushButton(text)
             btn.setFixedHeight(36)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+            btn.setFocusPolicy(Qt.NoFocus)
             btn.setStyleSheet(
                 f'QPushButton {{ background-color: {color}; border-radius: 4px; color: white; }}'
                 f'QPushButton:hover {{ background-color: {color}; opacity: 0.8; }}')
@@ -367,7 +373,11 @@ class QRLoginWidget(QWidget):
     # ================================================================
 
     def show(self):
+        self._destructiveGuardUntil = time.monotonic() + 0.35
         super().show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus(Qt.ActiveWindowFocusReason)
         self._syncUI()
 
     def setSessionData(self, sessdata):
@@ -405,6 +415,43 @@ class QRLoginWidget(QWidget):
             self._verifyingLabel.setText('正在验证登录状态...')
             self._verifyingHint.setText('请稍候')
             self._startVerify()
+
+    def _isGhostClick(self, action_name):
+        if time.monotonic() < self._destructiveGuardUntil:
+            logging.warning(f'[LOGIN] 忽略窗口刚打开后的误触动作: {action_name}')
+            return True
+        return False
+
+    def _confirmAction(self, title, message):
+        return QMessageBox.question(
+            self, title, message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        ) == QMessageBox.Yes
+
+    def _performLogout(self):
+        self._sessdata = ''
+        self._user_info = {}
+        self._credential = {}
+        self._avatarPixmap = None
+        self._resetAvatarPlaceholder()
+        self.sessionData.emit('')
+        self.login.emit(False)
+        self._syncUI()
+
+    def _openUserSpace(self):
+        uid = self._user_info.get('uid')
+        if not uid:
+            logging.warning('[LOGIN] 当前没有可打开的用户 UID')
+            return
+        QDesktopServices.openUrl(QUrl(f'https://space.bilibili.com/{uid}'))
+
+    def _onSwitchAccount(self):
+        if self._isGhostClick('switch-account'):
+            return
+        if not self._confirmAction('切换账号', '切换账号需要先退出当前登录，是否继续？'):
+            return
+        self._performLogout()
 
     def _onUserInfo(self, info):
         """FetchUserInfo 回调 — 区分成功/过期/网络错误"""
@@ -558,14 +605,11 @@ class QRLoginWidget(QWidget):
     # ================================================================
 
     def _onLogout(self):
-        self._sessdata = ''
-        self._user_info = {}
-        self._credential = {}
-        self._avatarPixmap = None
-        self._resetAvatarPlaceholder()
-        self.sessionData.emit('')
-        self.login.emit(False)
-        self._syncUI()
+        if self._isGhostClick('logout'):
+            return
+        if not self._confirmAction('退出登录', '确定要退出当前 B站账号吗？'):
+            return
+        self._performLogout()
 
     # ================================================================
     # 工具方法

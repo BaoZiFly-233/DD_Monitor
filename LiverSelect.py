@@ -419,8 +419,11 @@ class CoverLabel(QLabel):
 class GetHotLiver(QThread):
     """获取指定分区的热榜
 
-    使用 room/v1/Area/getListByAreaID 接口（无需 WBI 签名），
+    使用 room/v3/area/getRoomList 接口（无需 WBI 签名），
     替代原 xlive/web-interface/v1/second/getList（已要求 WBI，返回 -352）。
+
+    2026-03-06 实测 room/v1/Area/getListByAreaID 在 areaId=0 时会返回综合热门，
+    导致切换分区后看起来列表不变化，这里改为 v3 接口并使用 snake_case 参数。
     """
     roomInfoSummary = Signal(list)
 
@@ -435,15 +438,15 @@ class GetHotLiver(QThread):
                 pageSummary = []
                 for p in range(1, 6):
                     api = (
-                        'https://api.live.bilibili.com/room/v1/Area/getListByAreaID'
-                        f'?areaId=0&sort=online&pageSize=30&page={p}&parentAreaId={area}'
+                        'https://api.live.bilibili.com/room/v3/area/getRoomList'
+                        f'?parent_area_id={area}&area_id=0&sort_type=online&page={p}&page_size=30'
                     )
                     r = http_utils.get(api, headers=header, timeout=10)
                     resp = r.json()
                     if resp.get('code') != 0:
                         logging.warning(f'热榜 API 返回错误: area={area} page={p} code={resp.get("code")}')
                         break
-                    data = resp.get('data', [])
+                    data = resp.get('data', {}).get('list', [])
                     if data:
                         for info in data:
                             pageSummary.append([info['uname'], info['title'], str(info['roomid'])])
@@ -767,13 +770,7 @@ class AddLiverRoomWidget(QWidget):
         self.hotLiverTable.setEnabled(True)
         for page, hotLiverList in enumerate(info):
             self.hotLiverDict[page] = hotLiverList
-            for y, line in enumerate(hotLiverList):
-                for x, txt in enumerate(line):
-                    if page == self.currentPage:
-                        try:
-                            self.hotLiverTable.setItem(y, x, QTableWidgetItem(txt))
-                        except Exception:
-                            logging.exception('热门直播表插入失败')
+        self._fillHotLiverTable(self.currentPage)
 
     def switchHotLiver(self, index):
         if not self.buttonList[index].pushToken:
@@ -1050,6 +1047,7 @@ class LiverPanel(QWidget):
             self.addLiverRoomWidget.getFollows.start()
 
     def openLiverRoomPanel(self):
+        self.addLiverRoomWidget._fillHotLiverTable(self.addLiverRoomWidget.currentPage)
         if not self.addLiverRoomWidget.getHotLiver.isRunning():
             self.addLiverRoomWidget.getHotLiver.start()
         self.addLiverRoomWidget.hide()

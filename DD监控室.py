@@ -157,7 +157,7 @@ class Version(QWidget):
         self.resize(350, 150)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
-        layout.addWidget(QLabel(f'DD监控室 v{version} (2023/07/21)'), 0, 0, 1, 2)
+        layout.addWidget(QLabel(f'DD监控室 v{version} 复活版 (2026/03/06)'), 0, 0, 1, 2)
         layout.addWidget(QLabel('by 神君Channel'), 1, 0, 1, 2)
         layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 2, 0, 1, 2)
         releases_url = QLabel('')
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 2.16
+        self.versionNumber = 2.26
         self.setWindowTitle(f'DD监控室{self.versionNumber}')
         self.resize(1600, 900)
         self.maximumToken = True
@@ -327,6 +327,8 @@ class MainWindow(QMainWindow):
                 self.config['checkUpdate'] = True
             if 'sessionData' not in self.config:
                 self.config['sessionData'] = ''
+            if 'loginUserInfo' not in self.config or not isinstance(self.config['loginUserInfo'], dict):
+                self.config['loginUserInfo'] = {}
             # 兼容旧版：URL 解码 sessionData（旧版本可能保存了 %2C 等编码字符）
             if self.config['sessionData'] and '%' in self.config['sessionData']:
                 from urllib.parse import unquote
@@ -357,6 +359,7 @@ class MainWindow(QMainWindow):
                 'showStartLive': True,
                 'checkUpdate': True,
                 'sessionData': '',
+                'loginUserInfo': {},
             }
         self.dumpConfig = DumpConfig(self.config)
 
@@ -604,6 +607,9 @@ class MainWindow(QMainWindow):
 
         self.loginMenu = self.menuBar().addMenu('B站账号')
         self.loginAction = QAction('扫码登录', self, triggered=self.openLoginPage)
+        cached_uname = self.config.get('loginUserInfo', {}).get('uname', '')
+        if self.config.get('sessionData') and cached_uname:
+            self.loginAction.setText(f'账号管理 ({cached_uname})')
         self.loginMenu.addAction(self.loginAction)
 
         # 鼠标和计时器
@@ -992,6 +998,8 @@ class MainWindow(QMainWindow):
                             + ''.join(traceback.format_stack()))
         self.sessionData = sessionData
         self.config['sessionData'] = sessionData
+        if not sessionData:
+            self.config['loginUserInfo'] = {}
         for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
             videoWidget.sessionData = sessionData
         self.liverPanel.setSessionData(sessionData)
@@ -1018,6 +1026,13 @@ class MainWindow(QMainWindow):
         """登录成功后收到用户信息，更新标题并自动获取关注列表"""
         uname = info.get('uname', '')
         uid = info.get('uid', 0)
+        self.config['loginUserInfo'] = {
+            'uid': uid,
+            'uname': uname,
+            'face': info.get('face', ''),
+            'level': info.get('level', 0),
+        }
+        self.dumpConfig.start()
         self.setWindowTitle(f'DD监控室{self.versionNumber} - {uname}')
         if hasattr(self, 'loginAction'):
             self.loginAction.setText(f'账号管理 ({uname})')

@@ -62,7 +62,34 @@ blivedm/             # B站弹幕库 v1.1.5
 
 ## 打包
 
-在 `scripts` 文件夹下有各平台的打包脚本，需要在仓库根目录运行。
+### Windows
+
+- `2.26` 首发 Release 仅提供 `Windows x64`
+- 默认读取仓库根目录的 `libmpv-2.dll`
+- 也可以通过环境变量 `MPV_DLL` 指定当前架构对应的 DLL 路径
+- 打包命令：
+
+```bat
+scripts\build_win.bat x64
+```
+
+- 可选环境变量：
+
+```bat
+set APP_VERSION=2.26
+set MPV_DLL=D:\path\to\libmpv-2.dll
+set MPV_RUNTIME_DIR=D:\path\to\mpv-runtime
+```
+
+- 打包完成后会在 `release/` 目录生成可直接分发的 zip：
+
+```text
+DDMonitor-2.26-windows-x64.zip
+```
+
+### 其他平台
+
+在 `scripts` 文件夹下保留了其他平台的历史打包脚本，如需继续使用，请在仓库根目录执行。
 
 ## 致谢
 
