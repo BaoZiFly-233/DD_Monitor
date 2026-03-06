@@ -35,7 +35,7 @@ jobs:
             RELEASE_TAG='${{ inputs.release_tag }}'
             RELEASE_NAME='${{ inputs.release_name }}'
           else
-            RELEASE_TAG='${GITHUB_REF_NAME}'
+            RELEASE_TAG="${GITHUB_REF_NAME}"
             APP_VERSION="${RELEASE_TAG#v}"
             RELEASE_NAME="DDMonitor ${APP_VERSION} 复活版"
           fi
