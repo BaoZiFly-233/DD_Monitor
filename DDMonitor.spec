@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
+a_bilibili_hiddenimports = collect_submodules('bilibili_api.clients')
 
 # PySide6 exclude modules
 pyqt_exc = [
@@ -42,14 +44,15 @@ a = Analysis(['DD监控室.py'],
              binaries=[],
              datas=[
                 ('utils/ascii.txt', '.'),
+                ('utils/danmu.png', 'utils'),
                 ('utils/help.html', '.'),
                 ('utils/qdark.qss', 'utils'),
                 ('utils/splash.jpg', 'utils'),
                 ('utils/vtb.csv', 'utils'),
                 ('scripts/run.bat', '.'),
              ],
-             hiddenimports=[],
-             hookspath=['hooks'],
+             hiddenimports=a_bilibili_hiddenimports,
+             hookspath=[],
              runtime_hooks=[],
              excludes=pyqt_exc,
              win_no_prefer_redirects=False,
