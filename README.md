@@ -7,7 +7,7 @@
 - 16 个嵌入式播放窗口 + 16 个悬浮窗口，最多同时监控 32 个直播间
 - MPV 播放器内核，硬件加速解码，低 CPU 占用
 - 实时弹幕接收与显示（WebSocket 连接，Signal 推送）
-- ASS 字幕轨道滚动弹幕渲染（libass 原生帧率插值）
+- MPV `osd-overlay` 滚动弹幕渲染（无临时 ASS 文件、无 `sub-reload` 闪烁）
 - 扫码登录 B站账号，自动获取关注列表
 - 直播间卡片面板，开播状态实时刷新
 - 画质选择（原画/蓝光/超清/流畅/仅音频）
@@ -53,7 +53,7 @@ python DD监控室.py
 DD监控室.py          # 主窗口入口
 VideoWidget_mpv.py   # MPV 播放器窗口
 remote.py            # 弹幕接收线程（blivedm WebSocket）
-danmu.py             # 弹幕显示 + ASS 滚动弹幕渲染器
+danmu.py             # 弹幕显示 + MPV osd-overlay 滚动弹幕渲染器
 LiverSelect.py       # 主播卡片面板 + 关注列表
 login.py             # 扫码登录模块
 http_utils.py        # 共享 HTTP 连接池
@@ -64,9 +64,11 @@ blivedm/             # B站弹幕库 v1.1.5
 
 ### Windows
 
-- `2.26` 首发 Release 仅提供 `Windows x64`
+- `3.50魔改版` Release 仅提供 `Windows x64`
 - 默认读取仓库根目录的 `libmpv-2.dll`
 - 也可以通过环境变量 `MPV_DLL` 指定当前架构对应的 DLL 路径
+- Windows 打包会自动剔除 `utils/splash.psd`、`utils/entitlements.plist` 与本地配置备份，只保留运行时必需资源
+- 当前发布包最大单文件仍为 `libmpv-2.dll`，本轮仅完成确定性清理，不做高风险 DLL 替换
 - 打包命令：
 
 ```bat
@@ -76,7 +78,7 @@ scripts\build_win.bat x64
 - 可选环境变量：
 
 ```bat
-set APP_VERSION=2.26
+set APP_VERSION=3.50
 set MPV_DLL=D:\path\to\libmpv-2.dll
 set MPV_RUNTIME_DIR=D:\path\to\mpv-runtime
 ```
@@ -84,7 +86,7 @@ set MPV_RUNTIME_DIR=D:\path\to\mpv-runtime
 - 打包完成后会在 `release/` 目录生成可直接分发的 zip：
 
 ```text
-DDMonitor-2.26-windows-x64.zip
+DDMonitor-3.50-windows-x64.zip
 ```
 
 ### 其他平台

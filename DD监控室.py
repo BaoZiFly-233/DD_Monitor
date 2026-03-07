@@ -181,7 +181,7 @@ class Version(QWidget):
         self.resize(350, 150)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
-        layout.addWidget(QLabel(f'DD监控室 v{version} 复活版 (2026/03/06)'), 0, 0, 1, 2)
+        layout.addWidget(QLabel(f'DD监控室 v{version} (2026/03/07)'), 0, 0, 1, 2)
         layout.addWidget(QLabel('by 神君Channel'), 1, 0, 1, 2)
         layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 2, 0, 1, 2)
         releases_url = QLabel('')
@@ -265,8 +265,9 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 2.26
-        self.setWindowTitle(f'DD监控室{self.versionNumber}')
+        self.versionNumber = 3.50
+        self.versionDisplay = '3.50魔改版'
+        self.setWindowTitle(f'DD监控室{self.versionDisplay}')
         self.resize(1600, 900)
         self.maximumToken = True
         self.soloToken = False  # 记录静音除鼠标悬停窗口以外的其他所有窗口的标志位 True就是恢复所有房间声音
@@ -753,7 +754,7 @@ class MainWindow(QMainWindow):
 
     def _getVersionWindow(self):
         if self.version is None:
-            self.version = Version(self.versionNumber)
+            self.version = Version(self.versionDisplay)
         return self.version
 
     def _getHotKeyWindow(self):
@@ -1215,7 +1216,7 @@ class MainWindow(QMainWindow):
 
     def updateLogin(self, login):
         if not login:
-            self.setWindowTitle(f'DD监控室{self.versionNumber} - 未登录')
+            self.setWindowTitle(f'DD监控室{self.versionDisplay} - 未登录')
             if hasattr(self, 'loginAction'):
                 self.loginAction.setText('扫码登录')
             # 登出：清除 sessionData
@@ -1230,7 +1231,7 @@ class MainWindow(QMainWindow):
                         videoWidget.credential = {}
             self.dumpConfig.start()
         else:
-            self.setWindowTitle(f'DD监控室{self.versionNumber} - 已登录')
+            self.setWindowTitle(f'DD监控室{self.versionDisplay} - 已登录')
             if hasattr(self, 'loginAction'):
                 self.loginAction.setText('账号管理')
 
@@ -1245,7 +1246,7 @@ class MainWindow(QMainWindow):
             'level': info.get('level', 0),
         }
         self.dumpConfig.start()
-        self.setWindowTitle(f'DD监控室{self.versionNumber} - {uname}')
+        self.setWindowTitle(f'DD监控室{self.versionDisplay} - {uname}')
         if hasattr(self, 'loginAction'):
             self.loginAction.setText(f'账号管理 ({uname})')
         # 确保 liverPanel 已持有 sessionData（启动恢复 session 时不会触发 updateSessionData）
