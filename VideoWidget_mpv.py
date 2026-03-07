@@ -1,7 +1,7 @@
 """
 DD监控室视频播放窗口 - MPV 内核版本
 使用 python-mpv 库直接播放直播流 URL，无需本地 FLV 缓存下载
-相比 VLC 版本：启动更快，CPU 占用更低，支持更多格式
+???????????CPU ???????????
 """
 import json
 import os
@@ -10,15 +10,22 @@ import time
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
+from bilibili_api import live, sync
+from bili_credential import build_credential, normalize_credential_data
 from CommonWidget import Slider
-from remote import remoteThread
-from danmu import TextBrowser, MpvDanmakuRenderer
+from remote import DanmakuEvent, remoteThread
+from danmu import TextBrowser
+from danmaku_renderer import DanmakuRenderer
+from mpv_gl_widget import MpvGLWidget
 import logging
 import warnings
 from datetime import datetime
+from urllib.parse import urlsplit
 import http_utils
 
 _MPV_DLL_HANDLES = []
+_MPV_MODULE = None
+_MPV_IMPORT_ATTEMPTED = False
 
 
 def prepare_mpv_runtime():
@@ -59,16 +66,33 @@ def prepare_mpv_runtime():
     return candidate_dirs
 
 
-prepare_mpv_runtime()
+def load_mpv_module():
+    global _MPV_MODULE, _MPV_IMPORT_ATTEMPTED
+    if _MPV_MODULE is not None:
+        return _MPV_MODULE
+    if _MPV_IMPORT_ATTEMPTED:
+        return None
 
-try:
-    import mpv
-    HAS_MPV = True
-except (ImportError, OSError):
-    HAS_MPV = False
-    logging.warning('python-mpv 未安装或 libmpv 未找到')
+    _MPV_IMPORT_ATTEMPTED = True
+    prepare_mpv_runtime()
+    try:
+        import mpv as mpv_module
+    except (ImportError, OSError):
+        logging.warning('python-mpv 未安装或 libmpv 未找到')
+        return None
+
+    _MPV_MODULE = mpv_module
+    return _MPV_MODULE
 
 header = http_utils.DEFAULT_HEADERS
+
+
+def _is_valid_stream_url(url):
+    value = str(url or '').strip()
+    if not value:
+        return False
+    parsed = urlsplit(value)
+    return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
 
 
 class PushButton(QPushButton):
@@ -88,7 +112,7 @@ class GetStreamURL(QThread):
     """获取直播流地址
     MPV 版本不再下载 FLV 到本地，只获取流地址后直接交给 MPV 播放
     """
-    streamUrl = Signal(str)
+    streamUrl = Signal(object)
     downloadError = Signal()
 
     def __init__(self, sessionData=''):
@@ -96,60 +120,51 @@ class GetStreamURL(QThread):
         self.roomID = '0'
         self.quality = 250
         self.sessionData = sessionData if sessionData else ''
+        self.credential = normalize_credential_data(sessdata=self.sessionData)
         # 兼容性属性桩（DD监控室.py closeEvent 中会访问）
         self.recordToken = False
 
-    def setConfig(self, roomID, quality, sessionData):
+    def setConfig(self, roomID, quality, sessionData, credential=None):
         self.roomID = roomID
         self.quality = quality
         self.sessionData = sessionData if sessionData else ''
+        self.credential = normalize_credential_data(credential, sessdata=self.sessionData)
 
     def getStreamUrl(self):
-        url = "https://api.live.bilibili.com/xlive/app-room/v2/index/getRoomPlayInfo"
         onlyAudio = self.quality < 0
-        params = {
-            "appkey": "iVGUTjsxvpLeuDCf",
-            "build": 6250300,
-            "c_locale": "zh_CN",
-            "channel": "bili",
-            "codec": 0,
-            "device": "android",
-            "device_name": "MuMu",
-            "dolby": 1,
-            "format": "0,2",
-            "free_type": 0,
-            "http": 1,
-            "mask": 0,
-            "mobi_app": "android",
-            "network": "wifi",
-            "no_playurl": 0,
-            "only_audio": int(onlyAudio),
-            "only_video": 0,
-            "platform": "android",
-            "play_type": 0,
-            "protocol": "0,1",
-            "qn": (onlyAudio and 10000) or (not onlyAudio and self.quality),
-            "room_id": self.roomID,
-            "s_locale": "zh_CN",
-            "statistics": '{"appId":1,"platform":3,"version":"6.25.0","abtest":""}',
-            "ts": int(time.time())
+        qn_mapping = {
+            10000: live.ScreenResolution.ORIGINAL,
+            400: live.ScreenResolution.BLU_RAY,
+            250: live.ScreenResolution.ULTRA_HD,
+            150: live.ScreenResolution.HD,
+            80: live.ScreenResolution.FLUENCY,
         }
-        cookies = {}
-        if self.sessionData:
-            cookies['SESSDATA'] = self.sessionData
-
-        r = http_utils.get(url, params=params, headers=header, cookies=cookies)
-        j = r.json()
-        baseUrl = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['base_url']
-        extra = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['extra']
-        host = j['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]['url_info'][0]['host']
-        streamUrl = host + baseUrl + extra
-        return streamUrl
-
+        room = live.LiveRoom(int(self.roomID), credential=build_credential(self.credential, sessdata=self.sessionData))
+        qn = qn_mapping.get(abs(self.quality), live.ScreenResolution.ORIGINAL)
+        play_info = sync(room.get_room_play_info_v2(live_qn=qn))
+        stream = play_info['playurl_info']['playurl']['stream'][0]
+        format_info = stream['format'][0]
+        codec_info = format_info['codec'][0]
+        media_info = codec_info['audio_codecs'][0] if onlyAudio and codec_info.get('audio_codecs') else codec_info
+        base_url = media_info['base_url']
+        stream_urls = []
+        invalid_count = 0
+        for url_info in media_info.get('url_info', []):
+            stream_url = f"{url_info.get('host', '')}{base_url}{url_info.get('extra', '')}"
+            if _is_valid_stream_url(stream_url) and stream_url not in stream_urls:
+                stream_urls.append(stream_url)
+            else:
+                invalid_count += 1
+        if not stream_urls:
+            raise RuntimeError('未获取到可用直播流地址')
+        if invalid_count > 0:
+            logging.warning(f'房间 {self.roomID} 过滤掉 {invalid_count} 条无效流地址')
+        self.streamUrlCandidates = stream_urls
+        return stream_urls
     def run(self):
         try:
-            url = self.getStreamUrl()
-            self.streamUrl.emit(url)
+            urls = self.getStreamUrl()
+            self.streamUrl.emit(urls)
         except Exception as e:
             logging.error(str(e))
             logging.exception('直播地址获取失败')
@@ -212,31 +227,19 @@ class FetchRoomInfo(QThread):
             })
 
 
-class VideoFrame(QFrame):
-    """视频播放容器"""
-    rightClicked = Signal(QEvent)
-    leftClicked = Signal()
-    doubleClicked = Signal()
+class VideoFrame(MpvGLWidget):
+    """视频播放容器：MPV render API + QOpenGLWidget。"""
 
-    def __init__(self):
-        super(VideoFrame, self).__init__()
+    def __init__(self, danmaku_renderer, parent=None):
+        super(VideoFrame, self).__init__(danmaku_renderer=danmaku_renderer, parent=parent)
         self.setAcceptDrops(True)
-
-    def mousePressEvent(self, QMouseEvent):
-        if QMouseEvent.button() == Qt.RightButton:
-            self.rightClicked.emit(QMouseEvent)
-        elif QMouseEvent.button() == Qt.LeftButton:
-            self.leftClicked.emit()
-
-    def mouseDoubleClickEvent(self, QMouseEvent):
-        self.doubleClicked.emit()
 
 
 
 class VideoWidget(QFrame):
     """
     视频播放窗口 - MPV 内核版本
-    公共接口与 VideoWidget_vlc.py 保持一致，确保 DD监控室.py 可无缝切换
+    ?????????????????? DD???.py ?????
     """
     mutedChanged = Signal(list)
     volumeChanged = Signal(list)
@@ -254,8 +257,9 @@ class VideoWidget(QFrame):
     closePopWindow = Signal(list)
 
     def __init__(self, id, volume, cacheFolder, top=False, title='', resize=[],
-                 textSetting=[True, 20, 2, 6, 0, '【 [ {', 10, 0], maxCacheSize=2048000,
-                 saveCachePath='', startWithDanmu=True, hardwareDecode=True, sessionData=''):
+                 textSetting=[True, 20, 2, 6, 0, '【 [ {', 10, 0, True], maxCacheSize=2048000,
+                 saveCachePath='', startWithDanmu=True, hardwareDecode=True, sessionData='', credential=None,
+                 rollingSetting=None, danmakuBaseViewport=None):
         super(VideoWidget, self).__init__()
         self.setAcceptDrops(True)
         self.installEventFilter(self)
@@ -276,6 +280,7 @@ class VideoWidget(QFrame):
         self.muted = False
         self.hardwareDecode = hardwareDecode
         self.sessionData = sessionData if sessionData else ''
+        self.credential = normalize_credential_data(credential, sessdata=self.sessionData)
         self.leftButtonPress = False
         self.rightButtonPress = False
         self.fullScreen = False
@@ -299,12 +304,32 @@ class VideoWidget(QFrame):
         else:
             self.setStyleSheet(
                 '#video{border-width:1px;border-style:solid;border-color:gray}')
-        self.textSetting = textSetting
+        self.textSetting = list(textSetting)
+        default_text_setting = [True, 20, 2, 6, 0, '【 [ {', 10, 0, True]
+        while len(self.textSetting) < 8:
+            self.textSetting.append(default_text_setting[len(self.textSetting)])
+        if len(self.textSetting) < 9:
+            self.textSetting.append(bool(self.textSetting[0]))
         self.horiPercent = [0.1, 0.2, 0.3, 0.4, 0.5,
                             0.6, 0.7, 0.8, 0.9, 1.0][self.textSetting[2]]
         self.vertPercent = [0.1, 0.2, 0.3, 0.4, 0.5,
                             0.6, 0.7, 0.8, 0.9, 1.0][self.textSetting[3]]
         self.filters = textSetting[5].split(' ')
+        default_rolling_setting = {
+            'font_family': 'Microsoft YaHei',
+            'opacity': self.textSetting[1],
+            'display_area': self.textSetting[3],
+            'font_size': self.textSetting[6],
+            'speed_percent': 85,
+            'stroke_width': 30,
+            'shadow_enabled': False,
+            'shadow_strength': 35,
+            'top_enabled': True,
+            'bottom_enabled': True,
+        }
+        self.rollingSetting = rollingSetting if rollingSetting is not None else default_rolling_setting
+        for key, value in default_rolling_setting.items():
+            self.rollingSetting.setdefault(key, value)
         self.opacity = 100
         if top:
             self.setWindowFlag(Qt.WindowStaysOnTopHint)
@@ -318,62 +343,28 @@ class VideoWidget(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # ---- 弹幕机 ----
-        self.textBrowser = TextBrowser(self)
-        self.setDanmuOpacity(self.textSetting[1])
-        self.textBrowser.optionWidget.opacitySlider.setValue(
-            self.textSetting[1])
-        self.textBrowser.optionWidget.opacitySlider.value.connect(
-            self.setDanmuOpacity)
-        self.setHorizontalPercent(self.textSetting[2])
-        self.textBrowser.optionWidget.horizontalCombobox.setCurrentIndex(
-            self.textSetting[2])
-        self.textBrowser.optionWidget.horizontalCombobox.currentIndexChanged.connect(
-            self.setHorizontalPercent)
-        self.setVerticalPercent(self.textSetting[3])
-        self.textBrowser.optionWidget.verticalCombobox.setCurrentIndex(
-            self.textSetting[3])
-        self.textBrowser.optionWidget.verticalCombobox.currentIndexChanged.connect(
-            self.setVerticalPercent)
-        self.setTranslateBrowser(self.textSetting[4])
-        self.textBrowser.optionWidget.translateCombobox.setCurrentIndex(
-            self.textSetting[4])
-        self.textBrowser.optionWidget.translateCombobox.currentIndexChanged.connect(
-            self.setTranslateBrowser)
-        self.setTranslateFilter(self.textSetting[5])
-        self.textBrowser.optionWidget.translateFitler.setText(
-            self.textSetting[5])
-        self.textBrowser.optionWidget.translateFitler.textChanged.connect(
-            self.setTranslateFilter)
-        self.setFontSize(self.textSetting[6])
-        self.textBrowser.optionWidget.fontSizeCombox.setCurrentIndex(
-            self.textSetting[6])
-        self.textBrowser.optionWidget.fontSizeCombox.currentIndexChanged.connect(
-            self.setFontSize)
-        self.setMsgsBrowser(self.textSetting[7])
-        self.textBrowser.optionWidget.showEnterRoom.setCurrentIndex(
-            self.textSetting[7])
-        self.textBrowser.optionWidget.showEnterRoom.currentIndexChanged.connect(
-            self.setMsgsBrowser)
-
-        self.textBrowser.closeSignal.connect(self.closeDanmu)
-        self.textBrowser.moveSignal.connect(self.moveTextBrowser)
+        self.textBrowser = None
         if not self.startWithDanmu:
             self.textSetting[0] = False
-            self.textBrowser.hide()
+            self.textSetting[8] = False
 
         self.textPosDelta = QPoint(0, 0)
         self.deltaX = 0
         self.deltaY = 0
+        self._danmakuBaseViewport = QSize(danmakuBaseViewport) if danmakuBaseViewport is not None else QSize()
+        self._minOverlayFontSize = 18
+        self._minBrowserFontSize = 10
+
+        # ---- OpenGL 滚动弹幕渲染器 ----
+        self.scrollingDanmaku = DanmakuRenderer()
 
         # ---- 播放器布局 ----
-        self.videoFrame = VideoFrame()
+        self.videoFrame = VideoFrame(self.scrollingDanmaku)
+        self.videoFrame.setPlaybackActive(False)
         self.videoFrame.rightClicked.connect(self.rightMouseClicked)
         self.videoFrame.leftClicked.connect(self.leftMouseClicked)
         self.videoFrame.doubleClicked.connect(self.doubleClick)
         layout.addWidget(self.videoFrame, 0, 0, 12, 12)
-
-        # ---- MPV OSD 滚动弹幕渲染器 ----
-        self.scrollingDanmaku = MpvDanmakuRenderer()
 
         # 直播间标题
         self.topLabel = QLabel()
@@ -393,6 +384,10 @@ class VideoWidget(QFrame):
         frameLayout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.frame, 11, 0, 1, 12)
         self.frame.hide()
+        self._controls_keep_until = 0.0
+        self._controls_hide_timer = QTimer(self)
+        self._controls_hide_timer.setSingleShot(True)
+        self._controls_hide_timer.timeout.connect(self._hideControlsIfNeeded)
 
         self.titleLabel = QLabel()
         self.titleLabel.setMaximumWidth(135)
@@ -420,15 +415,19 @@ class VideoWidget(QFrame):
         self.slider.value.connect(self.setVolume)
         frameLayout.addWidget(self.slider)
         self.danmuButton = PushButton(text='弹')
-        self.danmuButton.clicked.connect(self.showDanmu)
+        self.danmuButton.clicked.connect(self.cycleDanmuDisplayMode)
         frameLayout.addWidget(self.danmuButton)
         self.stop = PushButton(self.style().standardIcon(
             QStyle.SP_DialogCancelButton))
         self.stop.clicked.connect(self._mediaStop)
         frameLayout.addWidget(self.stop)
+        for control_button in (self.play, self.reload, self.volumeButton, self.danmuButton, self.stop):
+            control_button.pressed.connect(self._onControlInteracted)
+            control_button.clicked.connect(self._onControlInteracted)
 
         # ---- IO 线程 ----
         self.getMediaURL = GetStreamURL(self.sessionData)
+        self.getMediaURL.credential = self.credential
         self.getMediaURL.streamUrl.connect(self.setMedia)
         self.getMediaURL.downloadError.connect(self.mediaReload)
 
@@ -457,33 +456,295 @@ class VideoWidget(QFrame):
         self.refreshTimeStampTimer.timeout.connect(self.refreshTimeStamp)
         self.refreshTimeStampTimer.setInterval(1000)
 
+    def ensureTextBrowser(self):
+        if self.textBrowser is not None:
+            return self.textBrowser
+
+        self.textBrowser = TextBrowser(self)
+        self.textBrowser.closeSignal.connect(self.closeDanmu)
+        self.textBrowser.moveSignal.connect(self.moveTextBrowser)
+
+        option_widget = self.textBrowser.optionWidget
+        option_widget.opacitySlider.setValue(self.textSetting[1])
+        option_widget.horizontalCombobox.setCurrentIndex(self.textSetting[2])
+        option_widget.verticalCombobox.setCurrentIndex(self.textSetting[3])
+        option_widget.translateCombobox.setCurrentIndex(self.textSetting[4])
+        option_widget.translateFitler.setText(self.textSetting[5])
+        option_widget.fontSizeCombox.setCurrentIndex(self.textSetting[6])
+        option_widget.showEnterRoom.setCurrentIndex(self.textSetting[7])
+
+        option_widget.opacitySlider.value.connect(self.setDanmuOpacity)
+        option_widget.horizontalCombobox.currentIndexChanged.connect(self.setHorizontalPercent)
+        option_widget.verticalCombobox.currentIndexChanged.connect(self.setVerticalPercent)
+        option_widget.translateCombobox.currentIndexChanged.connect(self.setTranslateBrowser)
+        option_widget.translateFitler.textChanged.connect(self.setTranslateFilter)
+        option_widget.fontSizeCombox.currentIndexChanged.connect(self.setFontSize)
+        option_widget.showEnterRoom.currentIndexChanged.connect(self.setMsgsBrowser)
+
+        self.applyDanmuSettings()
+        if not self.textSetting[0]:
+            self.textBrowser.hide()
+        self.moveTextBrowser()
+        return self.textBrowser
+
+    def applyDanmuSettings(self):
+        browser_opacity = max(self.textSetting[1], 7)
+        rolling_opacity = max(int(self.rollingSetting.get('opacity', browser_opacity)), 7)
+        browser_font_size, overlay_font_size = self._resolveDanmakuFontSizes()
+        rolling_enabled = self.isRollingDanmuEnabled()
+        self.scrollingDanmaku.setEnabled(rolling_enabled)
+        self.scrollingDanmaku.setOpacity(rolling_opacity / 100.0)
+        self.scrollingDanmaku.setFontFamily(str(self.rollingSetting.get('font_family', 'Microsoft YaHei')))
+        self.scrollingDanmaku.setFontSize(overlay_font_size)
+        self.scrollingDanmaku.setDisplayArea(self._rollingDisplayRatio())
+        self.scrollingDanmaku.setDenseLevel(0)
+        self.scrollingDanmaku.setSpeedFactor(self._rollingSpeedFactor())
+        self.scrollingDanmaku.setStrokeWidth(self._rollingStrokeWidth())
+        self.scrollingDanmaku.setShadowEnabled(bool(self.rollingSetting.get('shadow_enabled', False)))
+        self.scrollingDanmaku.setShadowStrength(int(self.rollingSetting.get('shadow_strength', 35)))
+        self.scrollingDanmaku.setTopEnabled(bool(self.rollingSetting.get('top_enabled', True)))
+        self.scrollingDanmaku.setBottomEnabled(bool(self.rollingSetting.get('bottom_enabled', True)))
+        self.videoFrame.update()
+        self._updateDanmuButtonState()
+
+        if self.textBrowser is None:
+            return
+
+        color = str(hex(int(browser_opacity / 101 * 256)))[2:] + '000000'
+        self.textBrowser.textBrowser.setStyleSheet('background-color:#%s' % color)
+        self.textBrowser.transBrowser.setStyleSheet('background-color:#%s' % color)
+        self.textBrowser.msgsBrowser.setStyleSheet('background-color:#%s' % color)
+
+        self.textBrowser.textBrowser.setFont(QFont('Microsoft JhengHei', browser_font_size, QFont.Bold))
+        self.textBrowser.transBrowser.setFont(QFont('Microsoft JhengHei', browser_font_size, QFont.Bold))
+        self.textBrowser.msgsBrowser.setFont(QFont('Microsoft JhengHei', browser_font_size, QFont.Bold))
+
+        if self.textSetting[4] == 0:
+            self.textBrowser.textBrowser.show()
+            self.textBrowser.transBrowser.show()
+        elif self.textSetting[4] == 1:
+            self.textBrowser.transBrowser.hide()
+            self.textBrowser.textBrowser.show()
+        elif self.textSetting[4] == 2:
+            self.textBrowser.textBrowser.hide()
+            self.textBrowser.transBrowser.show()
+
+        if self.textSetting[7] < 3:
+            self.textBrowser.msgsBrowser.show()
+        else:
+            self.textBrowser.msgsBrowser.hide()
+
+        self.textBrowser.resize(self.width() * self.horiPercent, self.height() * self.vertPercent)
+        self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
+        self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
+        self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
+
+    def _rollingSpeedFactor(self):
+        return max(0.5, min(int(self.rollingSetting.get('speed_percent', 85)) / 100.0, 2.0))
+
+    def _rollingStrokeWidth(self):
+        return max(0.0, min(int(self.rollingSetting.get('stroke_width', 30)) / 10.0, 8.0))
+
+    def _resolveDanmakuFontSizes(self):
+        browser_base_size = int(self.textSetting[6]) + 5
+        rolling_base_size = int(self.rollingSetting.get('font_size', self.textSetting[6])) + 5
+        overlay_base_size = max(24, int(rolling_base_size * 2.2))
+        scale = self._resolveDanmakuScale()
+        browser_font_size = max(self._minBrowserFontSize, int(round(browser_base_size * scale)))
+        overlay_font_size = max(self._minOverlayFontSize, int(round(overlay_base_size * scale)))
+        browser_font_size = min(browser_font_size, browser_base_size)
+        overlay_font_size = min(overlay_font_size, overlay_base_size)
+        return browser_font_size, overlay_font_size
+
+    def _resolveDanmakuScale(self):
+        current_width = max(self.videoFrame.width(), 0)
+        current_height = max(self.videoFrame.height(), 0)
+        if current_width <= 0 or current_height <= 0:
+            return 1.0
+
+        if self._danmakuBaseViewport.isEmpty():
+            self._danmakuBaseViewport = QSize(current_width, current_height)
+            return 1.0
+
+        base_width = max(self._danmakuBaseViewport.width(), 1)
+        base_height = max(self._danmakuBaseViewport.height(), 1)
+        width_scale = current_width / base_width
+        height_scale = current_height / base_height
+        return min(width_scale, height_scale, 1.0)
+
+    def setDanmakuBaseViewport(self, viewport_size):
+        self._danmakuBaseViewport = QSize(viewport_size)
+        self.applyDanmuSettings()
+
+    def isBrowserDanmuEnabled(self):
+        return bool(self.textSetting[0])
+
+    def isRollingDanmuEnabled(self):
+        return bool(self.textSetting[8])
+
+    def _rollingDisplayRatio(self):
+        index = int(self.rollingSetting.get('display_area', self.textSetting[3]))
+        index = max(0, min(index, 9))
+        return [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][index]
+
+    def _currentDanmuDisplayMode(self):
+        browser_enabled = self.isBrowserDanmuEnabled()
+        rolling_enabled = self.isRollingDanmuEnabled()
+        if browser_enabled and rolling_enabled:
+            return 0
+        if browser_enabled:
+            return 1
+        return 2
+
+    def _updateDanmuButtonState(self):
+        state_text = ['弹幕：全开', '弹幕：仅弹幕机', '弹幕：全关'][self._currentDanmuDisplayMode()]
+        self.danmuButton.setToolTip(state_text)
+
+    def _applyDanmuDisplayState(self, browser_enabled, rolling_enabled, restart_thread=False):
+        self.textSetting[0] = bool(browser_enabled)
+        self.textSetting[8] = bool(rolling_enabled)
+        self.startWithDanmu = self.textSetting[0] or self.textSetting[8]
+
+        if self.textSetting[0]:
+            self.showTextBrowser()
+        else:
+            self.hideTextBrowser()
+
+        if not self.textSetting[8]:
+            self.scrollingDanmaku.reset()
+
+        if not self.startWithDanmu:
+            self.stopDanmu()
+        elif restart_thread and self.roomID != '0':
+            self._restartDanmu()
+
+        self.applyDanmuSettings()
+        self._onControlInteracted()
+        self.setDanmu.emit()
+
+    def cycleDanmuDisplayMode(self):
+        next_mode = (self._currentDanmuDisplayMode() + 1) % 3
+        if next_mode == 0:
+            self._applyDanmuDisplayState(True, True, restart_thread=True)
+        elif next_mode == 1:
+            self._applyDanmuDisplayState(True, False, restart_thread=True)
+        else:
+            self._applyDanmuDisplayState(False, False)
+
+    def setRollingDanmuOpacity(self, value, emit_signal=True):
+        self.rollingSetting['opacity'] = max(7, int(value))
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuDisplayArea(self, index, emit_signal=True):
+        self.rollingSetting['display_area'] = max(0, min(int(index), 9))
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuFontSize(self, index, emit_signal=True):
+        self.rollingSetting['font_size'] = max(0, min(int(index), 20))
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuFontFamily(self, family, emit_signal=True):
+        self.rollingSetting['font_family'] = str(family).strip() or 'Microsoft YaHei'
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuSpeed(self, value, emit_signal=True):
+        self.rollingSetting['speed_percent'] = max(50, min(int(value), 200))
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuStrokeWidth(self, value, emit_signal=True):
+        self.rollingSetting['stroke_width'] = max(0, min(int(value), 60))
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuShadowEnabled(self, enabled, emit_signal=True):
+        self.rollingSetting['shadow_enabled'] = bool(enabled)
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuShadowStrength(self, value, emit_signal=True):
+        self.rollingSetting['shadow_strength'] = max(0, min(int(value), 100))
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuTopEnabled(self, enabled, emit_signal=True):
+        self.rollingSetting['top_enabled'] = bool(enabled)
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def setRollingDanmuBottomEnabled(self, enabled, emit_signal=True):
+        self.rollingSetting['bottom_enabled'] = bool(enabled)
+        self.applyDanmuSettings()
+        if emit_signal:
+            self.setDanmu.emit()
+
+    def showTextBrowser(self):
+        if not self.isBrowserDanmuEnabled():
+            return
+        self.ensureTextBrowser().show()
+
+    def hideTextBrowser(self):
+        if self.textBrowser is not None:
+            self.textBrowser.hide()
+
+    def applyCredentialContext(self, sessionData=None, credential=None):
+        """统一同步播放器、取流线程和弹幕线程的登录态。"""
+        if sessionData is not None:
+            self.sessionData = sessionData if sessionData else ''
+        base_credential = self.credential if credential is None else credential
+        self.credential = normalize_credential_data(base_credential, sessdata=self.sessionData)
+        self.getMediaURL.sessionData = self.sessionData
+        self.getMediaURL.credential = self.credential
+        self.danmu.setSessionData(self.sessionData)
+
     # ==== MPV 播放器管理 ====
 
     def _init_mpv(self):
         """延迟初始化 MPV 播放器 - 仅在需要播放时创建"""
         if self._mpv is not None:
             return
-        if not HAS_MPV:
+        mpv_module = load_mpv_module()
+        if mpv_module is None:
             logging.error('无法初始化 MPV: python-mpv 未安装或 libmpv 未找到')
             return
         try:
-            wid = str(int(self.videoFrame.winId()))
-            self._mpv = mpv.MPV(
-                wid=wid,
+            hwdec_mode = 'auto-copy' if self.hardwareDecode else 'no'
+            if sys.platform.startswith('win') and hwdec_mode != 'no':
+                logging.warning('%s MPV OpenGL 渲染路径暂时禁用硬件解码以规避花屏', self.name_str)
+                hwdec_mode = 'no'
+            self._mpv = mpv_module.MPV(
+                vo='libmpv',
                 input_cursor='no',
                 input_default_bindings='no',
                 osd_level=0,
                 keep_open='yes',
                 idle='yes',
-                hwdec='auto' if self.hardwareDecode else 'no',
+                osc='no',
+                ytdl=False,
+                http_header_fields=f"User-Agent: {header['User-Agent']},Referer: https://live.bilibili.com/",
+                hwdec=hwdec_mode,
+                gpu_hwdec_interop='no',
                 volume=self.volume,
                 cache='yes',
                 demuxer_max_bytes='50MiB',
                 demuxer_max_back_bytes='20MiB',
             )
             logging.info(f'{self.name_str} MPV 实例已创建')
-            # 绑定弹幕渲染器到 MPV
-            self.scrollingDanmaku.setMpv(self._mpv)
+            self.videoFrame.setPlayer(self._mpv)
+            self.applyDanmuSettings()
         except Exception:
             logging.exception(f'{self.name_str} MPV 初始化失败')
             self._mpv = None
@@ -526,6 +787,8 @@ class VideoWidget(QFrame):
             try:
                 idle = self._mpv.core_idle
                 if idle:
+                    if self._tryPlayNextStreamCandidate():
+                        return
                     self.retryTimes += 1
                     if self.retryTimes > 10:
                         self.mediaReload()
@@ -543,9 +806,36 @@ class VideoWidget(QFrame):
             m, s = divmod(m, 60)
             self.timestampLabel.setText('%01d:%02d:%02d' % (h, m, s))
 
+    def _tryPlayNextStreamCandidate(self):
+        if not self._mpv or self._stream_candidate_index + 1 >= len(self._stream_candidates):
+            return False
+        while self._stream_candidate_index + 1 < len(self._stream_candidates):
+            self._stream_candidate_index += 1
+            next_url = self._stream_candidates[self._stream_candidate_index]
+            if not _is_valid_stream_url(next_url):
+                logging.warning(f'{self.name_str} 跳过无效流地址: {next_url}')
+                continue
+            try:
+                self._stream_url = next_url
+                self.cacheName = next_url
+                self._mpv.play(next_url)
+                self._applyVolume()
+                self.retryTimes = 0
+                self.videoFrame.setPlaybackActive(True)
+                if self._stream_candidate_index > 0:
+                    logging.warning(f'{self.name_str} ???????? #{self._stream_candidate_index + 1}')
+                return True
+            except Exception:
+                logging.exception(f'{self.name_str} ?????????')
+        self.videoFrame.setPlaybackActive(False)
+        return False
+
     # ==== 弹幕机设置 ====
 
     def initTextPos(self):
+        if self.textBrowser is None:
+            self.moveTimer.stop()
+            return
         videoPos = self.mapToGlobal(self.videoFrame.pos())
         if self.textBrowser.pos() != videoPos:
             self.textBrowser.move(videoPos)
@@ -556,61 +846,31 @@ class VideoWidget(QFrame):
         if value < 7:
             value = 7
         self.textSetting[1] = value
-        value = int(value / 101 * 256)
-        color = str(hex(value))[2:] + '000000'
-        self.textBrowser.textBrowser.setStyleSheet(
-            'background-color:#%s' % color)
-        self.textBrowser.transBrowser.setStyleSheet(
-            'background-color:#%s' % color)
-        self.textBrowser.msgsBrowser.setStyleSheet(
-            'background-color:#%s' % color)
+        self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def setHorizontalPercent(self, index):
         self.textSetting[2] = index
         self.horiPercent = [0.1, 0.2, 0.3, 0.4, 0.5,
                             0.6, 0.7, 0.8, 0.9, 1.0][index]
-        width = self.width() * self.horiPercent
-        self.textBrowser.resize(width, self.textBrowser.height())
-        self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
+        self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def setVerticalPercent(self, index):
         self.textSetting[3] = index
         self.vertPercent = [0.1, 0.2, 0.3, 0.4, 0.5,
                             0.6, 0.7, 0.8, 0.9, 1.0][index]
-        self.textBrowser.resize(self.textBrowser.width(),
-                                self.height() * self.vertPercent)
-        self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
+        self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def setTranslateBrowser(self, index):
         self.textSetting[4] = index
-        if index == 0:
-            self.textBrowser.textBrowser.show()
-            self.textBrowser.transBrowser.show()
-        elif index == 1:
-            self.textBrowser.transBrowser.hide()
-            self.textBrowser.textBrowser.show()
-        elif index == 2:
-            self.textBrowser.textBrowser.hide()
-            self.textBrowser.transBrowser.show()
-        self.textBrowser.resize(
-            self.width() * self.horiPercent, self.height() * self.vertPercent)
+        self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def setMsgsBrowser(self, index):
         self.textSetting[7] = index
-        if index < 3:
-            self.textBrowser.msgsBrowser.show()
-        elif index == 3:
-            self.textBrowser.msgsBrowser.hide()
-        self.textBrowser.resize(
-            self.width() * self.horiPercent, self.height() * self.vertPercent)
+        self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def setTranslateFilter(self, filterWords):
@@ -620,38 +880,34 @@ class VideoWidget(QFrame):
 
     def setFontSize(self, index):
         self.textSetting[6] = index
-        self.textBrowser.textBrowser.setFont(
-            QFont('Microsoft JhengHei', index + 5, QFont.Bold))
-        self.textBrowser.transBrowser.setFont(
-            QFont('Microsoft JhengHei', index + 5, QFont.Bold))
-        self.textBrowser.msgsBrowser.setFont(
-            QFont('Microsoft JhengHei', index + 5, QFont.Bold))
+        self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def resizeEvent(self, QEvent):
         try:
             self.titleLabel.hide() if self.width() < 350 else self.titleLabel.show()
             self.play.hide() if self.width() < 300 else self.play.show()
-            self.danmuButton.hide() if self.width() < 250 else self.danmuButton.show()
+            self.danmuButton.show()
             self.slider.hide() if self.width() < 200 else self.slider.show()
-            width = self.width() * self.horiPercent
-            self.textBrowser.resize(width, self.height() * self.vertPercent)
-            self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-            self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-            self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
-            self.moveTextBrowser()
-            if not self.moveTimer.isActive():
-                self.moveTimer.start()
+            self.applyDanmuSettings()
+            if self.textBrowser is not None:
+                self.moveTextBrowser()
+                if not self.moveTimer.isActive():
+                    self.moveTimer.start()
         except Exception:
             pass
 
     def moveEvent(self, QMoveEvent):
+        if self.textBrowser is None:
+            return
         videoPos = self.mapToGlobal(self.videoFrame.pos())
         self.textBrowser.move(videoPos + self.textPosDelta)
         if not self.moveTimer.isActive():
             self.moveTimer.start()
 
     def moveTextBrowser(self, point=None):
+        if self.textBrowser is None:
+            return
         videoPos = self.mapToGlobal(self.videoFrame.pos())
         if point:
             danmuX, danmuY = point.x(), point.y()
@@ -678,15 +934,48 @@ class VideoWidget(QFrame):
         self.deltaX, self.deltaY = self.textPosDelta.x(
         ) / max(self.width(), 1), self.textPosDelta.y() / max(self.height(), 1)
 
-    def enterEvent(self, QEvent):
-        self.hoverToken = True
+    def _isCursorInsideSelf(self):
+        return self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+
+    def _showControls(self, keep_ms=0):
+        if keep_ms > 0:
+            self._controls_keep_until = max(
+                self._controls_keep_until, time.monotonic() + keep_ms / 1000.0
+            )
         self.topLabel.show()
         self.frame.show()
 
-    def leaveEvent(self, QEvent):
+    def _hideControlsIfNeeded(self):
+        if QApplication.mouseButtons() != Qt.NoButton:
+            self._controls_hide_timer.start(120)
+            return
+        if self._isCursorInsideSelf():
+            return
+        if time.monotonic() < self._controls_keep_until:
+            remaining_ms = max(120, int((self._controls_keep_until - time.monotonic()) * 1000))
+            self._controls_hide_timer.start(remaining_ms)
+            return
         self.hoverToken = False
         self.topLabel.hide()
         self.frame.hide()
+
+    def _onControlInteracted(self):
+        self.hoverToken = True
+        self._showControls(keep_ms=1800)
+        if self._controls_hide_timer.isActive():
+            self._controls_hide_timer.stop()
+
+    def enterEvent(self, QEvent):
+        self.hoverToken = True
+        self._showControls()
+        if self._controls_hide_timer.isActive():
+            self._controls_hide_timer.stop()
+
+    def leaveEvent(self, QEvent):
+        if self._isCursorInsideSelf():
+            return
+        self.hoverToken = False
+        self._controls_hide_timer.start(120)
 
     def doubleClick(self):
         if not self.top:
@@ -702,7 +991,7 @@ class VideoWidget(QFrame):
         else:
             mimeData.setText('exchange:%s:%s' % (self.id, self.roomID))
         drag.setMimeData(mimeData)
-        drag.exec_()
+        drag.exec()
 
     def dragEnterEvent(self, QDragEnterEvent):
         QDragEnterEvent.accept()
@@ -715,9 +1004,10 @@ class VideoWidget(QFrame):
                 self.roomID = text.split(':')[1]
                 self.addMedia.emit([self.id, self.roomID])
                 self.mediaReload()
-                self.textBrowser.textBrowser.clear()
-                self.textBrowser.transBrowser.clear()
-                self.textBrowser.msgsBrowser.clear()
+                if self.textBrowser is not None:
+                    self.textBrowser.textBrowser.clear()
+                    self.textBrowser.transBrowser.clear()
+                    self.textBrowser.msgsBrowser.clear()
             elif 'exchange' in text:
                 fromID, fromRoomID = text.split(':')[1:]
                 fromID = int(fromID)
@@ -766,7 +1056,7 @@ class VideoWidget(QFrame):
                 '退出全屏') if self.isFullScreen() else menu.addAction('全屏')
             exit = menu.addAction('退出')
 
-        action = menu.exec_(self.mapToGlobal(event.pos()))
+        action = menu.exec(self.mapToGlobal(event.pos()))
         if action == openBrowser:
             if self.roomID != '0':
                 QDesktopServices.openUrl(
@@ -813,7 +1103,7 @@ class VideoWidget(QFrame):
                 self.closePopWindow.emit([self.id, self.roomID])
                 self.hide()
                 self.mediaStop()
-                self.textBrowser.hide()
+                self.hideTextBrowser()
 
     def closeEvent(self, event):
         event.ignore()
@@ -821,7 +1111,7 @@ class VideoWidget(QFrame):
             self.closePopWindow.emit([self.id, self.roomID])
             self.hide()
             self.mediaStop()
-            self.textBrowser.hide()
+            self.hideTextBrowser()
 
     # ==== 音量控制 ====
 
@@ -842,23 +1132,13 @@ class VideoWidget(QFrame):
         self.volumeChanged.emit([self.id, value])
 
     def closeDanmu(self):
-        self.textSetting[0] = False
+        self._applyDanmuDisplayState(False, False)
 
     def stopDanmuMessage(self):
         self.stopDanmu()
 
     def showDanmu(self):
-        if self.textBrowser.isHidden():
-            self.textBrowser.show()
-            if not self.startWithDanmu:
-                self._restartDanmu()
-                self.textSetting[0] = True
-                self.startWithDanmu = True
-        else:
-            self.textBrowser.hide()
-            self.startWithDanmu = False
-        self.textSetting[0] = not self.textBrowser.isHidden()
-        self.setDanmu.emit()
+        self._applyDanmuDisplayState(True, True, restart_thread=True)
 
     # ==== 播放控制 ====
 
@@ -948,6 +1228,7 @@ class VideoWidget(QFrame):
         self.liveStartTime = 0
         self.timestampLabel.setText('0:00:00')
         self.playerRestart()
+        self.videoFrame.setPlaybackActive(False)
         self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         if deleteMedia:
             self.deleteMedia.emit(self.id)
@@ -955,6 +1236,7 @@ class VideoWidget(QFrame):
         self.checkPlaying.stop()
         self.stopDanmu()
         self.refreshTimeStampTimer.stop()
+        self.hideTextBrowser()
 
     def _safe_disconnect_danmu(self):
         """安全断开弹幕信号，抑制未连接时的 RuntimeWarning"""
@@ -969,12 +1251,14 @@ class VideoWidget(QFrame):
         self._safe_disconnect_danmu()
         self._danmuPendingRestart = False
         self.danmu.stop()
+        self.scrollingDanmaku.reset()
         # 非阻塞：不调用 wait()，线程收到 stop 信号后退出，
         # finished 信号会触发 _onDanmuFinished
 
     def _restartDanmu(self):
         """内部：请求重启弹幕线程（如果线程在运行则等 finished 信号）"""
         self.danmu.setRoomID(self.roomID)
+        self.danmu.setSessionData(self.sessionData)
         self._safe_disconnect_danmu()
         self.danmu.message.connect(self.playDanmu)
         if self.danmu.isRunning():
@@ -993,31 +1277,50 @@ class VideoWidget(QFrame):
         self._restartDanmu()
 
     def setMedia(self, url):
-        """播放直播流 - MPV 直接播放 URL，无需本地缓存"""
-        self._init_mpv()
-        self.retryTimes = 0
-        self._stream_url = url
-        self.cacheName = url  # 兼容性
-        self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        # 重置弹幕字幕轨道状态（切换媒体后需要重新 sub-add）
-        self.scrollingDanmaku.stop()
-        self.scrollingDanmaku._sub_loaded = False
+        """????? - MPV ???? URL???????"""
+        stream_candidates = url if isinstance(url, (list, tuple)) else [url]
+        self._stream_candidates = [
+            stream.strip()
+            for stream in stream_candidates
+            if isinstance(stream, str) and _is_valid_stream_url(stream.strip())
+        ]
+        self._stream_candidate_index = -1
+        if not self._stream_candidates:
+            logging.error(f'{self.name_str} 未获取到可播放的流地址')
+            self.videoFrame.setPlaybackActive(False)
+            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.checkPlaying.stop()
+            self.refreshTimeStampTimer.stop()
+            return
 
-        if self._mpv:
-            try:
-                self._mpv.play(url)
-                self._applyVolume()
-            except Exception:
-                logging.exception(f'{self.name_str} MPV 播放失败')
+        self._init_mpv()
+        if not self._mpv:
+            logging.error(f'{self.name_str} MPV ????????????')
+            self.videoFrame.setPlaybackActive(False)
+            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.checkPlaying.stop()
+            self.refreshTimeStampTimer.stop()
+            return
+
+        self.retryTimes = 0
+        self._stream_url = self._stream_candidates[0]
+        self.cacheName = self._stream_url
+        self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        self.scrollingDanmaku.reset()
+
+        if not self._tryPlayNextStreamCandidate():
+            self.videoFrame.setPlaybackActive(False)
+            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.checkPlaying.stop()
+            self.refreshTimeStampTimer.stop()
+            return
 
         self.checkPlaying.start(3000)
         self.refreshTimeStampTimer.start()
 
-        # 启动弹幕（非阻塞：通过 finished 信号处理重启）
         if self.startWithDanmu:
             self._restartDanmu()
-            self.textBrowser.show()
-
+            self.showTextBrowser()
     def copyCache(self, copyFile):
         """兼容保留"""
         pass
@@ -1035,12 +1338,15 @@ class VideoWidget(QFrame):
                 self._mpv.stop()
             except Exception:
                 pass
+        self.videoFrame.setPlaybackActive(False)
 
     def playerFree(self):
         """销毁 MPV 实例"""
         self.scrollingDanmaku.stop()
         self.scrollingDanmaku.cleanup_file()
+        self.videoFrame.setPlaybackActive(False)
         if self._mpv:
+            self.videoFrame.setPlayer(None)
             try:
                 self._mpv.terminate()
             except Exception:
@@ -1077,14 +1383,22 @@ class VideoWidget(QFrame):
                     datetime.strptime(live_time, "%Y-%m-%d %H:%M:%S").timetuple())
             except (ValueError, OSError):
                 self.liveStartTime = 0
+        else:
+            self.liveStartTime = 0
         if self.liveStatus != 1 and self.uname and not self.uname.startswith('（未开播）'):
             self.uname = '（未开播）' + self.uname
         self._updateTitleLabels()
         # 直播中则自动开始播放
         if self.liveStatus == 1 and self.roomID != '0':
-            self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData)
+            self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData, self.credential)
             if not self.getMediaURL.isRunning():
                 self.getMediaURL.start()
+        else:
+            self.videoFrame.setPlaybackActive(False)
+            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.checkPlaying.stop()
+            self.refreshTimeStampTimer.stop()
+            self.timestampLabel.setText('0:00:00')
 
     def _updateTitleLabels(self):
         """更新标题和标签文字"""
@@ -1092,28 +1406,68 @@ class VideoWidget(QFrame):
             ('    窗口%s  %s' % (self.id + 1, self.title))[:20])
         self.titleLabel.setText(self.uname)
 
+    @staticmethod
+    def _coerceDanmakuEvent(message):
+        if isinstance(message, DanmakuEvent):
+            return message
+        if isinstance(message, dict):
+            raw_kind = str(message.get('kind', 'danmaku'))
+            fallback_position = raw_kind if raw_kind in {'scroll', 'top', 'bottom'} else 'scroll'
+            position = str(message.get('position', message.get('dm_position', fallback_position)))
+            return DanmakuEvent(
+                kind=raw_kind,
+                text=message.get('text', ''),
+                uname=message.get('uname', ''),
+                color=message.get('color', '#FFFFFF'),
+                price=float(message.get('price', 0.0) or 0.0),
+                position=position,
+            )
+        return DanmakuEvent(kind='danmaku', text=str(message))
+
+    @staticmethod
+    def _normalizeDanmakuPosition(position):
+        normalized = str(position or 'scroll').strip().lower()
+        if normalized in {'top', 'bottom', 'scroll'}:
+            return normalized
+        return 'scroll'
+
+    def _isRollingPositionEnabled(self, position):
+        if position == 'top':
+            return bool(self.rollingSetting.get('top_enabled', True))
+        if position == 'bottom':
+            return bool(self.rollingSetting.get('bottom_enabled', True))
+        return True
+
     def playDanmu(self, message):
-        token = False
-        if message.startswith("## ") or message.startswith("** "):
+        event = self._coerceDanmakuEvent(message)
+        text = event.text
+        kind = event.kind
+        color = event.color
+        position = self._normalizeDanmakuPosition(getattr(event, 'position', 'scroll'))
+        text_browser = self.ensureTextBrowser() if self.isBrowserDanmuEnabled() else None
+
+        if kind in {'gift', 'guard', 'enter'}:
+            if text_browser is None:
+                return
             if self.textSetting[7] == 0:
-                self.textBrowser.msgsBrowser.append(message)
-            elif self.textSetting[7] == 1:
-                if message.startswith("** "):
-                    self.textBrowser.msgsBrowser.append(message)
-            elif self.textSetting[7] == 2:
-                if message.startswith("## "):
-                    self.textBrowser.msgsBrowser.append(message)
+                text_browser.msgsBrowser.append(text)
+            elif self.textSetting[7] == 1 and kind in {'gift', 'guard'}:
+                text_browser.msgsBrowser.append(text)
+            elif self.textSetting[7] == 2 and kind == 'enter':
+                text_browser.msgsBrowser.append(text)
             return
-        for symbol in self.filters:
-            if symbol in message:
-                self.textBrowser.transBrowser.append(message)
-                token = True
-                break
-        if not token:
-            self.textBrowser.textBrowser.append(message + '\n')
-            # 同时发送到滚动弹幕层
-            if hasattr(self, 'scrollingDanmaku') and self.scrollingDanmaku:
-                self.scrollingDanmaku.addDanmaku(message)
+
+        token = False
+        if text_browser is not None:
+            for symbol in self.filters:
+                if symbol and symbol in text:
+                    text_browser.transBrowser.append(text)
+                    token = True
+                    break
+        if not token and text_browser is not None:
+            text_browser.textBrowser.append(text + '\n')
+        if self.isRollingDanmuEnabled() and self._isRollingPositionEnabled(position) and hasattr(self, 'scrollingDanmaku') and self.scrollingDanmaku:
+            self.scrollingDanmaku.addDanmaku(text, color=color, kind=position, uname=event.uname)
 
     def keyPressEvent(self, QKeyEvent):
         if QKeyEvent.key() == Qt.Key_Escape:

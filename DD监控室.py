@@ -18,9 +18,11 @@ from PySide6.QtWidgets import * 	# QAction,QFileDialog
 from PySide6.QtGui import *		# QIcon,QPixmap
 from PySide6.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
-from VideoWidget_mpv import PushButton, Slider, VideoWidget, prepare_mpv_runtime
+from VideoWidget_mpv import PushButton, Slider, VideoWidget, load_mpv_module
 from LiverSelect import LiverPanel
-from danmu import TextOpation, ToolButton
+from bili_credential import normalize_credential_data, build_credential, credential_to_dict
+from bilibili_api import sync
+from danmu import GlobalDanmuOption
 from login import QRLoginWidget
 
 
@@ -30,6 +32,28 @@ application_path = ""
 
 def _translate(context, text, disambig):
     return QApplication.translate(context, text, disambig)
+
+
+class CredentialRefreshWorker(QThread):
+    refreshed = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, credential_data, sessionData):
+        super().__init__()
+        self.credential_data = normalize_credential_data(credential_data, sessdata=sessionData)
+        self.sessionData = sessionData
+
+    def run(self):
+        credential = build_credential(self.credential_data, sessdata=self.sessionData)
+        if credential is None:
+            return
+        try:
+            if sync(credential.check_refresh()):
+                sync(credential.refresh())
+                self.refreshed.emit(credential_to_dict(credential))
+        except Exception as e:
+            logging.exception('[LOGIN] ????????')
+            self.failed.emit(str(e))
 
 
 class ControlWidget(QWidget):
@@ -61,7 +85,7 @@ class ScrollArea(QScrollArea):
             addLiver = menu.addAction('添加直播间')
             menu.addSeparator()  # 添加分割线，防止误操作
             clearAll = menu.addAction('清空')
-            action = menu.exec_(self.mapToGlobal(QMouseEvent.pos()))
+            action = menu.exec(self.mapToGlobal(QMouseEvent.position().toPoint()))
             if action == addLiver:
                 self.addLiver.emit()
             elif action == clearAll:
@@ -285,7 +309,7 @@ class MainWindow(QMainWindow):
             while len(self.config['volume']) < 16:
                 self.config['volume'].append(0)
             while len(self.config['danmu']) < 16:
-                self.config['danmu'].append([True, 50, 1, 7, 0, "【 [ {", 10])
+                self.config['danmu'].append([True, 50, 1, 7, 0, "【 [ {", 10, 0, True])
             while len(self.config['muted']) < 16:
                 self.config['muted'].append(1)
             while len(self.config['quality']) < 16:
@@ -309,7 +333,7 @@ class MainWindow(QMainWindow):
             for index, textSetting in enumerate(self.config['danmu']):
                 if type(textSetting) == bool:
                     self.config['danmu'][index] = [
-                        textSetting, 20, 1, 7, 0, '【 [ {']
+                        textSetting, 20, 1, 7, 0, '【 [ {', 10, 0, textSetting]
             if 'hardwareDecode' not in self.config:
                 self.config['hardwareDecode'] = True
             if 'maxCacheSize' not in self.config:
@@ -329,15 +353,63 @@ class MainWindow(QMainWindow):
                 self.config['sessionData'] = ''
             if 'loginUserInfo' not in self.config or not isinstance(self.config['loginUserInfo'], dict):
                 self.config['loginUserInfo'] = {}
+            if 'credential' not in self.config or not isinstance(self.config['credential'], dict):
+                self.config['credential'] = {}
             # 兼容旧版：URL 解码 sessionData（旧版本可能保存了 %2C 等编码字符）
             if self.config['sessionData'] and '%' in self.config['sessionData']:
                 from urllib.parse import unquote
                 old_val = self.config['sessionData']
                 self.config['sessionData'] = unquote(old_val)
                 logging.info(f'[LOGIN] config sessionData URL 解码: {old_val[:30]}... → {self.config["sessionData"][:30]}...')
+            self.config['credential'] = normalize_credential_data(
+                self.config.get('credential', {}),
+                sessdata=self.config['sessionData'],
+            )
+            self.config['sessionData'] = self.config['credential'].get('sessdata', '')
             for danmuConfig in self.config['danmu']:
-                if len(danmuConfig) == 6:
-                    danmuConfig.append(10)
+                defaults = [True, 50, 1, 7, 0, '【 [ {', 10, 0, True]
+                while len(danmuConfig) < 8:
+                    danmuConfig.append(defaults[len(danmuConfig)])
+                if len(danmuConfig) < 9:
+                    danmuConfig.append(bool(danmuConfig[0]))
+                if len(danmuConfig) > 9:
+                    del danmuConfig[9:]
+                danmuConfig[0] = bool(danmuConfig[0])
+                danmuConfig[8] = bool(danmuConfig[8])
+            if 'rollingDanmu' not in self.config or not isinstance(self.config['rollingDanmu'], dict):
+                self.config['rollingDanmu'] = {
+                    'font_family': 'Microsoft YaHei',
+                    'opacity': 50,
+                    'display_area': 7,
+                    'font_size': 10,
+                    'speed_percent': 85,
+                    'stroke_width': 30,
+                    'shadow_enabled': False,
+                    'shadow_strength': 35,
+                    'top_enabled': True,
+                    'bottom_enabled': True,
+                }
+            self.config['rollingDanmu'].setdefault('font_family', 'Microsoft YaHei')
+            self.config['rollingDanmu'].setdefault('opacity', 50)
+            self.config['rollingDanmu'].setdefault('display_area', 7)
+            self.config['rollingDanmu'].setdefault('font_size', 10)
+            self.config['rollingDanmu'].setdefault('speed_percent', 85)
+            self.config['rollingDanmu'].setdefault('stroke_width', 30)
+            self.config['rollingDanmu'].setdefault('shadow_enabled', False)
+            self.config['rollingDanmu'].setdefault('shadow_strength', 35)
+            self.config['rollingDanmu'].setdefault('top_enabled', True)
+            self.config['rollingDanmu'].setdefault('bottom_enabled', True)
+            self.config['rollingDanmu']['font_family'] = str(self.config['rollingDanmu'].get('font_family', 'Microsoft YaHei'))
+            self.config['rollingDanmu']['opacity'] = max(7, min(int(self.config['rollingDanmu'].get('opacity', 50)), 100))
+            self.config['rollingDanmu']['display_area'] = max(0, min(int(self.config['rollingDanmu'].get('display_area', 7)), 9))
+            self.config['rollingDanmu'].pop('dense_level', None)
+            self.config['rollingDanmu']['font_size'] = max(0, min(int(self.config['rollingDanmu'].get('font_size', 10)), 20))
+            self.config['rollingDanmu']['speed_percent'] = max(50, min(int(self.config['rollingDanmu'].get('speed_percent', 85)), 200))
+            self.config['rollingDanmu']['stroke_width'] = max(0, min(int(self.config['rollingDanmu'].get('stroke_width', 30)), 60))
+            self.config['rollingDanmu']['shadow_enabled'] = bool(self.config['rollingDanmu'].get('shadow_enabled', False))
+            self.config['rollingDanmu']['shadow_strength'] = max(0, min(int(self.config['rollingDanmu'].get('shadow_strength', 35)), 100))
+            self.config['rollingDanmu']['top_enabled'] = bool(self.config['rollingDanmu'].get('top_enabled', True))
+            self.config['rollingDanmu']['bottom_enabled'] = bool(self.config['rollingDanmu'].get('bottom_enabled', True))
         else:  # 默认和备份 json 配置均读取失败
             self.config = {
                 # 置顶显示
@@ -349,7 +421,8 @@ class MainWindow(QMainWindow):
                 'muted': [1] * 16,
                 'volume': [50] * 16,
                 # 显示,透明,横向,纵向,类型,同传字符,字体大小
-                'danmu': [[True, 50, 1, 7, 0, '【 [ {', 10]] * 16,
+                'danmu': [[True, 50, 1, 7, 0, '【 [ {', 10, 0, True] for _ in range(16)],
+                'rollingDanmu': {'font_family': 'Microsoft YaHei', 'opacity': 50, 'display_area': 7, 'font_size': 10, 'speed_percent': 85, 'stroke_width': 30, 'shadow_enabled': False, 'shadow_strength': 35, 'top_enabled': True, 'bottom_enabled': True},
                 'globalVolume': 30,
                 'control': True,
                 'hardwareDecode': True,
@@ -360,8 +433,14 @@ class MainWindow(QMainWindow):
                 'checkUpdate': True,
                 'sessionData': '',
                 'loginUserInfo': {},
+                'credential': {},
             }
+        self.credential = normalize_credential_data(self.config.get('credential', {}), sessdata=self.config['sessionData'])
+        self.sessionData = self.credential.get('sessdata', '')
+        self.config['credential'] = self.credential
+        self.config['sessionData'] = self.sessionData
         self.dumpConfig = DumpConfig(self.config)
+        self.danmuSettingPanel = None
 
         # ---- 主窗体控件 ----
         mainWidget = QWidget()
@@ -372,72 +451,50 @@ class MainWindow(QMainWindow):
         self.mainLayout.setContentsMargins(0, 0, 0, 0)
         self.layoutSettingPanel = LayoutSettingPanel()
         self.layoutSettingPanel.layoutConfig.connect(self.changeLayout)
-        self.version = Version(self.versionNumber)
-        self.cacheSetting = CacheSetting()
-        self.cacheSetting.maxCacheEdit.setText(
-            str(self.config['maxCacheSize'] // 1024000))
-        self.cacheSetting.savePathEdit.setText(self.config['saveCachePath'])
-        self.cacheSetting.setting.connect(self.setCache)
-        self.hotKey = HotKey()
+        self.version = None
+        self.cacheSetting = None
+        self.hotKey = None
         self._pay = None  # 延迟创建
-        self.startLiveWindow = StartLiveWindow()
+        self.startLiveWindow = None
         self.loginBrowser = QRLoginWidget()
         # 先连接信号，再触发验证（确保回调到达时信号已就绪）
         self.loginBrowser.sessionData.connect(self.updateSessionData)
+        self.loginBrowser.credentialReady.connect(self.updateCredential)
         self.loginBrowser.login.connect(self.updateLogin)
         self.loginBrowser.userInfoReady.connect(self.onUserInfoReady)
         # 启动时如果有已保存的 sessionData，验证登录状态
-        if self.config['sessionData']:
+        if any(self.credential.values()):
+            self.loginBrowser.setCredential(self.credential)
+        elif self.config['sessionData']:
             self.loginBrowser.setSessionData(self.config['sessionData'])
         else:
             self.loginBrowser.show()
+        self.credentialRefreshTimer = QTimer(self)
+        self.credentialRefreshTimer.timeout.connect(self.refreshCredentialIfNeeded)
+        self.credentialRefreshTimer.setInterval(6 * 60 * 60 * 1000)
+        self.credentialRefreshWorker = None
+        if any(self.credential.values()):
+            QTimer.singleShot(0, self.refreshCredentialIfNeeded)
+            self.credentialRefreshTimer.start()
 
         # ---- 内嵌/弹出播放器初始化 ----
         self.videoWidgetList = []
-        self.popVideoWidgetList = []
+        self.popVideoWidgetList = [None] * 16
         progressCounter = 1
         for i in range(16):
-            if len(self.config['danmu'][i]) < 8:
-                self.config['danmu'][i].append(3)
             volume = self.config['volume'][i]
             progressText.setText('设置第%s个主层播放器...' % str(i + 1))
             self.videoWidgetList.append(VideoWidget(i, volume, cacheFolder, textSetting=self.config['danmu'][i],
+                                                    rollingSetting=self.config['rollingDanmu'],
                                                     maxCacheSize=self.config['maxCacheSize'],
                                                     saveCachePath=self.config['saveCachePath'],
                                                     startWithDanmu=self.config['startWithDanmu'],
                                                     hardwareDecode=self.config['hardwareDecode'],
-                                                    sessionData=self.config['sessionData']))
+                                                    sessionData=self.config['sessionData'],
+                                                    credential=self.config['credential']))
             progressCounter += 1
             progressBar.setValue(progressCounter)
-            self.videoWidgetList[i].mutedChanged.connect(self.mutedChanged)
-            self.videoWidgetList[i].volumeChanged.connect(self.volumeChanged)
-            self.videoWidgetList[i].addMedia.connect(self.addMedia)
-            self.videoWidgetList[i].deleteMedia.connect(self.deleteMedia)
-            self.videoWidgetList[i].exchangeMedia.connect(self.exchangeMedia)
-            # self.videoWidgetList[i].setDanmu.connect(self.setDanmu)  # 硬盘io过高 屏蔽掉 退出的时候统一保存
-            # self.videoWidgetList[i].setTranslator.connect(self.setTranslator)  # 已废弃
-            self.videoWidgetList[i].changeQuality.connect(self.setQuality)
-            # self.videoWidgetList[i].changeAudioChannel.connect(self.setAudioChannel)  # 硬盘io过高 屏蔽掉 退出的时候统一保存
-            self.videoWidgetList[i].popWindow.connect(self.popWindow)
-            self.videoWidgetList[i].hideBarKey.connect(self.openControlPanel)
-            self.videoWidgetList[i].fullScreenKey.connect(self.fullScreen)
-            self.videoWidgetList[i].muteExceptKey.connect(self.muteExcept)
-            self.videoWidgetList[i].mediaMute(
-                self.config['muted'][i], emit=False)
-            self.videoWidgetList[i].slider.setValue(self.config['volume'][i])
-            self.videoWidgetList[i].quality = self.config['quality'][i]
-            self.videoWidgetList[i].audioChannel = self.config['audioChannel'][i]
-            self.popVideoWidgetList.append(VideoWidget(i + 16, volume, cacheFolder, True, '悬浮窗', [1280, 720],
-                                                       maxCacheSize=self.config['maxCacheSize'],
-                                                       saveCachePath=self.config['saveCachePath'],
-                                                       startWithDanmu=self.config['startWithDanmu'],
-                                                       hardwareDecode=self.config['hardwareDecode'],
-                                                       sessionData=self.config['sessionData']))
-            self.popVideoWidgetList[i].closePopWindow.connect(
-                self.closePopWindow)
-            progressCounter += 1
-            progressBar.setValue(progressCounter)
-            progressText.setText('设置第%s个悬浮窗播放器...' % str(i + 1))
+            self._connectVideoWidget(self.videoWidgetList[i])
             app.processEvents()
             logging.info("播放器设置完毕 %s / 16" % str(i + 1))
         # 设置所有播放器布局
@@ -464,27 +521,11 @@ class MainWindow(QMainWindow):
         self.controlBarLayout.addWidget(self.stop, 0, 2, 1, 1)
 
         # 全局弹幕设置
-        self.danmuOption = TextOpation()
-        self.danmuOption.setWindowTitle('全局弹幕窗设置')
-        self.danmuOption.opacitySlider.value.connect(
-            self.setGlobalDanmuOpacity)
-        self.danmuOption.horizontalCombobox.currentIndexChanged.connect(
-            self.setGlobalHorizontalPercent)
-        self.danmuOption.verticalCombobox.currentIndexChanged.connect(
-            self.setGlobalVerticalPercent)
-        self.danmuOption.translateCombobox.currentIndexChanged.connect(
-            self.setGlobalTranslateBrowser)
-        self.danmuOption.showEnterRoom.currentIndexChanged.connect(
-            self.setGlobalShowEnterRoom)
-        self.danmuOption.translateFitler.textChanged.connect(
-            self.setGlobalTranslateFilter)
-        self.danmuOption.fontSizeCombox.currentIndexChanged.connect(
-            self.setGlobalFontSize)
-        # self.danmuButton = ToolButton(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         icon = QIcon()
         icon.addFile(os.path.join(application_path, 'utils/danmu.png'))
         self.danmuButton = PushButton(icon)
-        self.danmuButton.clicked.connect(self.danmuOption.show)
+        self.danmuButton.setToolTip('弹幕设置')
+        self.danmuButton.clicked.connect(self.openGlobalDanmuSetting)
         # self.danmuButton = PushButton(text='弹')
         # self.globalDanmuToken = True
         # self.danmuButton.clicked.connect(self.globalDanmuShow)
@@ -523,6 +564,9 @@ class MainWindow(QMainWindow):
 
         # 主播添加窗口
         self.liverPanel = LiverPanel(self.config['roomid'], application_path)
+        self.liverPanel.setSessionData(self.sessionData)
+        if any(self.credential.values()):
+            self.liverPanel.setCredential(self.credential)
         # self.liverPanel.addLiverRoomWidget.getHotLiver.start()
         self.liverPanel.addToWindow.connect(self.addCoverToPlayer)
         self.liverPanel.dumpConfig.connect(self.dumpConfig.start)  # 保存config
@@ -570,6 +614,8 @@ class MainWindow(QMainWindow):
         startLiveSetting.addAction(disableStartLive)
         cacheSizeSetting = QAction('缓存设置', self, triggered=self.openCacheSetting)
         self.optionMenu.addAction(cacheSizeSetting)
+        danmuSettingAction = QAction('弹幕设置', self, triggered=self.openGlobalDanmuSetting)
+        self.optionMenu.addAction(danmuSettingAction)
         startWithDanmuSetting = QAction('自动加载弹幕设置', self, triggered=self.openStartWithDanmuSetting)
         self.optionMenu.addAction(startWithDanmuSetting)
         controlPanelAction = QAction('显示 / 隐藏控制条(H)', self, triggered=self.openControlPanel)
@@ -650,6 +696,76 @@ class MainWindow(QMainWindow):
             self.videoWidgetList[self.videoIndex].playerRestart()
         self.videoIndex += 1
 
+    def _connectVideoWidget(self, videoWidget):
+        videoWidget.mutedChanged.connect(self.mutedChanged)
+        videoWidget.volumeChanged.connect(self.volumeChanged)
+        videoWidget.addMedia.connect(self.addMedia)
+        videoWidget.deleteMedia.connect(self.deleteMedia)
+        videoWidget.exchangeMedia.connect(self.exchangeMedia)
+        videoWidget.changeQuality.connect(self.setQuality)
+        videoWidget.setDanmu.connect(self.setDanmu)
+        videoWidget.popWindow.connect(self.popWindow)
+        videoWidget.hideBarKey.connect(self.openControlPanel)
+        videoWidget.fullScreenKey.connect(self.fullScreen)
+        videoWidget.muteExceptKey.connect(self.muteExcept)
+        videoWidget.mediaMute(self.config['muted'][videoWidget.id % 16], emit=False)
+        videoWidget.slider.setValue(self.config['volume'][videoWidget.id % 16])
+        videoWidget.quality = self.config['quality'][videoWidget.id % 16]
+        videoWidget.audioChannel = self.config['audioChannel'][videoWidget.id % 16]
+        videoWidget.setDanmakuBaseViewport(self._resolveDanmakuBaseViewport())
+        if videoWidget.top:
+            videoWidget.closePopWindow.connect(self.closePopWindow)
+
+    def _iterVideoWidgets(self, include_popups=False):
+        for videoWidget in self.videoWidgetList:
+            yield videoWidget
+        if include_popups:
+            for videoWidget in self.popVideoWidgetList:
+                if videoWidget is not None:
+                    yield videoWidget
+
+    def _getOrCreatePopVideoWidget(self, index):
+        videoWidget = self.popVideoWidgetList[index]
+        if videoWidget is not None:
+            return videoWidget
+
+        volume = self.config['volume'][index]
+        videoWidget = VideoWidget(index + 16, volume, self.cacheFolder, True, '悬浮窗', [1280, 720],
+                                  textSetting=self.config['danmu'][index],
+                                  rollingSetting=self.config['rollingDanmu'],
+                                  maxCacheSize=self.config['maxCacheSize'],
+                                  saveCachePath=self.config['saveCachePath'],
+                                  startWithDanmu=self.config['startWithDanmu'],
+                                  hardwareDecode=self.config['hardwareDecode'],
+                                  sessionData=self.config['sessionData'],
+                                  credential=self.config['credential'])
+        self._connectVideoWidget(videoWidget)
+        self.popVideoWidgetList[index] = videoWidget
+        return videoWidget
+
+    def _getCacheSetting(self):
+        if self.cacheSetting is None:
+            self.cacheSetting = CacheSetting()
+            self.cacheSetting.maxCacheEdit.setText(str(self.config['maxCacheSize'] // 1024000))
+            self.cacheSetting.savePathEdit.setText(self.config['saveCachePath'])
+            self.cacheSetting.setting.connect(self.setCache)
+        return self.cacheSetting
+
+    def _getVersionWindow(self):
+        if self.version is None:
+            self.version = Version(self.versionNumber)
+        return self.version
+
+    def _getHotKeyWindow(self):
+        if self.hotKey is None:
+            self.hotKey = HotKey()
+        return self.hotKey
+
+    def _getStartLiveWindow(self):
+        if self.startLiveWindow is None:
+            self.startLiveWindow = StartLiveWindow()
+        return self.startLiveWindow
+
     def addMedia(self, info):  # 窗口 房号
         id, roomID = info
         self.config['player'][id] = roomID
@@ -684,39 +800,12 @@ class MainWindow(QMainWindow):
 
             fromVideo.textSetting, toVideo.textSetting = toVideo.textSetting, fromVideo.textSetting  # 交换弹幕设置
             for videoWidget in [fromVideo, toVideo]:
-                color = str(
-                    hex(int(videoWidget.textSetting[1] / 101 * 256)))[2:] + '000000'
-                videoWidget.textBrowser.textBrowser.setStyleSheet(
-                    'background-color:#%s' % color)  # 设置透明度
-                videoWidget.textBrowser.transBrowser.setStyleSheet(
-                    'background-color:#%s' % color)
-                videoWidget.textBrowser.msgsBrowser.setStyleSheet(
-                    'background-color:#%s' % color)
                 videoWidget.horiPercent = [
                     0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][videoWidget.textSetting[2]]
                 videoWidget.vertPercent = [
                     0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][videoWidget.textSetting[3]]
-                if videoWidget.textSetting[4] == 0:  # 显示弹幕和同传
-                    videoWidget.textBrowser.textBrowser.show()
-                    videoWidget.textBrowser.transBrowser.show()
-                elif videoWidget.textSetting[4] == 1:  # 只显示弹幕
-                    videoWidget.textBrowser.transBrowser.hide()
-                    videoWidget.textBrowser.textBrowser.show()
-                elif videoWidget.textSetting[4] == 2:  # 只显示同传
-                    videoWidget.textBrowser.textBrowser.hide()
-                    videoWidget.textBrowser.transBrowser.show()
                 videoWidget.filters = videoWidget.textSetting[5].split(' ')
-                if videoWidget.textSetting[7] < 3:
-                    videoWidget.textBrowser.msgsBrowser.show()
-                elif videoWidget.textSetting[7] == 3:
-                    videoWidget.textBrowser.msgsBrowser.hide()
-                size = videoWidget.textSetting[6]
-                videoWidget.textBrowser.textBrowser.setFont(
-                    QFont('Microsoft JhengHei', size + 5, QFont.Bold))
-                videoWidget.textBrowser.transBrowser.setFont(
-                    QFont('Microsoft JhengHei', size + 5, QFont.Bold))
-                videoWidget.textBrowser.msgsBrowser.setFont(
-                    QFont('Microsoft JhengHei', size + 5, QFont.Bold))
+                videoWidget.applyDanmuSettings()
 
         # 交换控件列表
         self.videoWidgetList[fromID], self.videoWidgetList[toID] = toVideo, fromVideo
@@ -746,6 +835,51 @@ class MainWindow(QMainWindow):
     def setDanmu(self):
         self.dumpConfig.start()
 
+    def _resolveDanmakuBaseViewport(self):
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return QSize(1920, 1080)
+        geometry = screen.geometry()
+        return QSize(max(geometry.width(), 1), max(geometry.height(), 1))
+
+    def _applyDanmakuBaseViewport(self):
+        viewport = self._resolveDanmakuBaseViewport()
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setDanmakuBaseViewport(viewport)
+
+    def _ensureGlobalDanmuSettingPanel(self):
+        if self.danmuSettingPanel is not None:
+            return self.danmuSettingPanel
+        self.danmuSettingPanel = GlobalDanmuOption(self.config['danmu'][0], self.config['rollingDanmu'])
+        browser = self.danmuSettingPanel.browserOptionWidget
+        rolling = self.danmuSettingPanel.rollingOptionWidget
+        browser.opacitySlider.value.connect(self.setGlobalDanmuOpacity)
+        browser.horizontalCombobox.currentIndexChanged.connect(self.setGlobalHorizontalPercent)
+        browser.verticalCombobox.currentIndexChanged.connect(self.setGlobalVerticalPercent)
+        browser.translateCombobox.currentIndexChanged.connect(self.setGlobalTranslateBrowser)
+        browser.showEnterRoom.currentIndexChanged.connect(self.setGlobalShowEnterRoom)
+        browser.translateFitler.textChanged.connect(self.setGlobalTranslateFilter)
+        browser.fontSizeCombox.currentIndexChanged.connect(self.setGlobalFontSize)
+        rolling.opacitySlider.value.connect(self.setGlobalRollingDanmuOpacity)
+        rolling.displayAreaCombobox.currentIndexChanged.connect(self.setGlobalRollingDanmuDisplayArea)
+        rolling.fontSizeCombox.currentIndexChanged.connect(self.setGlobalRollingDanmuFontSize)
+        rolling.fontFamilyCombobox.currentTextChanged.connect(self.setGlobalRollingDanmuFontFamily)
+        rolling.speedSlider.valueChanged.connect(self.setGlobalRollingDanmuSpeed)
+        rolling.strokeWidthSlider.valueChanged.connect(self.setGlobalRollingDanmuStrokeWidth)
+        rolling.shadowEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuShadowEnabled)
+        rolling.shadowStrengthSlider.valueChanged.connect(self.setGlobalRollingDanmuShadowStrength)
+        rolling.topEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuTopEnabled)
+        rolling.bottomEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuBottomEnabled)
+        return self.danmuSettingPanel
+
+    def openGlobalDanmuSetting(self):
+        panel = self._ensureGlobalDanmuSettingPanel()
+        panel.syncBrowserSetting(self.config['danmu'][0])
+        panel.syncRollingSetting(self.config['rollingDanmu'])
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
     def showAddButton(self, height):
         if height < 181:
             self.addButton.hide()
@@ -770,16 +904,17 @@ class MainWindow(QMainWindow):
     def popWindow(self, info):  # 悬浮窗播放
         id, roomID, quality, showMax, startWithDanmu = info
         logging.info("%s 进入悬浮窗模式, 弹幕?: %s" % (roomID, startWithDanmu))
-        self.popVideoWidgetList[id].roomID = roomID
-        self.popVideoWidgetList[id].quality = quality
-        self.popVideoWidgetList[id].resize(1280, 720)
-        self.popVideoWidgetList[id].show()
+        pop_video_widget = self._getOrCreatePopVideoWidget(id)
+        pop_video_widget.roomID = roomID
+        pop_video_widget.quality = quality
+        pop_video_widget.resize(1280, 720)
+        pop_video_widget.show()
+        pop_video_widget.setDanmakuBaseViewport(self._resolveDanmakuBaseViewport())
         if startWithDanmu:
-            self.popVideoWidgetList[id].showDanmu()
-            self.popVideoWidgetList[id].textBrowser.show()
+            pop_video_widget.showDanmu()
         if showMax:
-            self.popVideoWidgetList[id].showMaximized()
-        self.popVideoWidgetList[id].mediaReload()
+            pop_video_widget.showMaximized()
+        pop_video_widget.mediaReload()
 
     def mutedChanged(self, mutedInfo):
         id, muted = mutedInfo
@@ -847,85 +982,103 @@ class MainWindow(QMainWindow):
     def setGlobalDanmuOpacity(self, value):
         if value < 7:
             value = 7  # 最小透明度
-        opacity = int(value / 101 * 256)
-        color = str(hex(opacity))[2:] + '000000'
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[1] = value  # 记录设置
-            videoWidget.textBrowser.textBrowser.setStyleSheet(
-                'background-color:#%s' % color)
-            videoWidget.textBrowser.transBrowser.setStyleSheet(
-                'background-color:#%s' % color)
-            videoWidget.textBrowser.msgsBrowser.setStyleSheet(
-                'background-color:#%s' % color)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setDanmuOpacity(value)
+        self.dumpConfig.start()
 
     def setGlobalHorizontalPercent(self, index):  # 设置弹幕框水平宽度
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[2] = index
-            videoWidget.horiPercent = [
-                0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][index]  # 记录横向占比
-            width = videoWidget.width() * videoWidget.horiPercent
-            videoWidget.textBrowser.resize(
-                width, videoWidget.textBrowser.height())
-            videoWidget.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-            videoWidget.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-            videoWidget.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setHorizontalPercent(index)
+        self.dumpConfig.start()
 
     def setGlobalVerticalPercent(self, index):  # 设置弹幕框垂直高度
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[3] = index
-            videoWidget.vertPercent = [
-                0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][index]  # 记录纵向占比
-            height = videoWidget.height() * videoWidget.vertPercent
-            videoWidget.textBrowser.resize(
-                videoWidget.textBrowser.width(), height)
-            videoWidget.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-            videoWidget.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-            videoWidget.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setVerticalPercent(index)
+        self.dumpConfig.start()
 
     def setGlobalTranslateBrowser(self, index):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[4] = index
-            if index == 0:  # 显示弹幕和同传
-                videoWidget.textBrowser.textBrowser.show()
-                videoWidget.textBrowser.transBrowser.show()
-            elif index == 1:  # 只显示弹幕
-                videoWidget.textBrowser.transBrowser.hide()
-                videoWidget.textBrowser.textBrowser.show()
-            elif index == 2:  # 只显示同传
-                videoWidget.textBrowser.textBrowser.hide()
-                videoWidget.textBrowser.transBrowser.show()
-            width = videoWidget.width() * videoWidget.horiPercent
-            height = videoWidget.height() * videoWidget.vertPercent
-            videoWidget.textBrowser.resize(width, height)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setTranslateBrowser(index)
+        self.dumpConfig.start()
 
     def setGlobalShowEnterRoom(self, index):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[7] = index
-            if index < 3:  # 显示礼物和进入信息]
-                videoWidget.textBrowser.msgsBrowser.show()
-            elif index == 3:  # 隐藏窗口
-                videoWidget.textBrowser.msgsBrowser.hide()
-            width = videoWidget.width() * videoWidget.horiPercent
-            height = videoWidget.height() * videoWidget.vertPercent
-            videoWidget.textBrowser.resize(width, height)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setMsgsBrowser(index)
+        self.dumpConfig.start()
 
     def setGlobalTranslateFilter(self, filterWords):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[5] = filterWords
-            videoWidget.filters = filterWords.split(' ')
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setTranslateFilter(filterWords)
+        self.dumpConfig.start()
 
     def setGlobalFontSize(self, index):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.textSetting[6] = index
-            videoWidget.textBrowser.textBrowser.setFont(
-                QFont('Microsoft JhengHei', index + 5, QFont.Bold))
-            videoWidget.textBrowser.transBrowser.setFont(
-                QFont('Microsoft JhengHei', index + 5, QFont.Bold))
-            videoWidget.textBrowser.msgsBrowser.setFont(
-                QFont('Microsoft JhengHei', index + 5, QFont.Bold))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setFontSize(index)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuOpacity(self, value):
+        self.config['rollingDanmu']['opacity'] = max(7, int(value))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuOpacity(value, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuDisplayArea(self, index):
+        self.config['rollingDanmu']['display_area'] = max(0, min(int(index), 9))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuDisplayArea(index, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuFontSize(self, index):
+        self.config['rollingDanmu']['font_size'] = max(0, min(int(index), 20))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuFontSize(index, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuFontFamily(self, family):
+        family = str(family).strip() or 'Microsoft YaHei'
+        self.config['rollingDanmu']['font_family'] = family
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuFontFamily(family, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuSpeed(self, value):
+        self.config['rollingDanmu']['speed_percent'] = max(50, min(int(value), 200))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuSpeed(value, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuStrokeWidth(self, value):
+        self.config['rollingDanmu']['stroke_width'] = max(0, min(int(value), 60))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuStrokeWidth(value, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuShadowEnabled(self, enabled):
+        self.config['rollingDanmu']['shadow_enabled'] = bool(enabled)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuShadowEnabled(enabled, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuShadowStrength(self, value):
+        self.config['rollingDanmu']['shadow_strength'] = max(0, min(int(value), 100))
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuShadowStrength(value, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuTopEnabled(self, enabled):
+        self.config['rollingDanmu']['top_enabled'] = bool(enabled)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuTopEnabled(enabled, emit_signal=False)
+        self.dumpConfig.start()
+
+    def setGlobalRollingDanmuBottomEnabled(self, enabled):
+        self.config['rollingDanmu']['bottom_enabled'] = bool(enabled)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.setRollingDanmuBottomEnabled(enabled, emit_signal=False)
+        self.dumpConfig.start()
 
     def globalQuality(self, quality):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
             if not videoWidget.isHidden():  # 窗口没有被隐藏
                 videoWidget.quality = quality
                 videoWidget.mediaReload()
@@ -933,13 +1086,13 @@ class MainWindow(QMainWindow):
         self.dumpConfig.start()
 
     def globalAudioChannel(self, audioChannel):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.set_audio_channel(audioChannel)
         self.config['audioChannel'] = [audioChannel] * 16
         # self.dumpConfig.start()
 
     def setDecode(self, hardwareDecodeToken):
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.hardwareDecode = hardwareDecodeToken
         self.globalMediaReload()
         self.config['hardwareDecode'] = hardwareDecodeToken
@@ -963,8 +1116,9 @@ class MainWindow(QMainWindow):
         self.controlBarLayoutToken = self.controlDock.isHidden()
 
     def openVersion(self):
-        self.version.hide()
-        self.version.show()
+        version_window = self._getVersionWindow()
+        version_window.hide()
+        version_window.show()
 
     def openGithub(self):
         QDesktopServices.openUrl(
@@ -983,8 +1137,9 @@ class MainWindow(QMainWindow):
             QUrl(r'https://www.bilibili.com/video/BV1Di4y1L7T2'))
 
     def openCacheSetting(self):
-        self.cacheSetting.hide()
-        self.cacheSetting.show()
+        cache_setting = self._getCacheSetting()
+        cache_setting.hide()
+        cache_setting.show()
 
     def openLoginPage(self):
         self.loginBrowser.show()
@@ -998,14 +1153,65 @@ class MainWindow(QMainWindow):
                             + ''.join(traceback.format_stack()))
         self.sessionData = sessionData
         self.config['sessionData'] = sessionData
+        self.credential = normalize_credential_data(self.config.get('credential', {}), sessdata=sessionData)
+        self.config['credential'] = self.credential
         if not sessionData:
             self.config['loginUserInfo'] = {}
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-            videoWidget.sessionData = sessionData
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            if hasattr(videoWidget, 'applyCredentialContext'):
+                videoWidget.applyCredentialContext(sessionData=sessionData)
+            else:
+                videoWidget.sessionData = sessionData
         self.liverPanel.setSessionData(sessionData)
         self.dumpConfig.start()
         if sessionData:
             self.globalMediaReload()
+
+    def updateCredential(self, credential):
+        self.credential = normalize_credential_data(credential)
+        self.config['credential'] = self.credential
+        self.sessionData = self.credential.get('sessdata', '')
+        self.config['sessionData'] = self.sessionData
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            if hasattr(videoWidget, 'applyCredentialContext'):
+                videoWidget.applyCredentialContext(
+                    sessionData=self.sessionData,
+                    credential=self.credential,
+                )
+            else:
+                if hasattr(videoWidget, 'credential'):
+                    videoWidget.credential = self.credential
+                videoWidget.sessionData = self.sessionData
+        if hasattr(self.liverPanel, 'setCredential'):
+            self.liverPanel.setCredential(self.credential)
+        if any(self.credential.values()):
+            self.credentialRefreshTimer.start()
+        else:
+            self.credentialRefreshTimer.stop()
+        self.dumpConfig.start()
+
+    def refreshCredentialIfNeeded(self):
+        if self.credentialRefreshWorker is not None and self.credentialRefreshWorker.isRunning():
+            logging.info('[LOGIN] ??????????????????')
+            return
+        self.credentialRefreshWorker = CredentialRefreshWorker(self.credential, self.sessionData)
+        self.credentialRefreshWorker.refreshed.connect(self._onCredentialRefreshed)
+        self.credentialRefreshWorker.failed.connect(self._onCredentialRefreshFailed)
+        self.credentialRefreshWorker.finished.connect(self._onCredentialRefreshFinished)
+        self.credentialRefreshWorker.start()
+
+    def _onCredentialRefreshed(self, refreshed):
+        logging.info('[LOGIN] ???????')
+        self.updateCredential(refreshed)
+        self.loginBrowser.setCredential(refreshed)
+
+    def _onCredentialRefreshFailed(self, error):
+        logging.warning(f'[LOGIN] ????????: {error}')
+
+    def _onCredentialRefreshFinished(self):
+        if self.credentialRefreshWorker is not None:
+            self.credentialRefreshWorker.deleteLater()
+            self.credentialRefreshWorker = None
 
     def updateLogin(self, login):
         if not login:
@@ -1014,8 +1220,14 @@ class MainWindow(QMainWindow):
                 self.loginAction.setText('扫码登录')
             # 登出：清除 sessionData
             self.config['sessionData'] = ''
-            for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
-                videoWidget.sessionData = ''
+            self.config['credential'] = {}
+            for videoWidget in self._iterVideoWidgets(include_popups=True):
+                if hasattr(videoWidget, 'applyCredentialContext'):
+                    videoWidget.applyCredentialContext(sessionData='', credential={})
+                else:
+                    videoWidget.sessionData = ''
+                    if hasattr(videoWidget, 'credential'):
+                        videoWidget.credential = {}
             self.dumpConfig.start()
         else:
             self.setWindowTitle(f'DD监控室{self.versionNumber} - 已登录')
@@ -1040,6 +1252,8 @@ class MainWindow(QMainWindow):
         sessdata = getattr(self, 'sessionData', '') or self.config.get('sessionData', '')
         if sessdata:
             self.liverPanel.setSessionData(sessdata)
+        if self.credential and hasattr(self.liverPanel, 'setCredential'):
+            self.liverPanel.setCredential(self.credential)
         # 自动填入 UID 并获取关注列表
         if uid:
             self.liverPanel.autoFetchFollows(str(uid))
@@ -1069,8 +1283,9 @@ class MainWindow(QMainWindow):
             self.dumpConfig.start()
 
     def openHotKey(self):
-        self.hotKey.hide()
-        self.hotKey.show()
+        hotkey_window = self._getHotKeyWindow()
+        hotkey_window.hide()
+        hotkey_window.show()
 
     def openFeed(self):
         if self._pay is None:
@@ -1094,12 +1309,17 @@ class MainWindow(QMainWindow):
             for videoWidget in self.videoWidgetList:
                 videoWidget.topLabel.hide()  # 隐藏播放窗口的控制条
                 videoWidget.frame.hide()
-            for videoWidget in self.popVideoWidgetList:
+            for videoWidget in self._iterVideoWidgets(include_popups=True):
+                if not videoWidget.top:
+                    continue
                 videoWidget.topLabel.hide()  # 隐藏悬浮窗口的控制条
                 videoWidget.frame.hide()
 
     def moveEvent(self, QMoveEvent):  # 捕获主窗口moveEvent来实时同步弹幕机位置
+        self._applyDanmakuBaseViewport()
         for videoWidget in self.videoWidgetList:
+            if videoWidget.textBrowser is None:
+                continue
             videoPos = videoWidget.mapToGlobal(
                 videoWidget.videoFrame.pos())  # videoFrame的坐标要转成globalPos
             videoWidget.textBrowser.move(videoPos + videoWidget.textPosDelta)
@@ -1111,16 +1331,17 @@ class MainWindow(QMainWindow):
         """
         logging.debug(f"主窗口已隐藏")
         for videoWidget in self.videoWidgetList:
-            videoWidget.textBrowser.hide()
+            videoWidget.hideTextBrowser()
 
     def showEvent(self, e: QShowEvent) -> None:
         """主窗口显示：打开、最大化
         显示开启的弹幕机
         """
         logging.debug(f"主窗口已显示")
+        self._applyDanmakuBaseViewport()
         for index, videoWidget in enumerate(self.videoWidgetList):
             if self.config['danmu'][index][0] and not videoWidget.isHidden():
-                videoWidget.textBrowser.show()
+                videoWidget.showTextBrowser()
 
     def closeEvent(self, QCloseEvent):
         self.hide()
@@ -1128,7 +1349,7 @@ class MainWindow(QMainWindow):
         self.liverPanel.addLiverRoomWidget.close()
         self.liverPanel.collectLiverInfo.stop()
         self.loginBrowser.close()
-        for videoWidget in self.videoWidgetList + self.popVideoWidgetList:
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
             videoWidget.mediaStop(deleteMedia=False)  # 不要清除播放窗记录
@@ -1144,7 +1365,7 @@ class MainWindow(QMainWindow):
         for videoWidget in self.videoWidgetList:
             videoWidget.mediaPlay(1)  # 全部暂停
         for index, _ in enumerate(self.config['layout']):
-            self.videoWidgetList[index].textBrowser.hide()
+            self.videoWidgetList[index].hideTextBrowser()
             self.mainLayout.itemAt(0).widget().hide()
             self.mainLayout.removeWidget(self.mainLayout.itemAt(0).widget())
         for index, layout in enumerate(layoutConfig):
@@ -1152,7 +1373,7 @@ class MainWindow(QMainWindow):
             videoWidget = self.videoWidgetList[index]
             videoWidget.show()
             if videoWidget.textSetting[0]:  # 显示弹幕
-                videoWidget.textBrowser.show()
+                videoWidget.showTextBrowser()
             self.mainLayout.addWidget(videoWidget, y, x, h, w)
             if videoWidget.roomID != '0':
                 videoWidget.mediaPlay(2)  # 显示的窗口播放
@@ -1160,6 +1381,7 @@ class MainWindow(QMainWindow):
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
         self.config['layout'] = layoutConfig
+        self._applyDanmakuBaseViewport()
         self.dumpConfig.start()
 
     def changeLiverPanelLayout(self, multiple):
@@ -1326,14 +1548,15 @@ class MainWindow(QMainWindow):
 
     def startLiveTip(self, startLiveList):  # 开播提醒
         if self.config['showStartLive']:
-            self.startLiveWindow.resize(240, 70)
-            self.startLiveWindow.move(self.pos() + QPoint(50, 50))
+            start_live_window = self._getStartLiveWindow()
+            start_live_window.resize(240, 70)
+            start_live_window.move(self.pos() + QPoint(50, 50))
             startLivers = ''
             for liver in startLiveList:
                 startLivers += '  %s 开播啦!~  \n' % liver
-            self.startLiveWindow.tipLabel.setText(startLivers)
-            self.startLiveWindow.show()
-            self.startLiveWindow.hideTimer.start()
+            start_live_window.tipLabel.setText(startLivers)
+            start_live_window.show()
+            start_live_window.hideTimer.start()
 
     def setNoMore(self):
         self.config['checkUpdate'] = False
@@ -1395,17 +1618,18 @@ if __name__ == '__main__':
     _sysInfoThread.start()
     # MPV 信息log
     try:
-        prepare_mpv_runtime()
-        import mpv
-        logging.info(f"python-mpv 已加载")
-    except (ImportError, OSError) as e:
-        logging.warning(f"python-mpv 加载失败: {e}")
+        if load_mpv_module() is not None:
+            logging.info("python-mpv 已就绪（惰性加载）")
+        else:
+            logging.warning("python-mpv 未安装或 libmpv 未找到")
+    except Exception as e:
+        logging.warning(f"python-mpv 预检查失败: {e}")
 
     # 欢迎页面
     splash = QSplashScreen(QPixmap(os.path.join(
         application_path, 'utils/splash.jpg')))
     progressBar = QProgressBar(splash)
-    progressBar.setMaximum(32)  # 16 * 2个播放器, 0 - 17 index
+    progressBar.setMaximum(16)  # 仅在启动时初始化 16 个主层播放器
     progressBar.setGeometry(0, splash.height() - 20, splash.width(), 20)
     progressText = QLabel(splash)
     progressText.setText("加载中...")

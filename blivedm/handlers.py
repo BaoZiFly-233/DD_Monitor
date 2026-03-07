@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+import time
 from typing import *
 
 from .clients import ws_base
@@ -37,7 +38,11 @@ logged_unknown_cmds = {
     'USER_TOAST_MSG',
     'WIDGET_BANNER',
 }
-"""已打日志的未知cmd"""
+"""忽略日志的未知cmd白名单"""
+
+_unknown_cmd_last_log_time: Dict[str, float] = {}
+_UNKNOWN_CMD_LOG_INTERVAL_SECONDS = 300.0
+"""未知 cmd 的日志限流时间窗（秒）"""
 
 
 class HandlerInterface:
@@ -142,10 +147,14 @@ class BaseHandler(HandlerInterface):
             cmd = cmd[:pos]
 
         if cmd not in self._CMD_CALLBACK_DICT:
-            # 只有第一次遇到未知cmd时打日志
-            if cmd not in logged_unknown_cmds:
-                logger.warning('room=%d unknown cmd=%s, command=%s', client.room_id, cmd, command)
-                logged_unknown_cmds.add(cmd)
+            if cmd in logged_unknown_cmds:
+                return
+            now = time.monotonic()
+            last_logged = _unknown_cmd_last_log_time.get(cmd, 0.0)
+            if now - last_logged >= _UNKNOWN_CMD_LOG_INTERVAL_SECONDS:
+                # 未知消息不打印完整 payload，避免日志噪声和超长输出
+                logger.warning('room=%d unknown cmd=%s', client.room_id, cmd)
+                _unknown_cmd_last_log_time[cmd] = now
             return
 
         callback = self._CMD_CALLBACK_DICT[cmd]

@@ -2,6 +2,7 @@
 共享 HTTP 会话管理
 提供全局 requests.Session 实现 TCP 连接复用，统一超时和 User-Agent 配置
 """
+import time
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -31,9 +32,27 @@ session = _create_session()
 
 
 def get(url, **kwargs):
-    """带默认超时的 GET 请求"""
+    """带默认超时的 GET 请求
+
+    可选参数：
+    - retries: 失败后重试次数（默认 0）
+    - retry_backoff: 指数退避起始秒数（默认 0.2）
+    """
+    retries = max(0, int(kwargs.pop('retries', 0) or 0))
+    retry_backoff = max(0.0, float(kwargs.pop('retry_backoff', 0.2) or 0.0))
     kwargs.setdefault('timeout', DEFAULT_TIMEOUT)
-    return session.get(url, **kwargs)
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            return session.get(url, **kwargs)
+        except requests.RequestException as e:
+            last_error = e
+            if attempt >= retries:
+                raise
+            if retry_backoff > 0:
+                time.sleep(retry_backoff * (2 ** attempt))
+    if last_error is not None:
+        raise last_error
 
 
 def post(url, **kwargs):
