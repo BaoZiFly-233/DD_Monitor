@@ -182,7 +182,7 @@ class Version(QWidget):
         self.resize(350, 150)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
-        layout.addWidget(QLabel(f'DD监控室 v{version} (2026/03/07)'), 0, 0, 1, 2)
+        layout.addWidget(QLabel(f'DD监控室 v{version} (2026/04/28)'), 0, 0, 1, 2)
         layout.addWidget(QLabel('by 神君Channel'), 1, 0, 1, 2)
         layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 2, 0, 1, 2)
         releases_url = QLabel('')
@@ -236,8 +236,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 3.50
-        self.versionDisplay = '3.50魔改版'
+        self.versionNumber = 3.51
+        self.versionDisplay = '3.51魔改版'
         self.setWindowTitle(f'DD监控室{self.versionDisplay}')
         self.resize(1600, 900)
         self.maximumToken = True
