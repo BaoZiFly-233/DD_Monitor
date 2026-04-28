@@ -3,11 +3,80 @@
 import os
 import logging
 import tempfile
+from dataclasses import dataclass
 
 from PySide6.QtWidgets import QLabel, QToolButton, QWidget, QComboBox, QLineEdit, QTextBrowser, QGridLayout, QStyle
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontMetrics, QPainterPath
 from PySide6.QtCore import Qt, Signal, QPoint, QTimer
 from CommonWidget import Slider
+
+# 全局显示比例选项
+DISPLAY_RATIOS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+
+@dataclass
+class DanmakuSettings:
+    """弹幕配置 — 替代旧版 textSetting list 魔法索引。
+
+    旧版索引: [0=enabled, 1=opacity, 2=horiz_idx, 3=vert_idx, 4=translate_mode,
+                5=filters, 6=font_size, 7=enter_room, 8=rolling_enabled]
+    """
+    enabled: bool = True
+    opacity: int = 50
+    horizontal_index: int = 1
+    vertical_index: int = 7
+    translate_mode: int = 0
+    translate_filters: str = '【 [ {'
+    font_size: int = 10
+    show_enter_room: int = 0
+    rolling_enabled: bool = True
+
+    def to_config_list(self):
+        """导出为兼容旧 config.json 的列表格式"""
+        return [self.enabled, self.opacity, self.horizontal_index,
+                self.vertical_index, self.translate_mode,
+                self.translate_filters, self.font_size,
+                self.show_enter_room, self.rolling_enabled]
+
+    @classmethod
+    def from_config_list(cls, data):
+        """从 config.json 列表格式恢复"""
+        defaults = [True, 50, 1, 7, 0, '【 [ {', 10, 0, True]
+        if isinstance(data, bool):
+            data = [data, 20, 1, 7, 0, '【 [ {', 10, 0, data]
+        lst = list(data)
+        while len(lst) < 9:
+            lst.append(defaults[len(lst)])
+        lst = lst[:9]
+        return cls(
+            enabled=bool(lst[0]),
+            opacity=max(7, int(lst[1])),
+            horizontal_index=max(0, min(int(lst[2]), 9)),
+            vertical_index=max(0, min(int(lst[3]), 9)),
+            translate_mode=max(0, min(int(lst[4]), 2)),
+            translate_filters=str(lst[5]),
+            font_size=max(0, min(int(lst[6]), 25)),
+            show_enter_room=max(0, min(int(lst[7]), 3)),
+            rolling_enabled=bool(lst[8]),
+        )
+
+    # 兼容旧代码的列表索引访问
+    _INDEX_MAP = {
+        0: 'enabled', 1: 'opacity', 2: 'horizontal_index',
+        3: 'vertical_index', 4: 'translate_mode', 5: 'translate_filters',
+        6: 'font_size', 7: 'show_enter_room', 8: 'rolling_enabled',
+    }
+
+    def __getitem__(self, index):
+        if index in self._INDEX_MAP:
+            return getattr(self, self._INDEX_MAP[index])
+        raise IndexError(f'DanmakuSettings index out of range: {index}')
+
+    def __setitem__(self, index, value):
+        if index in self._INDEX_MAP:
+            setattr(self, self._INDEX_MAP[index], value)
+            return
+        raise IndexError(f'DanmakuSettings index out of range: {index}')
 
 
 class Bar(QLabel):
@@ -43,11 +112,11 @@ class ToolButton(QToolButton):
         self.setIcon(icon)
 
 
-class TextOpation(QWidget):
+class TextOption(QWidget):
     """弹幕机选项 - 弹出式窗口"""
 
     def __init__(self, setting=[50, 1, 7, 0, '【 [ {', 10, 0]):
-        super(TextOpation, self).__init__()
+        super(TextOption, self).__init__()
         self.resize(300, 300)
         self.setWindowTitle('弹幕窗设置')
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
@@ -107,7 +176,7 @@ class TextBrowser(QWidget):
 
     def __init__(self, parent):
         super(TextBrowser, self).__init__(parent)
-        self.optionWidget = TextOpation()
+        self.optionWidget = TextOption()
         self.setWindowTitle('弹幕机')
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)

@@ -103,17 +103,6 @@ class PushButton(QPushButton):
             self.setStyleSheet('background-color:#31363b;border-width:1px')
 
 
-# class RequestAPI(QThread):
-#     data = Signal(dict)
-#
-#     def __init__(self, roomID):
-#         super(RequestAPI, self).__init__()
-#         self.roomID = roomID
-#
-#     def run(self):
-#         r = http_utils.get(r'https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%s' % self.roomID)
-#         self.data.emit(json.loads(r.text))
-
 
 class RecordThread(QThread):
     """获取直播推流并录制
@@ -438,7 +427,7 @@ class CoverLabel(QLabel):
 
 
 class GetHotLiver(QThread):
-    """?????????"""
+    """获取热门直播列表"""
     roomInfoSummary = Signal(list)
     areaLoaded = Signal(int, list)
 
@@ -543,8 +532,8 @@ class GetHotLiver(QThread):
 
 
 class GetFollows(QThread):
-    """???????????
-    ???? cookie (SESSDATA) ????????
+    """获取关注列表
+    需要 cookie (SESSDATA) 才能正常工作
     """
     roomInfoSummary = Signal(list)
     roomInfoChunk = Signal(list)
@@ -616,14 +605,14 @@ class GetFollows(QThread):
             ).get_all_followings())
             followsIDs = self._extract_follow_ids(follow_list)
         except Exception:
-            logging.exception('?? bilibili-api-python ???????????????')
+            logging.exception('通过 bilibili-api-python 获取关注列表失败，回退至 HTTP API')
             try:
                 for p in range(1, 11):
                     url = f'https://api.bilibili.com/x/relation/followings?vmid={self.uid}&pn={p}&ps=50&order=desc'
                     r = http_utils.get(url, headers=req_headers, cookies=cookies)
                     resp_data = r.json()
                     if resp_data.get('code') != 0:
-                        logging.warning(f'????????: {resp_data.get("message", "????")}')
+                        logging.warning(f'关注列表获取失败: {resp_data.get("message", "未知错误")}')
                         break
                     followList = (resp_data.get('data') or {}).get('list') or []
                     if not followList:
@@ -635,7 +624,7 @@ class GetFollows(QThread):
 
         followsIDs = list(followsIDs)
         if not followsIDs:
-            logging.error('???????????????? UID ???')
+            logging.error('没有获取到关注列表，请检查 UID 是否正确')
             self.roomInfoSummary.emit([])
             return
 
@@ -648,14 +637,14 @@ class GetFollows(QThread):
                 response.encoding = 'utf8'
                 payload = json.loads(response.text)
                 if payload.get('code') != 0:
-                    logging.warning(f'???????????: {payload.get("message", "????")}')
+                    logging.warning(f'直播状态查询失败: {payload.get("message", "未知错误")}')
                     continue
                 room_chunk = self._build_room_rows(chunk, payload.get('data', {}))
                 if room_chunk:
                     roomIDList.extend(room_chunk)
                     self.roomInfoChunk.emit(room_chunk)
             except Exception:
-                logging.exception('???????????')
+                logging.exception('直播间状态查询失败')
             time.sleep(0.1)
         self.roomInfoSummary.emit(roomIDList)
 
@@ -755,9 +744,6 @@ class AddLiverRoomWidget(QWidget):
         self.entertainment = PushButton('娱乐')
         self.entertainment.clicked.connect(lambda: self.switchHotLiver(4))
         hotLiverLayout.addWidget(self.entertainment, 0, 4, 1, 1)
-        # self.broadcasting = PushButton('电台')
-        # self.broadcasting.clicked.connect(lambda: self.switchHotLiver(5))
-        # hotLiverLayout.addWidget(self.broadcasting, 0, 5, 1, 1)
         self.buttonList = [self.virtual, self.onlineGame, self.mobileGame, self.consoleGame, self.entertainment]
         self.currentPage = 0
 
@@ -1490,14 +1476,7 @@ class LiverPanel(QWidget):
                     if cover.roomID == info[1]:
                         cover.updateLabel(info)
         if roomIDStartLive:
-            self.startLiveList.emit(roomIDStartLive)  # 发送开播列表
-        # if roomIDToRefresh:
-        #     self.refreshIDList.emit(roomIDToRefresh)
-        #     self.refreshPanel()  # 修改刷新策略 只有当有主播直播状态发生变化后才会刷新 降低闪退风险
-        # elif firstRefresh:
-        #     self.refreshPanel()
-        # elif not self.refreshCount % 3:  # 每20s x 3 = 1分钟强制刷新一次
-        #     self.refreshPanel()
+            self.startLiveList.emit(roomIDStartLive)
         self.refreshPanel()
 
     def addCoverToPlayer(self, info):

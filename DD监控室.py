@@ -20,6 +20,7 @@ from PySide6.QtCore import * 		# QSize
 from LayoutPanel import LayoutSettingPanel
 from VideoWidget_mpv import PushButton, Slider, VideoWidget, load_mpv_module
 from LiverSelect import LiverPanel
+from config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS
 from bili_credential import normalize_credential_data, build_credential, credential_to_dict
 from bilibili_api import sync
 from danmu import GlobalDanmuOption
@@ -52,7 +53,7 @@ class CredentialRefreshWorker(QThread):
                 sync(credential.refresh())
                 self.refreshed.emit(credential_to_dict(credential))
         except Exception as e:
-            logging.exception('[LOGIN] ????????')
+            logging.exception('[LOGIN] 验证登录异常')
             self.failed.emit(str(e))
 
 
@@ -212,36 +213,6 @@ class HotKey(QWidget):
         layout.addWidget(QLabel('M、m、S、s —— 除当前鼠标悬停窗口外全部静音'), 2, 0)
 
 
-class DumpConfig(QThread):
-    """导出配置"""
-
-    def __init__(self, config):
-        super(DumpConfig, self).__init__()
-        self.config = config
-        self.backupNumber = 1
-
-    def run(self):
-        try:
-            configJSONPath = os.path.join(application_path, r'utils/config.json')
-            with open(configJSONPath, 'w', encoding='utf-8', errors='ignore') as f:
-                f.write(json.dumps(self.config, ensure_ascii=False))
-        except Exception as e:
-            logging.error(str(e))
-            logging.exception('config.json 写入失败')
-
-        try:  # 备份 防止存储config时崩溃
-            configJSONPath = os.path.join(application_path, r'utils/config_备份%d.json' % self.backupNumber)
-            self.backupNumber += 1
-            if self.backupNumber == 4:
-                self.backupNumber = 1
-            # with open(configJSONPath, 'w') as f:
-            #     f.write(json.dumps(self.config, ensure_ascii=False))
-            with open(configJSONPath, 'w', encoding='utf-8', errors='ignore') as f:
-                f.write(json.dumps(self.config, ensure_ascii=False))
-        except Exception as e:
-            logging.error(str(e))
-            logging.exception('config_备份.json 备份配置文件写入失败')
-
 
 class CheckDanmmuProvider(QThread):
     """检查弹幕服务器域名解析状态"""
@@ -274,173 +245,12 @@ class MainWindow(QMainWindow):
         self.cacheFolder = cacheFolder
 
         # ---- json 配置文件加载 ----
-        self.configJSONPath = os.path.join(
-            application_path, r'utils/config.json')
-        self.config = {}
-        # 读取默认的 config
-        if os.path.exists(self.configJSONPath):
-            if os.path.getsize(self.configJSONPath):
-                try:
-                    with open(self.configJSONPath, 'r', encoding='utf-8', errors='ignore') as f:
-                        self.config = json.loads(f.read())
-                    # self.config = json.loads(open(self.configJSONPath).read())
-                except Exception as e:
-                    logging.error(str(e))
-                    logging.exception('json 配置读取失败')
-                    self.config = {}
-        # 读取config失败 尝试读取备份
-        if not self.config:
-            for backupNumber in [1, 2, 3]:  # 备份预设123
-                self.configJSONPath = os.path.join(
-                    application_path, r'utils/config_备份%d.json' % backupNumber)
-                if os.path.exists(self.configJSONPath):  # 如果备份文件存在
-                    if os.path.getsize(self.configJSONPath):  # 如过备份文件有效
-                        try:
-                            self.config = json.loads(
-                                open(self.configJSONPath, 'r', encoding='utf-8', errors='ignore').read())
-                            break
-                        except Exception as e:
-                            logging.error(str(e))
-                            logging.exception('json 备份配置读取失败')
-                            self.config = {}
-        # 如果能成功读取到config文件
-        if self.config:
-            while len(self.config['player']) < 16:
-                self.config['player'].append('0')
-            while len(self.config['volume']) < 16:
-                self.config['volume'].append(0)
-            while len(self.config['danmu']) < 16:
-                self.config['danmu'].append([True, 50, 1, 7, 0, "【 [ {", 10, 0, True])
-            while len(self.config['muted']) < 16:
-                self.config['muted'].append(1)
-            while len(self.config['quality']) < 16:
-                self.config['quality'].append(80)
-            while len(self.config['audioChannel']) < 16:
-                self.config['audioChannel'].append(0)
-            self.config['player'] = list(map(str, self.config['player']))
-            if type(self.config['roomid']) == list:
-                roomIDList = self.config['roomid']
-                self.config['roomid'] = {}
-                for roomID in roomIDList:
-                    self.config['roomid'][roomID] = False
-            if '0' in self.config['roomid']:  # 过滤0房间号
-                del self.config['roomid']['0']
-            if 'quality' not in self.config:
-                self.config['quality'] = [80] * 16
-            if 'audioChannel' not in self.config:
-                self.config['audioChannel'] = [0] * 16
-            if 'translator' not in self.config:
-                self.config['translator'] = [True] * 16
-            for index, textSetting in enumerate(self.config['danmu']):
-                if type(textSetting) == bool:
-                    self.config['danmu'][index] = [
-                        textSetting, 20, 1, 7, 0, '【 [ {', 10, 0, textSetting]
-            if 'hardwareDecode' not in self.config:
-                self.config['hardwareDecode'] = True
-            if 'maxCacheSize' not in self.config:
-                self.config['maxCacheSize'] = 2048000
-                logging.warning('最大缓存没有被设置，使用默认1G')
-            if 'saveCachePath' not in self.config:
-                self.config['saveCachePath'] = ''
-                logging.warning('默认缓存备份路径为空 即自动清空')
-            if 'startWithDanmu' not in self.config:
-                self.config['startWithDanmu'] = True
-                logging.warning('启动时加载弹幕没有被设置，默认加载')
-            if 'showStartLive' not in self.config:
-                self.config['showStartLive'] = True
-            if 'checkUpdate' not in self.config:
-                self.config['checkUpdate'] = True
-            if 'sessionData' not in self.config:
-                self.config['sessionData'] = ''
-            if 'loginUserInfo' not in self.config or not isinstance(self.config['loginUserInfo'], dict):
-                self.config['loginUserInfo'] = {}
-            if 'credential' not in self.config or not isinstance(self.config['credential'], dict):
-                self.config['credential'] = {}
-            # 兼容旧版：URL 解码 sessionData（旧版本可能保存了 %2C 等编码字符）
-            if self.config['sessionData'] and '%' in self.config['sessionData']:
-                from urllib.parse import unquote
-                old_val = self.config['sessionData']
-                self.config['sessionData'] = unquote(old_val)
-                logging.info(f'[LOGIN] config sessionData URL 解码: {old_val[:30]}... → {self.config["sessionData"][:30]}...')
-            self.config['credential'] = normalize_credential_data(
-                self.config.get('credential', {}),
-                sessdata=self.config['sessionData'],
-            )
-            self.config['sessionData'] = self.config['credential'].get('sessdata', '')
-            for danmuConfig in self.config['danmu']:
-                defaults = [True, 50, 1, 7, 0, '【 [ {', 10, 0, True]
-                while len(danmuConfig) < 8:
-                    danmuConfig.append(defaults[len(danmuConfig)])
-                if len(danmuConfig) < 9:
-                    danmuConfig.append(bool(danmuConfig[0]))
-                if len(danmuConfig) > 9:
-                    del danmuConfig[9:]
-                danmuConfig[0] = bool(danmuConfig[0])
-                danmuConfig[8] = bool(danmuConfig[8])
-            if 'rollingDanmu' not in self.config or not isinstance(self.config['rollingDanmu'], dict):
-                self.config['rollingDanmu'] = {
-                    'font_family': 'Microsoft YaHei',
-                    'opacity': 50,
-                    'display_area': 7,
-                    'font_size': 10,
-                    'speed_percent': 85,
-                    'stroke_width': 30,
-                    'shadow_enabled': False,
-                    'shadow_strength': 35,
-                    'top_enabled': True,
-                    'bottom_enabled': True,
-                }
-            self.config['rollingDanmu'].setdefault('font_family', 'Microsoft YaHei')
-            self.config['rollingDanmu'].setdefault('opacity', 50)
-            self.config['rollingDanmu'].setdefault('display_area', 7)
-            self.config['rollingDanmu'].setdefault('font_size', 10)
-            self.config['rollingDanmu'].setdefault('speed_percent', 85)
-            self.config['rollingDanmu'].setdefault('stroke_width', 30)
-            self.config['rollingDanmu'].setdefault('shadow_enabled', False)
-            self.config['rollingDanmu'].setdefault('shadow_strength', 35)
-            self.config['rollingDanmu'].setdefault('top_enabled', True)
-            self.config['rollingDanmu'].setdefault('bottom_enabled', True)
-            self.config['rollingDanmu']['font_family'] = str(self.config['rollingDanmu'].get('font_family', 'Microsoft YaHei'))
-            self.config['rollingDanmu']['opacity'] = max(7, min(int(self.config['rollingDanmu'].get('opacity', 50)), 100))
-            self.config['rollingDanmu']['display_area'] = max(0, min(int(self.config['rollingDanmu'].get('display_area', 7)), 9))
-            self.config['rollingDanmu'].pop('dense_level', None)
-            self.config['rollingDanmu']['font_size'] = max(0, min(int(self.config['rollingDanmu'].get('font_size', 10)), 20))
-            self.config['rollingDanmu']['speed_percent'] = max(50, min(int(self.config['rollingDanmu'].get('speed_percent', 85)), 200))
-            self.config['rollingDanmu']['stroke_width'] = max(0, min(int(self.config['rollingDanmu'].get('stroke_width', 30)), 60))
-            self.config['rollingDanmu']['shadow_enabled'] = bool(self.config['rollingDanmu'].get('shadow_enabled', False))
-            self.config['rollingDanmu']['shadow_strength'] = max(0, min(int(self.config['rollingDanmu'].get('shadow_strength', 35)), 100))
-            self.config['rollingDanmu']['top_enabled'] = bool(self.config['rollingDanmu'].get('top_enabled', True))
-            self.config['rollingDanmu']['bottom_enabled'] = bool(self.config['rollingDanmu'].get('bottom_enabled', True))
-        else:  # 默认和备份 json 配置均读取失败
-            self.config = {
-                # 置顶显示
-                'roomid': {},
-                'layout': [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1)],
-                'player': ['0'] * 16,
-                'quality': [80] * 16,
-                'audioChannel': [0] * 16,
-                'muted': [1] * 16,
-                'volume': [50] * 16,
-                # 显示,透明,横向,纵向,类型,同传字符,字体大小
-                'danmu': [[True, 50, 1, 7, 0, '【 [ {', 10, 0, True] for _ in range(16)],
-                'rollingDanmu': {'font_family': 'Microsoft YaHei', 'opacity': 50, 'display_area': 7, 'font_size': 10, 'speed_percent': 85, 'stroke_width': 30, 'shadow_enabled': False, 'shadow_strength': 35, 'top_enabled': True, 'bottom_enabled': True},
-                'globalVolume': 30,
-                'control': True,
-                'hardwareDecode': True,
-                'maxCacheSize': 2048000,
-                'saveCachePath': '',
-                'startWithDanmu': True,
-                'showStartLive': True,
-                'checkUpdate': True,
-                'sessionData': '',
-                'loginUserInfo': {},
-                'credential': {},
-            }
+        self.configManager = ConfigManager(application_path)
+        self.config = self.configManager.load()
         self.credential = normalize_credential_data(self.config.get('credential', {}), sessdata=self.config['sessionData'])
         self.sessionData = self.credential.get('sessdata', '')
         self.config['credential'] = self.credential
         self.config['sessionData'] = self.sessionData
-        self.dumpConfig = DumpConfig(self.config)
         self.danmuSettingPanel = None
 
         # ---- 主窗体控件 ----
@@ -570,7 +380,7 @@ class MainWindow(QMainWindow):
             self.liverPanel.setCredential(self.credential)
         # self.liverPanel.addLiverRoomWidget.getHotLiver.start()
         self.liverPanel.addToWindow.connect(self.addCoverToPlayer)
-        self.liverPanel.dumpConfig.connect(self.dumpConfig.start)  # 保存config
+        self.liverPanel.dumpConfig.connect(lambda: self.configManager.save())  # 保存config
         self.liverPanel.refreshIDList.connect(
             self.refreshPlayerStatus)  # 刷新播放器
         self.liverPanel.startLiveList.connect(self.startLiveTip)  # 开播提醒
@@ -648,8 +458,6 @@ class MainWindow(QMainWindow):
         self.payMenu.addAction(githubAction)
         feedAction = QAction('投喂作者', self, triggered=self.openFeed)
         self.payMenu.addAction(feedAction)
-        # killAction = QAction('自尽(测试)', self, triggered=lambda a: 0 / 0)
-        # self.payMenu.addAction(killAction)
         progressText.setText('设置关于菜单...')
 
         self.loginMenu = self.menuBar().addMenu('B站账号')
@@ -771,12 +579,12 @@ class MainWindow(QMainWindow):
         id, roomID = info
         self.config['player'][id] = roomID
         self.liverPanel.updatePlayingStatus(self.config['player'])
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def deleteMedia(self, id):
         self.config['player'][id] = 0
         self.liverPanel.updatePlayingStatus(self.config['player'])
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def exchangeMedia(self, info):  # 交换播放窗口的函数
         fromID, fromRoomID, toID, toRoomID = info  # 交换数据
@@ -812,7 +620,7 @@ class MainWindow(QMainWindow):
         self.videoWidgetList[fromID], self.videoWidgetList[toID] = toVideo, fromVideo
         self.config['player'][toID] = fromRoomID  # 记录config
         self.config['player'][fromID] = toRoomID
-        self.dumpConfig.start()
+        self.configManager.save()
         # self.changeLayout(self.config['layout'])  # 刷新layout
         # 用新的方法直接交换两个窗口
         fromLayout, toLayout = self.config['layout'][fromID], self.config['layout'][toID]
@@ -821,11 +629,7 @@ class MainWindow(QMainWindow):
         y, x, h, w = toLayout
         self.mainLayout.addWidget(fromVideo, y, x, h, w)
 
-        # TODO: 改崩溃了 不想改了 怎么改都没法按比例调整弹幕窗坐标
-        # fromVideoPos = fromVideo.mapToGlobal(fromVideo.pos())  # 保持弹幕框相对位置
-        # toVideoPos = toVideo.mapToGlobal(toVideo.pos())
-        # fromVideo.textBrowser.move(toVideoPos + QPoint(toWidth * fromVideo.deltaX, toHeight * fromVideo.deltaY))
-        # toVideo.textBrowser.move(fromVideoPos + QPoint(fromWidth * toVideo.deltaX, fromHeight * toVideo.deltaY))
+        # FIXME: 弹幕窗坐标在交换后需按比例重新计算，当前 deltaX/deltaY 定位不准确
 
     def clearLiverPanel(self):  # 清空卡片槽
         reply = QMessageBox.information(
@@ -834,7 +638,7 @@ class MainWindow(QMainWindow):
             self.liverPanel.deleteAll()
 
     def setDanmu(self):
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def _resolveDanmakuBaseViewport(self):
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -890,17 +694,17 @@ class MainWindow(QMainWindow):
     def setTranslator(self, info):
         id, token = info  # 窗口 同传显示布尔值
         self.config['translator'][id] = token
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setQuality(self, info):
         id, quality = info  # 窗口 画质
         self.config['quality'][id] = quality
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setAudioChannel(self, info):
         id, audioChannel = info  # 窗口 音效
         self.config['audioChannel'][id] = audioChannel
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def popWindow(self, info):  # 悬浮窗播放
         id, roomID, quality, showMax, startWithDanmu = info
@@ -921,12 +725,10 @@ class MainWindow(QMainWindow):
         id, muted = mutedInfo
         token = 2 if muted else 1
         self.config['muted'][id] = token
-        # self.dumpConfig.start()
 
     def volumeChanged(self, volumeInfo):
         id, value = volumeInfo
         self.config['volume'][id] = value
-        # self.dumpConfig.start()
 
     def globalMediaPlay(self):
         if self.globalPlayToken:
@@ -957,7 +759,6 @@ class MainWindow(QMainWindow):
         for videoWidget in self.videoWidgetList:
             videoWidget.mediaMute(force)
         self.config['muted'] = [force] * 16
-        # self.dumpConfig.start()
 
     def globalSetVolume(self, value):
         for videoWidget in self.videoWidgetList:
@@ -966,117 +767,108 @@ class MainWindow(QMainWindow):
             videoWidget.slider.setValue(value)
         self.config['volume'] = [value] * 16
         self.config['globalVolume'] = value
-        # self.dumpConfig.start()
 
     def globalMediaStop(self):
         for videoWidget in self.videoWidgetList:
             videoWidget.mediaStop()
-
-    # def globalDanmuShow(self):  # 已弃用
-    #     self.globalDanmuToken = not self.globalDanmuToken
-    #     for videoWidget in self.videoWidgetList:
-    #         if not videoWidget.isHidden():
-    #             videoWidget.textBrowser.show() if self.globalDanmuToken else videoWidget.textBrowser.hide()
-    #     for danmuConfig in self.config['danmu']:
-    #         danmuConfig[0] = self.globalDanmuToken
 
     def setGlobalDanmuOpacity(self, value):
         if value < 7:
             value = 7  # 最小透明度
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setDanmuOpacity(value)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalHorizontalPercent(self, index):  # 设置弹幕框水平宽度
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setHorizontalPercent(index)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalVerticalPercent(self, index):  # 设置弹幕框垂直高度
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setVerticalPercent(index)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalTranslateBrowser(self, index):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setTranslateBrowser(index)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalShowEnterRoom(self, index):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setMsgsBrowser(index)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalTranslateFilter(self, filterWords):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setTranslateFilter(filterWords)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalFontSize(self, index):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setFontSize(index)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuOpacity(self, value):
         self.config['rollingDanmu']['opacity'] = max(7, int(value))
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuOpacity(value, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuDisplayArea(self, index):
         self.config['rollingDanmu']['display_area'] = max(0, min(int(index), 9))
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuDisplayArea(index, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuFontSize(self, index):
         self.config['rollingDanmu']['font_size'] = max(0, min(int(index), 20))
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuFontSize(index, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuFontFamily(self, family):
         family = str(family).strip() or 'Microsoft YaHei'
         self.config['rollingDanmu']['font_family'] = family
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuFontFamily(family, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuSpeed(self, value):
         self.config['rollingDanmu']['speed_percent'] = max(50, min(int(value), 200))
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuSpeed(value, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuStrokeWidth(self, value):
         self.config['rollingDanmu']['stroke_width'] = max(0, min(int(value), 60))
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuStrokeWidth(value, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuShadowEnabled(self, enabled):
         self.config['rollingDanmu']['shadow_enabled'] = bool(enabled)
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuShadowEnabled(enabled, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuShadowStrength(self, value):
         self.config['rollingDanmu']['shadow_strength'] = max(0, min(int(value), 100))
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuShadowStrength(value, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuTopEnabled(self, enabled):
         self.config['rollingDanmu']['top_enabled'] = bool(enabled)
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuTopEnabled(enabled, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def setGlobalRollingDanmuBottomEnabled(self, enabled):
         self.config['rollingDanmu']['bottom_enabled'] = bool(enabled)
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setRollingDanmuBottomEnabled(enabled, emit_signal=False)
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def globalQuality(self, quality):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
@@ -1084,13 +876,13 @@ class MainWindow(QMainWindow):
                 videoWidget.quality = quality
                 videoWidget.mediaReload()
         self.config['quality'] = [quality] * 16
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def globalAudioChannel(self, audioChannel):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.set_audio_channel(audioChannel)
         self.config['audioChannel'] = [audioChannel] * 16
-        # self.dumpConfig.start()
+        # self.configManager.save()
 
     def setDecode(self, hardwareDecodeToken):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
@@ -1164,7 +956,7 @@ class MainWindow(QMainWindow):
             else:
                 videoWidget.sessionData = sessionData
         self.liverPanel.setSessionData(sessionData)
-        self.dumpConfig.start()
+        self.configManager.save()
         if sessionData:
             self.globalMediaReload()
 
@@ -1189,11 +981,11 @@ class MainWindow(QMainWindow):
             self.credentialRefreshTimer.start()
         else:
             self.credentialRefreshTimer.stop()
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def refreshCredentialIfNeeded(self):
         if self.credentialRefreshWorker is not None and self.credentialRefreshWorker.isRunning():
-            logging.info('[LOGIN] ??????????????????')
+            logging.info('[LOGIN] 凭据刷新任务已在运行，跳过')
             return
         self.credentialRefreshWorker = CredentialRefreshWorker(self.credential, self.sessionData)
         self.credentialRefreshWorker.refreshed.connect(self._onCredentialRefreshed)
@@ -1202,12 +994,12 @@ class MainWindow(QMainWindow):
         self.credentialRefreshWorker.start()
 
     def _onCredentialRefreshed(self, refreshed):
-        logging.info('[LOGIN] ???????')
+        logging.info('[LOGIN] 凭据刷新成功')
         self.updateCredential(refreshed)
         self.loginBrowser.setCredential(refreshed)
 
     def _onCredentialRefreshFailed(self, error):
-        logging.warning(f'[LOGIN] ????????: {error}')
+        logging.warning(f'[LOGIN] 凭据刷新失败: {error}')
 
     def _onCredentialRefreshFinished(self):
         if self.credentialRefreshWorker is not None:
@@ -1229,7 +1021,7 @@ class MainWindow(QMainWindow):
                     videoWidget.sessionData = ''
                     if hasattr(videoWidget, 'credential'):
                         videoWidget.credential = {}
-            self.dumpConfig.start()
+            self.configManager.save()
         else:
             self.setWindowTitle(f'DD监控室{self.versionDisplay} - 已登录')
             if hasattr(self, 'loginAction'):
@@ -1245,7 +1037,7 @@ class MainWindow(QMainWindow):
             'face': info.get('face', ''),
             'level': info.get('level', 0),
         }
-        self.dumpConfig.start()
+        self.configManager.save()
         self.setWindowTitle(f'DD监控室{self.versionDisplay} - {uname}')
         if hasattr(self, 'loginAction'):
             self.loginAction.setText(f'账号管理 ({uname})')
@@ -1267,7 +1059,7 @@ class MainWindow(QMainWindow):
             return
         self.config['maxCacheSize'] = intergerMaxCache * 1024000
         self.config['saveCachePath'] = savePath
-        self.dumpConfig.start()
+        self.configManager.save()
         QMessageBox.information(
             self, '缓存设置更改', '设置成功 重启监控室后生效', QMessageBox.Ok)
 
@@ -1281,7 +1073,7 @@ class MainWindow(QMainWindow):
         if okPressed:
             trueDanmu = (selection == items[0])
             self.config['startWithDanmu'] = trueDanmu
-            self.dumpConfig.start()
+            self.configManager.save()
 
     def openHotKey(self):
         hotkey_window = self._getHotKeyWindow()
@@ -1356,7 +1148,7 @@ class MainWindow(QMainWindow):
             videoWidget.mediaStop(deleteMedia=False)  # 不要清除播放窗记录
             videoWidget.close()
         self.saveDockLayout()
-        self.dumpConfig.start()
+        self.configManager.save_now()
 
     def openLayoutSetting(self):
         self.layoutSettingPanel.hide()
@@ -1383,7 +1175,7 @@ class MainWindow(QMainWindow):
             videoWidget.checkPlaying.stop()
         self.config['layout'] = layoutConfig
         self._applyDanmakuBaseViewport()
-        self.dumpConfig.start()
+        self.configManager.save()
 
     def changeLiverPanelLayout(self, multiple):
         self.liverPanel.multiple = multiple
@@ -1432,12 +1224,11 @@ class MainWindow(QMainWindow):
         logging.info(f'restore Window layout.')
 
     def exportConfig(self):
-        self.savePath = QFileDialog.getSaveFileName(
+        savePath = QFileDialog.getSaveFileName(
             self, "选择保存路径", 'DD监控室预设', "*.json")[0]
-        if self.savePath:  # 保存路径有效
+        if savePath:
             try:
-                with open(self.savePath, 'w', encoding='utf-8', errors='ignore') as f:
-                    f.write(json.dumps(self.config, ensure_ascii=False))
+                self.configManager.export_to(savePath)
                 QMessageBox.information(self, '导出预设', '导出完成', QMessageBox.Ok)
             except Exception:
                 logging.exception('json 配置导出失败')
@@ -1445,64 +1236,11 @@ class MainWindow(QMainWindow):
     def importConfig(self):
         jsonPath = QFileDialog.getOpenFileName(self, "选择预设", None, "*.json")[0]
         if jsonPath:
-            if os.path.getsize(jsonPath):
-                config = {}
-                try:
-                    with open(jsonPath, 'r', encoding='utf-8', errors='ignore') as f:
-                        config = json.loads(f.read())
-                except UnicodeDecodeError:
-                    try:
-                        with open(jsonPath, 'r', encoding='gbk', errors='ignore') as f:
-                            config = json.loads(f.read())
-                    except Exception:
-                        logging.exception('json 配置导入失败')
-                        config = {}
-                except Exception:
-                    logging.exception('json 配置导入失败')
-                    config = {}
-                if config:  # 如果能成功读取到config文件
-                    config['layout'] = self.config['layout']  # 保持最新layout
-                    self.config = config
-                    while len(self.config['player']) < 16:
-                        self.config['player'].append('0')
-                    self.config['player'] = list(
-                        map(str, self.config['player']))
-                    if type(self.config['roomid']) == list:
-                        roomIDList = self.config['roomid']
-                        self.config['roomid'] = {}
-                        for roomID in roomIDList:
-                            self.config['roomid'][roomID] = False
-                    if '0' in self.config['roomid']:  # 过滤0房间号
-                        del self.config['roomid']['0']
-                    if 'quality' not in self.config:
-                        self.config['quality'] = [80] * 16
-                    if 'audioChannel' not in self.config:
-                        self.config['audioChannel'] = [0] * 16
-                    if 'translator' not in self.config:
-                        self.config['translator'] = [True] * 16
-                    for index, textSetting in enumerate(self.config['danmu']):
-                        if type(textSetting) == bool:
-                            self.config['danmu'][index] = [
-                                textSetting, 20, 1, 7, 0, '【 [ {']
-                    if 'hardwareDecode' not in self.config:
-                        self.config['hardwareDecode'] = True
-                    if 'maxCacheSize' not in self.config:
-                        self.config['maxCacheSize'] = 2048000
-                        logging.warning('最大缓存没有被设置，使用默认1G')
-                    if 'saveCachePath' not in self.config:
-                        self.config['saveCachePath'] = ''
-                        logging.warning('默认缓存备份路径为空 即自动清空')
-                    if 'startWithDanmu' not in self.config:
-                        self.config['startWithDanmu'] = True
-                        logging.warning('启动时加载弹幕没有被设置，默认加载')
-                    if 'showStartLive' not in self.config:
-                        self.config['showStartLive'] = True
-                    for danmuConfig in self.config['danmu']:
-                        if len(danmuConfig) == 6:
-                            danmuConfig.append(10)
-                    self.liverPanel.addLiverRoomList(self.config['roomid'])
-                    QMessageBox.information(
-                        self, '导入预设', '导入完成', QMessageBox.Ok)
+            if self.configManager.import_from(jsonPath, self.config['layout']):
+                self.config = self.configManager.config
+                self.liverPanel.addLiverRoomList(self.config['roomid'])
+                QMessageBox.information(
+                    self, '导入预设', '导入完成', QMessageBox.Ok)
 
     def muteExcept(self):
         if not self.soloToken:
@@ -1525,7 +1263,7 @@ class MainWindow(QMainWindow):
             self.videoWidgetList[id - 16].mediaReload()
             self.config['player'][id - 16] = roomID
             self.liverPanel.updatePlayingStatus(self.config['player'])
-            self.dumpConfig.start()
+            self.configManager.save()
 
     def keyPressEvent(self, QKeyEvent):
         if QKeyEvent.key() == Qt.Key_Escape or QKeyEvent.key() == Qt.Key_F:
