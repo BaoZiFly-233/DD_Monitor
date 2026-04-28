@@ -1,7 +1,7 @@
 """
 DD监控室视频播放窗口 - MPV 内核版本
 使用 python-mpv 库直接播放直播流 URL，无需本地 FLV 缓存下载
-???????????CPU ???????????
+降低 CPU 和内存占用
 """
 import json
 import os
@@ -14,7 +14,7 @@ from bilibili_api import live, sync
 from bili_credential import build_credential, normalize_credential_data
 from CommonWidget import Slider
 from remote import DanmakuEvent, remoteThread
-from danmu import TextBrowser
+from danmu import TextBrowser, DanmakuSettings, DISPLAY_RATIOS
 from danmaku_renderer import DanmakuRenderer
 from mpv_gl_widget import MpvGLWidget
 import logging
@@ -239,7 +239,7 @@ class VideoFrame(MpvGLWidget):
 class VideoWidget(QFrame):
     """
     视频播放窗口 - MPV 内核版本
-    ?????????????????? DD???.py ?????
+    信号连接由 DD监控室.py 中的 _connectVideoWidget 完成
     """
     mutedChanged = Signal(list)
     volumeChanged = Signal(list)
@@ -304,17 +304,10 @@ class VideoWidget(QFrame):
         else:
             self.setStyleSheet(
                 '#video{border-width:1px;border-style:solid;border-color:gray}')
-        self.textSetting = list(textSetting)
-        default_text_setting = [True, 20, 2, 6, 0, '【 [ {', 10, 0, True]
-        while len(self.textSetting) < 8:
-            self.textSetting.append(default_text_setting[len(self.textSetting)])
-        if len(self.textSetting) < 9:
-            self.textSetting.append(bool(self.textSetting[0]))
-        self.horiPercent = [0.1, 0.2, 0.3, 0.4, 0.5,
-                            0.6, 0.7, 0.8, 0.9, 1.0][self.textSetting[2]]
-        self.vertPercent = [0.1, 0.2, 0.3, 0.4, 0.5,
-                            0.6, 0.7, 0.8, 0.9, 1.0][self.textSetting[3]]
-        self.filters = textSetting[5].split(' ')
+        self.textSetting = DanmakuSettings.from_config_list(textSetting)
+        self.horiPercent = DISPLAY_RATIOS[self.textSetting.horizontal_index]
+        self.vertPercent = DISPLAY_RATIOS[self.textSetting.vertical_index]
+        self.filters = self.textSetting.translate_filters.split(' ')
         default_rolling_setting = {
             'font_family': 'Microsoft YaHei',
             'opacity': self.textSetting[1],
@@ -722,6 +715,9 @@ class VideoWidget(QFrame):
             return
         try:
             hwdec_mode = 'auto-copy' if self.hardwareDecode else 'no'
+            # Windows + OpenGL 渲染路径下硬件解码会导致画面花屏/green frames
+            # MPV 的 gpu-hwdec-interop 在 libmpv + ANGLE 组合下不稳定
+            # 上游追踪: mpv-player/mpv 和 shinchiro/mpv-winbuild-cmake
             if sys.platform.startswith('win') and hwdec_mode != 'no':
                 logging.warning('%s MPV OpenGL 渲染路径暂时禁用硬件解码以规避花屏', self.name_str)
                 hwdec_mode = 'no'
@@ -823,10 +819,10 @@ class VideoWidget(QFrame):
                 self.retryTimes = 0
                 self.videoFrame.setPlaybackActive(True)
                 if self._stream_candidate_index > 0:
-                    logging.warning(f'{self.name_str} ???????? #{self._stream_candidate_index + 1}')
+                    logging.warning(f'{self.name_str} 切换到备用流 #{self._stream_candidate_index + 1}')
                 return True
             except Exception:
-                logging.exception(f'{self.name_str} ?????????')
+                logging.exception(f'{self.name_str} 备用流切换失败')
         self.videoFrame.setPlaybackActive(False)
         return False
 
@@ -1277,7 +1273,7 @@ class VideoWidget(QFrame):
         self._restartDanmu()
 
     def setMedia(self, url):
-        """????? - MPV ???? URL???????"""
+        """接收直播流 - MPV 播放 URL 入口"""
         stream_candidates = url if isinstance(url, (list, tuple)) else [url]
         self._stream_candidates = [
             stream.strip()
@@ -1295,7 +1291,7 @@ class VideoWidget(QFrame):
 
         self._init_mpv()
         if not self._mpv:
-            logging.error(f'{self.name_str} MPV ????????????')
+            logging.error(f'{self.name_str} MPV 播放器未初始化或加载失败')
             self.videoFrame.setPlaybackActive(False)
             self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
             self.checkPlaying.stop()
