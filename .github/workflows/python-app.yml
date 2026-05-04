@@ -124,6 +124,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout (for release notes)
+        uses: actions/checkout@v4
+
       - name: Download package artifact
         uses: actions/download-artifact@v4
         with:
