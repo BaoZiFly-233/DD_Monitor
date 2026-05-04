@@ -31,8 +31,12 @@ class Slider(QSlider):
         pass
 
     def updateValue(self, QPoint):
-        value = QPoint.x()
-        if value > 100: value = 100
-        elif value < 0: value = 0
+        # 按滑块实际宽度比例映射值
+        slider_width = max(self.width(), 1)
+        value = int(QPoint.x() / slider_width * self.maximum())
+        if value > self.maximum():
+            value = self.maximum()
+        elif value < 0:
+            value = 0
         self.setValue(value)
         self.value.emit(value)

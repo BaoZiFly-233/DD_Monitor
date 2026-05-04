@@ -25,7 +25,6 @@ import http_utils
 
 _MPV_DLL_HANDLES = []
 _MPV_MODULE = None
-_MPV_IMPORT_ATTEMPTED = False
 
 
 def prepare_mpv_runtime():
@@ -67,18 +66,15 @@ def prepare_mpv_runtime():
 
 
 def load_mpv_module():
-    global _MPV_MODULE, _MPV_IMPORT_ATTEMPTED
+    global _MPV_MODULE
     if _MPV_MODULE is not None:
         return _MPV_MODULE
-    if _MPV_IMPORT_ATTEMPTED:
-        return None
 
-    _MPV_IMPORT_ATTEMPTED = True
     prepare_mpv_runtime()
     try:
         import mpv as mpv_module
     except (ImportError, OSError):
-        logging.warning('python-mpv 未安装或 libmpv 未找到')
+        logging.warning('python-mpv 未安装或 libmpv 未找到，后续调用将重试')
         return None
 
     _MPV_MODULE = mpv_module
@@ -503,10 +499,10 @@ class VideoWidget(QFrame):
         if self.textBrowser is None:
             return
 
-        color = str(hex(int(browser_opacity / 101 * 256)))[2:] + '000000'
-        self.textBrowser.textBrowser.setStyleSheet('background-color:#%s' % color)
-        self.textBrowser.transBrowser.setStyleSheet('background-color:#%s' % color)
-        self.textBrowser.msgsBrowser.setStyleSheet('background-color:#%s' % color)
+        alpha_hex = format(max(0, min(255, int(round(browser_opacity / 100.0 * 255)))), '02x')
+        self.textBrowser.textBrowser.setStyleSheet(f'background-color:#{alpha_hex}000000')
+        self.textBrowser.transBrowser.setStyleSheet(f'background-color:#{alpha_hex}000000')
+        self.textBrowser.msgsBrowser.setStyleSheet(f'background-color:#{alpha_hex}000000')
 
         self.textBrowser.textBrowser.setFont(QFont('Microsoft JhengHei', browser_font_size, QFont.Bold))
         self.textBrowser.transBrowser.setFont(QFont('Microsoft JhengHei', browser_font_size, QFont.Bold))
@@ -741,8 +737,8 @@ class VideoWidget(QFrame):
             logging.info(f'{self.name_str} MPV 实例已创建')
             self.videoFrame.setPlayer(self._mpv)
             self.applyDanmuSettings()
-        except Exception:
-            logging.exception(f'{self.name_str} MPV 初始化失败')
+        except Exception as e:
+            logging.exception('%s MPV 初始化失败: %s', self.name_str, e)
             self._mpv = None
 
     def get_volume(self):
@@ -750,7 +746,8 @@ class VideoWidget(QFrame):
         if self._mpv:
             try:
                 return int(self._mpv.volume or 0)
-            except Exception:
+            except Exception as e:
+                logging.debug('%s get_volume 失败: %s', self.name_str, e)
                 return 0
         return 0
 
@@ -759,15 +756,8 @@ class VideoWidget(QFrame):
         if self._mpv:
             try:
                 self._mpv.volume = int(value)
-            except Exception:
-                pass
-
-    def get_mute(self):
-        """获取静音状态"""
-        if self._mpv:
-            try:
-                return bool(self._mpv.mute)
-            except Exception:
+            except Exception as e:
+                logging.debug('%s get_mute 失败: %s', self.name_str, e)
                 return False
         return False
 
@@ -790,10 +780,12 @@ class VideoWidget(QFrame):
                         self.mediaReload()
                 else:
                     self.retryTimes = 0
-            except Exception:
+            except Exception as e:
+                logging.debug('%s checkPlayStatus 异常: %s', self.name_str, e)
                 self.retryTimes += 1
                 if self.retryTimes > 10:
                     self.mediaReload()
+        return False
 
     def refreshTimeStamp(self):
         if self.liveStartTime:
@@ -1282,7 +1274,7 @@ class VideoWidget(QFrame):
         ]
         self._stream_candidate_index = -1
         if not self._stream_candidates:
-            logging.error(f'{self.name_str} 未获取到可播放的流地址')
+            logging.error('%s 未获取到可播放的流地址', self.name_str)
             self.videoFrame.setPlaybackActive(False)
             self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
             self.checkPlaying.stop()
@@ -1317,15 +1309,6 @@ class VideoWidget(QFrame):
         if self.startWithDanmu:
             self._restartDanmu()
             self.showTextBrowser()
-    def copyCache(self, copyFile):
-        """兼容保留"""
-        pass
-
-    # ==== MPV 实例管理 ====
-
-    def newPlayer(self):
-        """延迟初始化 MPV"""
-        pass  # MPV 在 setMedia 时按需初始化
 
     def playerRestart(self):
         """重置播放器"""

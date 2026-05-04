@@ -24,7 +24,7 @@ def unraisableExceptionHandler(exc_type,exc_value,exc_traceback,err_msg,object):
                   "************************************************************\n")
 
 
-def thraedingExceptionHandler(exc_type,exc_value,exc_traceback,thread):
+def threadingExceptionHandler(exc_type, exc_value, exc_traceback, thread):
     logging.error("\n************!!!UNCAUGHT THREADING EXCEPTION!!!***********\n" +
                   ("Type: %s" % exc_type) + '\n' +
                   ("Value: %s" % exc_value) + '\n' +
@@ -38,7 +38,7 @@ def loggingSystemInfo():
     systemCmd = ""
     gpuCmd = ""
     if platform.system() == 'Windows':
-        systemCmd = r"\u C:\Windows\System32\systeminfo.exe"
+        systemCmd = "C:\\Windows\\System32\\systeminfo.exe"
         wmi_exe = r"C:\Windows\System32\wbem\WMIC.exe"
         gpu_property_list = "AdapterCompatibility, Caption, DeviceID, DriverDate, DriverVersion, VideoModeDescription"
         gpuCmd = f"{wmi_exe} PATH win32_VideoController GET {gpu_property_list} /FORMAT:list"
