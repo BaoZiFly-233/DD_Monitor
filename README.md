@@ -2,11 +2,11 @@
 
 基于 PySide6 + MPV 的 B站多直播间监控工具，支持同时观看最多 32 个直播间，实时弹幕显示，低资源占用。
 
-> **新版本**: v3.50 魔改版，弹幕系统全面重构为 MPV `osd-overlay` 滚动弹幕渲染，告别 `sub-reload` 闪烁。
+> **当前版本**: v3.51 魔改版 — 弹幕系统全面重构为 MPV `osd-overlay` 滚动弹幕渲染。
 
-## 截图
-
-<!-- TODO: 添加应用截图 -->
+> **原作者**: [神君Channel](https://space.bilibili.com/637783) · **魔改维护**: [BaoZi_Fly](https://space.bilibili.com/34094740)
+>
+> 本项目 fork 自 [zhimingshenjun/DD_Monitor](https://github.com/zhimingshenjun/DD_Monitor)，感谢原作者的开源贡献。
 
 ## 功能特性
 
@@ -19,7 +19,7 @@
 - 自定义窗口布局（拖拽网格、预设切换）
 
 ### 弹幕系统
-- **滚动弹幕**: MPV `osd-overlay` 渲染，无临时 ASS 文件、无字幕刷新闪烁，滚动流畅接近原生
+- **滚动弹幕**: MPV `osd-overlay` 渲染，无临时 ASS 文件、无字幕刷新闪烁
 - **弹幕机**: 可拖拽的独立悬浮窗，半透明显示，支持弹幕/同传分离、礼物和进入信息筛选
 - 同传弹幕过滤（空格分隔关键词），自动归类到独立面板
 - 弹幕机透明度 / 字体 / 横向纵向比例均可调
@@ -50,13 +50,13 @@
 
 | 组件 | 说明 |
 |------|------|
-| Python | 3.8+ |
+| Python | 3.9+ |
 | libmpv | MPV 播放器库 ([Windows 下载](https://github.com/shinchiro/mpv-winbuild-cmake/releases)) |
 | 操作系统 | Windows / macOS / Linux |
 
 **Windows 用户**: 下载 `libmpv-2.dll` 放在项目根目录，或设置环境变量 `MPV_DLL` 指向 DLL 路径。
 
-**macOS 用户**: 
+**macOS 用户**:
 ```bash
 brew install mpv
 ```
@@ -117,7 +117,7 @@ python DD监控室.py
 1. 切换画质至较低档位（流畅）
 2. 在菜单「解码方案」中尝试切换硬解/软解
 3. 减少同时播放的窗口数量
-4. Windows 下 OpenGL 渲染路径已自动禁用硬件解码以规避花屏，这可能导致 CPU 占用略高
+4. Windows 下 OpenGL 渲染路径已自动禁用硬件解码以规避花屏
 
 ### 扫码登录失败
 
@@ -141,25 +141,28 @@ python DD监控室.py
 
 ```
 DD监控室.py              # 主窗口入口（配置加载、窗口管理、全局控制）
-config_manager.py         # 配置管理（加载、保存、迁移、去抖动写入）
+config_manager.py         # 配置管理（加载、保存、迁移、备份轮转）
 VideoWidget_mpv.py        # MPV 播放器窗口（流获取、播放控制、弹幕管理）
-danmu.py                  # 弹幕系统（滚动渲染器、弹幕机 UI、设置面板类）
+danmu.py                  # 弹幕系统（弹幕机 UI、全局设置面板）
+danmaku_renderer.py       # 滚动弹幕渲染器（OpenGL 叠加层）
+danmaku_layout.py         # 弹幕布局引擎（滚动/顶部/底部轨道）
 LiverSelect.py            # 主播卡片面板（热门直播、关注列表、VUP 名单）
 login.py                  # 扫码登录模块
 remote.py                 # 弹幕 WebSocket 接收线程
 http_utils.py             # 共享 HTTP 连接池
 CommonWidget.py           # 通用组件（Slider 等）
 bili_credential.py        # B站凭据规范化工具
-LayoutConfig.py           # 布局设置面板
-LayoutPanel.py            # 布局模版
+LayoutConfig.py           # 布局配置数据
+LayoutPanel.py            # 布局选择面板
+mpv_gl_widget.py          # MPV OpenGL 渲染控件
 ReportException.py        # 异常日志收集
 checkUpdate.py            # 版本更新检查
 log.py                    # 日志初始化
-blivedm/                  # B站弹幕库
-utils/                    # 资源文件 (QSS主题, VUP名单, 启动图, 图标)
+pay.py                    # 赞助页面
+blivedm/                  # B站弹幕协议库（vendored）
+utils/                    # 资源文件 (QSS主题、启动图、图标)
 scripts/                  # 打包脚本
-plugins/                  # 插件
-plugins_lite/             # 轻量插件
+docs/                     # 文档
 ```
 
 ## 打包发布
@@ -169,11 +172,11 @@ plugins_lite/             # 轻量插件
 ```bat
 scripts\build_win.bat x64
 # 可选环境变量
-set APP_VERSION=3.50
+set APP_VERSION=3.51
 set MPV_DLL=D:\path\to\libmpv-2.dll
 ```
 
-打包完成后在 `release/` 目录生成 `DDMonitor-3.50-windows-x64.zip`。
+打包完成后在 `release/` 目录生成 `DDMonitor-3.51-windows-x64.zip`。
 
 ### 其他平台
 
@@ -184,14 +187,19 @@ pyinstaller DDMonitor_unix.spec    # Linux
 pyinstaller DDMonitor_macos.spec   # macOS
 ```
 
+## 更新日志
+
+详见 [docs/release-notes/](docs/release-notes/)
+
 ## 致谢
 
-- [blivedm](https://github.com/xfgryujk/blivedm) — B站弹幕协议库
+- **原作者**: [神君Channel](https://space.bilibili.com/637783) ([zhimingshenjun/DD_Monitor](https://github.com/zhimingshenjun/DD_Monitor)) — 项目原始开发者
+- [blivedm](https://github.com/xfgryujk/blivedm) — B站弹幕 WebSocket 协议库
 - [mpv](https://mpv.io/) — 开源视频播放器
 - [bilibili-api-python](https://github.com/Nemo2011/bilibili-api) — B站 API 封装
-- [DD_Monitor](https://github.com/zhimingshenjun/DD_Monitor) — 原始项目
 - [PySide6](https://wiki.qt.io/Qt_for_Python) — Qt for Python GUI 框架
+- 特别鸣谢：大锅饭、美东矿业、inkydragon、聪_哥 PR
 
 ## License
 
-MIT
+MIT — 原作者 [zhimingshenjun](https://github.com/zhimingshenjun) 保留原始版权。魔改部分同样以 MIT 协议开源。

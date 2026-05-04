@@ -18,7 +18,7 @@ exit /b 1
 )
 
 set "APP_VERSION=%APP_VERSION%"
-if "%APP_VERSION%"=="" set "APP_VERSION=3.50"
+if "%APP_VERSION%"=="" set "APP_VERSION=3.51"
 
 set "DIST_NAME=DDMonitor"
 set "DIST_DIR=%ROOT_DIR%dist\%DIST_NAME%"

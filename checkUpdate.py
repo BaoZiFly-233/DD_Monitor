@@ -17,7 +17,7 @@ class checkUpdate(QThread):
         infos = ''
         try:
             html = http_utils.get(
-                r'https://gitee.com/zhimingshenjun/DD_Monitor_latest/releases',
+                r'https://github.com/BaoZiFly-233/DD_Monitor/releases',
                 timeout=5
             )
         except Exception:
