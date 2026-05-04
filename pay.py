@@ -64,6 +64,7 @@ class pay(QDialog):
         layout = QGridLayout()
         self.setLayout(layout)
         txt = u'DD监控室由B站up：神君Channel 业余时间独立开发制作。\n\
+\n本魔改版由 BaoZi_Fly 维护：https://space.bilibili.com/34094740\n\
 \n所有功能全部永久免费给广大DD使用\n\
 \n有独立经济来源的老板们如觉得监控室好用的话，不妨小小支持亿下\n\
 \n一元也是对我继续更新监控室的莫大鼓励。十分感谢！\n'

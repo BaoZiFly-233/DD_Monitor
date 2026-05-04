@@ -180,17 +180,23 @@ class Version(QWidget):
 
     def __init__(self, version):
         super(Version, self).__init__()
-        self.resize(350, 150)
+        self.resize(350, 220)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
         layout.addWidget(QLabel(f'DD监控室 v{version} (2026/04/28)'), 0, 0, 1, 2)
-        layout.addWidget(QLabel('by 神君Channel'), 1, 0, 1, 2)
-        layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 2, 0, 1, 2)
+        layout.addWidget(QLabel('原作者：神君Channel'), 1, 0, 1, 2)
+        layout.addWidget(QLabel('魔改维护：BaoZi_Fly'), 2, 0, 1, 2)
+        layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 3, 0, 1, 2)
         releases_url = QLabel('')
         releases_url.setOpenExternalLinks(True)
         releases_url.setText(_translate("MainWindow", "<html><head/><body><p><a href=\"https://space.bilibili.com/637783\">\
-<span style=\" text-decoration: underline; color:#cccccc;\">https://space.bilibili.com/637783</span></a></p></body></html>", None))
+<span style=\" text-decoration: underline; color:#cccccc;\">原作者：https://space.bilibili.com/637783</span></a></p></body></html>", None))
         layout.addWidget(releases_url, 1, 1, 1, 2, Qt.AlignRight)
+        fork_url = QLabel('')
+        fork_url.setOpenExternalLinks(True)
+        fork_url.setText(_translate("MainWindow", "<html><head/><body><p><a href=\"https://space.bilibili.com/34094740\">\
+<span style=\" text-decoration: underline; color:#cccccc;\">魔改：https://space.bilibili.com/34094740</span></a></p></body></html>", None))
+        layout.addWidget(fork_url, 2, 1, 1, 2, Qt.AlignRight)
 
         checkButton = QPushButton('检查更新')
         checkButton.setFixedHeight(40)
@@ -915,7 +921,7 @@ class MainWindow(QMainWindow):
 
     def openGithub(self):
         QDesktopServices.openUrl(
-            QUrl(r'https://github.com/zhimingshenjun/DD_Monitor'))
+            QUrl(r'https://github.com/BaoZiFly-233/DD_Monitor'))
 
     def openBilibili(self):
         QDesktopServices.openUrl(

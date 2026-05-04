@@ -672,7 +672,7 @@ class DownloadVTBList(QThread):
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36'}
-            r = http_utils.get(r'https://github.com/zhimingshenjun/DD_Monitor/blob/master/utils/vtb.csv', headers=headers)
+            r = http_utils.get(r'https://raw.githubusercontent.com/BaoZiFly-233/DD_Monitor/master/utils/vtb.csv', headers=headers)
             # r.encoding = 'utf8'
             vtbList = []
             html = r.text.split('\n')
