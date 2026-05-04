@@ -101,16 +101,23 @@ class pay(QDialog):
         self.bossTable.clear()
         self.bossTable.setColumnCount(2)
         self.bossTable.setRowCount(len(bossList))
-        if len(bossList) > 3:
+        if len(bossList) >= 3:
             biggestBossList = []
             for _ in range(3):
-                sc = 0
+                if not bossList:
+                    break
+                sc = -1.0
+                bossNum = None
                 for cnt, i in enumerate(bossList):
-                    money = float(i[1].split(' ')[0])
+                    try:
+                        money = float(str(i[1]).split(' ')[0])
+                    except (ValueError, IndexError):
+                        money = 0.0
                     if money > sc:
                         sc = money
                         bossNum = cnt
-                biggestBossList.append(bossList.pop(bossNum))
+                if bossNum is not None:
+                    biggestBossList.append(bossList.pop(bossNum))
             for y, i in enumerate(biggestBossList):
                 self.bossTable.setItem(y, 0, QTableWidgetItem(i[0]))
                 self.bossTable.setItem(y, 1, QTableWidgetItem(i[1]))

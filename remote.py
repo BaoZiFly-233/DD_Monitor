@@ -7,6 +7,7 @@ import asyncio
 import http.cookies
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
@@ -14,6 +15,17 @@ from PySide6.QtCore import QThread, Signal
 
 import blivedm
 import blivedm.models.web as web_models
+
+
+@dataclass
+class DanmakuEvent:
+    """统一弹幕事件 — 标准化来自不同来源的弹幕数据"""
+    kind: str = 'danmaku'
+    text: str = ''
+    uname: str = ''
+    color: str = '#FFFFFF'
+    price: float = 0.0
+    position: str = 'scroll'
 
 
 def _generate_buvid3() -> str:
@@ -25,6 +37,7 @@ class DanmakuHandler(blivedm.BaseHandler):
     """弹幕事件处理器 - 通过 Qt Signal 直接推送消息到主线程"""
 
     def __init__(self, message_signal):
+        super().__init__()
         self._signal = message_signal
 
     def _on_heartbeat(self, client: blivedm.BLiveClient, message: web_models.HeartbeatMessage):
@@ -67,6 +80,7 @@ class remoteThread(QThread):
         self.sessionData = sessionData if sessionData else ''
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._stop_event: Optional[asyncio.Event] = None
 
     def setRoomID(self, roomID):
         self.roomID = str(roomID)
@@ -75,10 +89,10 @@ class remoteThread(QThread):
         self.sessionData = sessionData if sessionData else ''
 
     def stop(self):
-        """安全停止弹幕线程"""
+        """安全停止弹幕线程 — 通过 asyncio.Event 通知协程优雅退出"""
         self._running = False
-        if self._loop and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop and self._loop.is_running() and self._stop_event is not None:
+            self._loop.call_soon_threadsafe(self._stop_event.set)
 
     def run(self):
         if not self.roomID or self.roomID == '0':
@@ -89,9 +103,8 @@ class remoteThread(QThread):
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_until_complete(self._connect())
-        except RuntimeError as e:
-            if 'Event loop stopped' not in str(e):
-                logging.exception(f'弹幕线程 room={self.roomID} 异常退出')
+        except RuntimeError:
+            logging.exception(f'弹幕线程 room={self.roomID} 异常退出')
         except Exception:
             logging.exception(f'弹幕线程 room={self.roomID} 异常退出')
         finally:
@@ -120,13 +133,18 @@ class remoteThread(QThread):
         try:
             room_id = int(self.roomID)
             client = blivedm.BLiveClient(room_id, session=session)
-            handler = DanmakuHandler(self.message)
-            client.set_handler(handler)
+            client.set_handler(DanmakuHandler(self.message))
+            # 线性退避重连策略，避免 32 个窗口同时重连造成风暴
+            client.set_reconnect_policy(
+                blivedm.utils.make_linear_retry_policy(
+                    start_interval=1.0, interval_step=2.0, max_interval=30.0
+                )
+            )
             client.start()
             logging.info(f'弹幕连接已启动 room={self.roomID}')
             try:
-                while self._running:
-                    await asyncio.sleep(0.5)
+                self._stop_event = asyncio.Event()
+                await self._stop_event.wait()  # 阻塞直到 stop() 设置 event
             finally:
                 await client.stop_and_close()
                 logging.info(f'弹幕连接已关闭 room={self.roomID}')

@@ -47,6 +47,7 @@ class CredentialRefreshWorker(QThread):
     def run(self):
         credential = build_credential(self.credential_data, sessdata=self.sessionData)
         if credential is None:
+            self.failed.emit('凭据无效，无法刷新')
             return
         try:
             if sync(credential.check_refresh()):
@@ -227,8 +228,7 @@ class CheckDanmmuProvider(QThread):
             danmu_ip = anwsers[0].to_text()
             logging.info("弹幕IP: %s" % danmu_ip)
         except Exception as e:
-            logging.error("解析弹幕域名失败")
-            logging.error(str(e))
+            logging.error('解析弹幕域名失败: %s', e)
 
 
 class MainWindow(QMainWindow):
@@ -245,7 +245,7 @@ class MainWindow(QMainWindow):
         self.cacheFolder = cacheFolder
 
         # ---- json 配置文件加载 ----
-        self.configManager = ConfigManager(application_path)
+        self.configManager = ConfigManager(application_path, parent=self)
         self.config = self.configManager.load()
         self.credential = normalize_credential_data(self.config.get('credential', {}), sessdata=self.config['sessionData'])
         self.sessionData = self.credential.get('sessdata', '')
@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         self.loginBrowser.userInfoReady.connect(self.onUserInfoReady)
         # 启动时如果有已保存的 sessionData，验证登录状态
         if any(self.credential.values()):
-            self.loginBrowser.setCredential(self.credential)
+            self.loginBrowser.setSessionData(self.credential.get('sessdata', ''))
         elif self.config['sessionData']:
             self.loginBrowser.setSessionData(self.config['sessionData'])
         else:
@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
             self.liverPanel.setCredential(self.credential)
         # self.liverPanel.addLiverRoomWidget.getHotLiver.start()
         self.liverPanel.addToWindow.connect(self.addCoverToPlayer)
-        self.liverPanel.dumpConfig.connect(lambda: self.configManager.save())  # 保存config
+        self.liverPanel.dumpConfig.connect(self._onDumpRoomConfig)  # 保存房间配置
         self.liverPanel.refreshIDList.connect(
             self.refreshPlayerStatus)  # 刷新播放器
         self.liverPanel.startLiveList.connect(self.startLiveTip)  # 开播提醒
@@ -996,7 +996,7 @@ class MainWindow(QMainWindow):
     def _onCredentialRefreshed(self, refreshed):
         logging.info('[LOGIN] 凭据刷新成功')
         self.updateCredential(refreshed)
-        self.loginBrowser.setCredential(refreshed)
+        self.loginBrowser.setSessionData(refreshed.get('sessdata', ''))
 
     def _onCredentialRefreshFailed(self, error):
         logging.warning(f'[LOGIN] 凭据刷新失败: {error}')
@@ -1026,6 +1026,11 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f'DD监控室{self.versionDisplay} - 已登录')
             if hasattr(self, 'loginAction'):
                 self.loginAction.setText('账号管理')
+
+    def _onDumpRoomConfig(self):
+        """回写房间列表到 config 并保存 — 否则 roomid 永不持久化"""
+        self.config['roomid'] = dict(self.liverPanel.roomIDDict)
+        self.configManager.save()
 
     def onUserInfoReady(self, info):
         """登录成功后收到用户信息，更新标题并自动获取关注列表"""
@@ -1149,6 +1154,7 @@ class MainWindow(QMainWindow):
             videoWidget.close()
         self.saveDockLayout()
         self.configManager.save_now()
+        QCloseEvent.accept()
 
     def openLayoutSetting(self):
         self.layoutSettingPanel.hide()
@@ -1159,8 +1165,10 @@ class MainWindow(QMainWindow):
             videoWidget.mediaPlay(1)  # 全部暂停
         for index, _ in enumerate(self.config['layout']):
             self.videoWidgetList[index].hideTextBrowser()
-            self.mainLayout.itemAt(0).widget().hide()
-            self.mainLayout.removeWidget(self.mainLayout.itemAt(0).widget())
+            item = self.mainLayout.itemAt(0)
+            if item is not None and item.widget() is not None:
+                item.widget().hide()
+                self.mainLayout.removeWidget(item.widget())
         for index, layout in enumerate(layoutConfig):
             y, x, h, w = layout
             videoWidget = self.videoWidgetList[index]
@@ -1347,11 +1355,11 @@ if __name__ == '__main__':
 
     # 日志采集初始化
     log.init_log(application_path)
-    from ReportException import thraedingExceptionHandler, uncaughtExceptionHandler,\
+    from ReportException import threadingExceptionHandler, uncaughtExceptionHandler,\
         unraisableExceptionHandler, loggingSystemInfo
     sys.excepthook = uncaughtExceptionHandler
     sys.unraisablehook = unraisableExceptionHandler
-    threading.excepthook = thraedingExceptionHandler
+    threading.excepthook = threadingExceptionHandler
     # 系统信息收集延迟到后台线程
     _sysInfoThread = threading.Thread(target=loggingSystemInfo, daemon=True)
     _sysInfoThread.start()

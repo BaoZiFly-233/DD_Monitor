@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QTimer
 # 常量
 MAX_WINDOWS = 16
 WINDOW_CARD_WIDTH = 169
-DISPLAY_RATIOS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+from danmu import DISPLAY_RATIOS  # 弹幕显示比例（定义在 danmu.py 中）
 
 # 弹幕配置默认值 (兼容旧 list 格式)
 DEFAULT_DANMU_CONFIG = [True, 50, 1, 7, 0, '【 [ {', 10, 0, True]
@@ -194,18 +194,32 @@ class ConfigManager(QObject):
         self._flush()
 
     def _flush(self):
-        """实际写入磁盘"""
+        """实际写入磁盘 — 先轮转旧备份再写新配置，确保至少保留一个历史版本"""
         if not self._dirty:
             return
         self._dirty = False
-        self._write_json(self.config_path, self.config)
-        for backup_number in [1, 2, 3]:
-            backup_path = os.path.join(
-                self.application_path, f'utils/config_备份{backup_number}.json')
+        # 轮转备份：备份2 → 备份3, 备份1 → 备份2, 当前配置文件 → 备份1
+        for src_num, dst_num in [(2, 3), (1, 2)]:
+            src = os.path.join(self.application_path, f'utils/config_备份{src_num}.json')
+            dst = os.path.join(self.application_path, f'utils/config_备份{dst_num}.json')
             try:
-                self._write_json(backup_path, self.config)
-            except Exception:
+                if os.path.exists(src):
+                    if os.path.exists(dst):
+                        os.remove(dst)
+                    os.rename(src, dst)
+            except OSError:
                 pass
+        # 当前 config.json → 备份1
+        backup1 = os.path.join(self.application_path, 'utils/config_备份1.json')
+        try:
+            if os.path.exists(self.config_path):
+                if os.path.exists(backup1):
+                    os.remove(backup1)
+                os.rename(self.config_path, backup1)
+        except OSError:
+            pass
+        # 写入新配置
+        self._write_json(self.config_path, self.config)
 
     def _write_json(self, path, data):
         try:

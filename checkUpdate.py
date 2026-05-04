@@ -7,7 +7,6 @@ from PySide6.QtGui import QDesktopServices
 
 class checkUpdate(QThread):
     update = Signal(str, float, str)
-    latest = Signal(float)
 
     def __init__(self, version):
         super(checkUpdate, self).__init__()
@@ -51,8 +50,6 @@ class checkUpdate(QThread):
                 break
         if token:
             self.update.emit(link, version, infos)
-        else:
-            self.latest.emit(version)
 
 
 class updateReminder(QWidget):
@@ -91,18 +88,3 @@ class updateReminder(QWidget):
 
     def openURL(self):
         QDesktopServices.openUrl(QUrl(self.link))
-
-
-class latestRemainder(QWidget):
-    def __init__(self):
-        super(latestRemainder, self).__init__()
-        self.resize(480, 180)
-        self.setWindowTitle('检查版本')
-        self.layout = QGridLayout()
-        self.setLayout(self.layout)
-        self.label = QLabel()
-        self.layout.addWidget(self.label)
-
-    def _show(self, version):
-        self.label.setText('已经是最新版本: v%.1f' % version)
-        self.show()

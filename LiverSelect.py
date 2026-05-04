@@ -113,6 +113,8 @@ class RecordThread(QThread):
 
     def __init__(self, roomID):
         super(RecordThread, self).__init__()
+        import threading
+        self._lock = threading.Lock()
         self.roomID = roomID
         self.recordToken = False
         self.downloadToken = False
@@ -122,18 +124,24 @@ class RecordThread(QThread):
         self.reconnectCount = 0
 
     def checkDownlods(self):
-        if self.downloadToken:
-            self.downloadToken = False
-            if not self.downloadTime % 60:  # 每分钟刷新一次
-                self.downloadTimer.emit('%dmin' % (self.downloadTime / 60))
-            self.downloadTime += 3
-        else:
-            self.reconnectCount += 1
-            if self.reconnectCount > 60:  # 60 x 3s = 180s重试 超时了就退出
-                self.downloadError.emit(self.roomID)
+        with self._lock:
+            if self.downloadToken:
+                self.downloadToken = False
+                if not self.downloadTime % 60:  # 每分钟刷新一次
+                    self.downloadTimer.emit('%dmin' % (self.downloadTime / 60))
+                self.downloadTime += 3
+            else:
+                self.reconnectCount += 1
+                if self.reconnectCount > 60:  # 60 x 3s = 180s重试 超时了就退出
+                    self.downloadError.emit(self.roomID)
 
     def setSavePath(self, savePath):
         self.savePath = savePath
+
+    def stopRecording(self):
+        """安全停止录制（线程安全）"""
+        with self._lock:
+            self.recordToken = False
 
     def run(self):
         self.reconnectCount = 0
@@ -142,16 +150,21 @@ class RecordThread(QThread):
             r = http_utils.get(api, headers=header)
             url = json.loads(r.text)['data']['durl'][0]['url']
             download = http_utils.get(url, stream=True, headers=header)
-            self.recordToken = True
+            with self._lock:
+                self.recordToken = True
             self.downloadTime = 0  # 初始化下载时间为0s
             self.cacheVideo = open(self.savePath, 'wb')
-            for chunk in download.iter_content(chunk_size=512):
-                if not self.recordToken:
-                    break
-                if chunk:
-                    self.downloadToken = True
-                    self.cacheVideo.write(chunk)
-            self.cacheVideo.close()
+            try:
+                for chunk in download.iter_content(chunk_size=512):
+                    with self._lock:
+                        if not self.recordToken:
+                            break
+                    if chunk:
+                        with self._lock:
+                            self.downloadToken = True
+                        self.cacheVideo.write(chunk)
+            finally:
+                self.cacheVideo.close()
         except Exception:
             logging.exception("下载视频到缓存失败")
 
@@ -406,7 +419,7 @@ class CoverLabel(QLabel):
                     elif self.recordState == 1:  # 录制中→取消录制
                         self.recordState = 0  # 取消录制
                         self.recordThread.checkTimer.stop()
-                        self.recordThread.recordToken = False  # 设置录像线程标志位让它自行退出结束
+                        self.recordThread.stopRecording()  # 设置录像线程标志位让它自行退出结束
                         self.refreshStateLabel()
                     elif self.recordState == 2:  # 等待录制→取消录制
                         self.recordState = 0  # 取消录制
@@ -590,7 +603,6 @@ class GetFollows(QThread):
         followsIDs = set()
         roomIDList = []
         req_headers = {
-            'Connection': 'close',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                           '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://space.bilibili.com/',
@@ -820,14 +832,13 @@ class AddLiverRoomWidget(QWidget):
         self.hacoTable.setColumnCount(3)
         try:
             self.vtbList = []
-            vtbs = open(os.path.join(self.application_path, 'utils/vtb.csv'), 'r', encoding='utf-8')
-            for line in vtbs:
-                line = line.strip()
-                if line:
-                    self.vtbList.append(line.split(','))
-                else:
-                    self.vtbList.append(['', '', ''])
-            vtbs.close()
+            with open(os.path.join(self.application_path, 'utils/vtb.csv'), 'r', encoding='utf-8') as vtbs:
+                for line in vtbs:
+                    line = line.strip()
+                    if line:
+                        self.vtbList.append(line.split(','))
+                    else:
+                        self.vtbList.append(['', '', ''])
             self.hacoTable.setRowCount(len(self.vtbList))
             self.hacoTable.setVerticalHeaderLabels(['添加'] * len(self.vtbList))
             for i in range(len(self.vtbList)):
@@ -939,6 +950,8 @@ class AddLiverRoomWidget(QWidget):
                     logging.exception('热门直播表填充失败')
 
     def refreshHacoList(self):
+        if self.refreshButton.text() == '更新中...':
+            return
         self.refreshButton.clicked.disconnect(self.refreshHacoList)
         self.refreshButton.setText('更新中...')
         self.downloadVTBList.start()
@@ -948,10 +961,9 @@ class AddLiverRoomWidget(QWidget):
 
     def collectVTBList(self, vtbList):
         try:
-            vtbs = open(os.path.join(self.application_path, 'utils/vtb.csv'), 'w', encoding='utf-8')
-            for line in vtbList:
-                vtbs.write(line)
-            vtbs.close()
+            with open(os.path.join(self.application_path, 'utils/vtb.csv'), 'w', encoding='utf-8') as vtbs:
+                for line in vtbList:
+                    vtbs.write(line)
             self.vtbList = []
             for line in vtbList:
                 self.vtbList.append(line.split(','))
@@ -1500,7 +1512,9 @@ class LiverPanel(QWidget):
         self.roomIDDict.clear()
         self.oldLiveStatus.clear()
         for cover in self.coverList:
-            cover.roomID = '0'
+            cover.hide()
+            cover.deleteLater()
+        self.coverList.clear()
         self._applyRoomListMutation(request_refresh=True, refresh_panel=True, dump_config=True)
 
     def changeTop(self, info):
