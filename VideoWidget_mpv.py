@@ -803,13 +803,13 @@ class VideoWidget(QFrame):
             try:
                 idle = self._mpv.core_idle
                 if idle:
-                    if self._tryPlayNextStreamCandidate():
+                    if self._tryPlayNextStreamCandidate(max_tries=2):
                         return
                     self.retryTimes += 1
-                    if self.retryTimes > 10:
+                    if self.retryTimes > 4:  # 4×3s=12s 后重载
                         self.mediaReload()
                     # 连续卡顿超过阈值，自动降一档画质
-                    if self.retryTimes > 20 and self.quality > 80:
+                    if self.retryTimes > 8 and self.quality > 80:
                         old_q = self.quality
                         self.quality = self._nextLowerQuality(self.quality)
                         logging.warning('%s 自适应画质: %s -> %s', self.name_str, old_q, self.quality)
@@ -820,7 +820,7 @@ class VideoWidget(QFrame):
             except Exception as e:
                 logging.debug('%s checkPlayStatus 异常: %s', self.name_str, e)
                 self.retryTimes += 1
-                if self.retryTimes > 10:
+                if self.retryTimes > 4:
                     self.mediaReload()
         return False
 
@@ -843,12 +843,15 @@ class VideoWidget(QFrame):
             m, s = divmod(m, 60)
             self.timestampLabel.setText('%01d:%02d:%02d' % (h, m, s))
 
-    def _tryPlayNextStreamCandidate(self):
+    def _tryPlayNextStreamCandidate(self, max_tries=2):
         if not self._mpv or self._stream_candidate_index + 1 >= len(self._stream_candidates):
             return False
-        while self._stream_candidate_index + 1 < len(self._stream_candidates):
+        tried = 0
+        while (self._stream_candidate_index + 1 < len(self._stream_candidates)
+               and tried < max_tries):
             self._stream_candidate_index += 1
             next_url = self._stream_candidates[self._stream_candidate_index]
+            tried += 1
             if not _is_valid_stream_url(next_url):
                 logging.warning(f'{self.name_str} 跳过无效流地址: {next_url}')
                 continue

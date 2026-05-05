@@ -84,14 +84,7 @@ class FetchAvatar(QThread):
         if not self.url:
             return
         try:
-            # 用小尺寸减少超时概率，B站 CDN 对缩略图响应更快
-            r = http_utils.get(self.url + '@48w_48h.jpg', timeout=15)
-            qimage = QImage.fromData(r.content)
-            if not qimage.isNull():
-                self.avatarReady.emit(qimage)
-                return
-            # 降级：不带尺寸后缀重试
-            r = http_utils.get(self.url, timeout=15)
+            r = http_utils.get(self.url, timeout=20)
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self.avatarReady.emit(qimage)
@@ -588,11 +581,11 @@ class QRLoginWidget(QWidget):
     def _onAvatarReady(self, qimage):
         """头像下载完成 → 裁剪为圆形并缓存"""
         pixmap = QPixmap.fromImage(qimage)
-        scaled = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._avatarPixmap = self._makeCircularPixmap(scaled, 80)
-        # 直接更新 label（不走 _syncUI 避免整体刷新）
+        scaled = pixmap.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._avatarPixmap = self._makeCircularPixmap(scaled, 72)
         self._avatarLabel.setPixmap(self._avatarPixmap)
-        self._avatarLabel.setStyleSheet('')
+        self._avatarLabel.setStyleSheet(
+            'border-radius: 36px; border: 2px solid #3daee9;')
 
     # ================================================================
     # 内部：QR 登录流程
