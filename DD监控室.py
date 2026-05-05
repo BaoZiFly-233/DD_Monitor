@@ -515,19 +515,12 @@ class MainWindow(QMainWindow):
             self.mainLayout.addWidget(videoWidget, y, x, h, w)
             self.videoWidgetList[index].show()
         self.videoIndex = 0
-        self.setMediaTimer = QTimer(self)
-        self.setMediaTimer.timeout.connect(self.setMedia)
-        self.setMediaTimer.start(100)  # 每 100ms 初始化一个播放窗口
-
-    def setMedia(self):
-        if self.videoIndex == 16:
-            self.setMediaTimer.stop()
-        elif self.videoIndex < len(self.config['layout']):
-            # pass
-            self.videoWidgetList[self.videoIndex].mediaReload()
-        else:
-            self.videoWidgetList[self.videoIndex].playerRestart()
-        self.videoIndex += 1
+        # 并行启动所有已配置房间的信息获取，替代串行 100ms timer
+        for vw in self.videoWidgetList:
+            if vw.roomID != '0':
+                vw.mediaReload()
+            else:
+                vw.playerRestart()
 
     def _connectVideoWidget(self, videoWidget):
         videoWidget.mutedChanged.connect(self.mutedChanged)
