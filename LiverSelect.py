@@ -1528,13 +1528,15 @@ class LiverPanel(QWidget):
                 break
         self._applyRoomListMutation(request_refresh=True, refresh_panel=True, dump_config=True)
 
-    def deleteAll(self):  # 清空卡片槽
+    def deleteAll(self):
+        """清空卡片槽 — 释放所有卡片控件并清理房间列表"""
         self.roomIDDict.clear()
         self.oldLiveStatus.clear()
         for cover in self.coverList:
             cover.hide()
             cover.deleteLater()
         self.coverList.clear()
+        # _onDumpRoomConfig 会将空 roomid 写入 config 并保存
         self._applyRoomListMutation(request_refresh=True, refresh_panel=True, dump_config=True)
 
     def changeTop(self, info):

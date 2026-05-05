@@ -213,12 +213,15 @@ class HotKey(QWidget):
 
     def __init__(self):
         super(HotKey, self).__init__()
-        self.resize(350, 150)
+        self.resize(350, 200)
         self.setWindowTitle('快捷键')
         layout = QGridLayout(self)
         layout.addWidget(QLabel('F、f —— 全屏'), 0, 0)
         layout.addWidget(QLabel('H、h —— 隐藏控制条'), 1, 0)
         layout.addWidget(QLabel('M、m、S、s —— 除当前鼠标悬停窗口外全部静音'), 2, 0)
+        layout.addWidget(QLabel('1 - 9 —— 聚焦对应窗口'), 3, 0)
+        layout.addWidget(QLabel('Ctrl + 1 - 9 —— 加载房间到对应窗口'), 4, 0)
+        layout.addWidget(QLabel('Esc —— 退出全屏'), 5, 0)
 
 
 
@@ -437,8 +440,6 @@ class MainWindow(QMainWindow):
         self.optionMenu.addAction(cacheSizeSetting)
         danmuSettingAction = QAction('弹幕设置', self, triggered=self.openGlobalDanmuSetting)
         self.optionMenu.addAction(danmuSettingAction)
-        startWithDanmuSetting = QAction('自动加载弹幕设置', self, triggered=self.openStartWithDanmuSetting)
-        self.optionMenu.addAction(startWithDanmuSetting)
         controlPanelAction = QAction('显示 / 隐藏控制条(H)', self, triggered=self.openControlPanel)
         self.optionMenu.addAction(controlPanelAction)
         self.fullScreenAction = QAction('全屏(F) / 退出(Esc)', self, triggered=self.fullScreen)
@@ -662,12 +663,14 @@ class MainWindow(QMainWindow):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setDanmakuBaseViewport(viewport)
 
-    def _ensureGlobalDanmuSettingPanel(self):
-        if self.danmuSettingPanel is not None:
-            return self.danmuSettingPanel
-        self.danmuSettingPanel = GlobalDanmuOption(self.config['danmu'][0], self.config['rollingDanmu'])
-        browser = self.danmuSettingPanel.browserOptionWidget
-        rolling = self.danmuSettingPanel.rollingOptionWidget
+    def setGlobalDanmuOpacity(self, value):
+        panel = GlobalDanmuOption(self.config['danmu'][0], self.config['rollingDanmu'])
+        panel.setAttribute(Qt.WA_DeleteOnClose)
+        panel.syncBrowserSetting(self.config['danmu'][0])
+        panel.syncRollingSetting(self.config['rollingDanmu'])
+        # 连接信号
+        browser = panel.browserOptionWidget
+        rolling = panel.rollingOptionWidget
         browser.opacitySlider.value.connect(self.setGlobalDanmuOpacity)
         browser.horizontalCombobox.currentIndexChanged.connect(self.setGlobalHorizontalPercent)
         browser.verticalCombobox.currentIndexChanged.connect(self.setGlobalVerticalPercent)
@@ -685,12 +688,6 @@ class MainWindow(QMainWindow):
         rolling.shadowStrengthSlider.valueChanged.connect(self.setGlobalRollingDanmuShadowStrength)
         rolling.topEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuTopEnabled)
         rolling.bottomEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuBottomEnabled)
-        return self.danmuSettingPanel
-
-    def openGlobalDanmuSetting(self):
-        panel = self._ensureGlobalDanmuSettingPanel()
-        panel.syncBrowserSetting(self.config['danmu'][0])
-        panel.syncRollingSetting(self.config['rollingDanmu'])
         panel.show()
         panel.raise_()
         panel.activateWindow()
@@ -924,16 +921,18 @@ class MainWindow(QMainWindow):
         version_window.show()
 
     def openSettingsDialog(self):
-        """打开统一设置面板（非模态，允许同时操作布局面板）"""
-        dlg = SettingsDialog(
-            self, self.config, self.configManager,
-            danmu_panel_fn=self.openGlobalDanmuSetting,
-            layout_panel_fn=self.openLayoutSetting,
-        )
-        dlg.setAttribute(Qt.WA_DeleteOnClose)
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+        """打开统一设置面板（非模态，缓存复用）"""
+        if not hasattr(self, '_settingsDialog') or self._settingsDialog is None:
+            self._settingsDialog = SettingsDialog(
+                self, self.config, self.configManager,
+                danmu_panel_fn=self.openGlobalDanmuSetting,
+                layout_panel_fn=self.openLayoutSetting,
+            )
+            self._settingsDialog.setAttribute(Qt.WA_DeleteOnClose)
+            self._settingsDialog.destroyed.connect(lambda: setattr(self, '_settingsDialog', None))
+        self._settingsDialog.show()
+        self._settingsDialog.raise_()
+        self._settingsDialog.activateWindow()
 
     def openGithub(self):
         QDesktopServices.openUrl(
@@ -1089,18 +1088,6 @@ class MainWindow(QMainWindow):
         self.configManager.save()
         QMessageBox.information(
             self, '缓存设置更改', '设置成功 重启监控室后生效', QMessageBox.Ok)
-
-    def openStartWithDanmuSetting(self):
-        items = ('加载(推荐，默认。但可能增加网络压力，可能会被限流。)', '不加载')
-        defulatSelection = 0
-        if not self.config['startWithDanmu']:
-            defulatSelection = 1
-        selection, okPressed = QInputDialog.getItem(
-            self, "设置启动时是否加载弹幕", "加载选项", items, defulatSelection, False)
-        if okPressed:
-            trueDanmu = (selection == items[0])
-            self.config['startWithDanmu'] = trueDanmu
-            self.configManager.save()
 
     def openHotKey(self):
         hotkey_window = self._getHotKeyWindow()

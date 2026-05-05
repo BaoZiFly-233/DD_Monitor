@@ -615,6 +615,7 @@ class VideoWidget(QFrame):
                 self.danmuDensityLabel.setText('')
         else:
             self.danmuDensityLabel.setText('')
+            self._danmuDensityTimer.stop()
 
     def _applyDanmuDisplayState(self, browser_enabled, rolling_enabled, restart_thread=False):
         self.textSetting[0] = bool(browser_enabled)
@@ -795,7 +796,9 @@ class VideoWidget(QFrame):
     # ==== 播放状态检测 ====
 
     def checkPlayStatus(self):
-        """检测播放是否卡住"""
+        """检测播放是否卡住（跳过未加载房间的空白窗口）"""
+        if self.roomID == '0':
+            return
         if self._mpv and not self.isHidden() and self.liveStatus == 1 and not self.userPause:
             try:
                 idle = self._mpv.core_idle
