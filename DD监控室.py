@@ -924,16 +924,16 @@ class MainWindow(QMainWindow):
         version_window.show()
 
     def openSettingsDialog(self):
-        """打开统一设置面板"""
+        """打开统一设置面板（非模态，允许同时操作布局面板）"""
         dlg = SettingsDialog(
             self, self.config, self.configManager,
             danmu_panel_fn=self.openGlobalDanmuSetting,
             layout_panel_fn=self.openLayoutSetting,
         )
-        dlg.exec()
-        # 设置已通过 SettingsDialog._apply() 直接写入 config 并保存
-        # 弹幕设置通过 applyDanmuSettings 在各窗口下次交互时生效
-        # 画质/解码等需要重载的变更由用户手动控制
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def openGithub(self):
         QDesktopServices.openUrl(

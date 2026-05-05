@@ -24,7 +24,6 @@ class SettingsDialog(QDialog):
         self._layout_panel_fn = layout_panel_fn
         self.setWindowTitle('设置')
         self.resize(520, 480)
-        self.setModal(True)
 
         tabs = QTabWidget()
         main_layout = QVBoxLayout(self)
