@@ -106,7 +106,8 @@ class PushButton(QPushButton):
 
 class RecordThread(QThread):
     """获取直播推流并录制
-    TODO: 换用 bilibili_api.live.get_room_play_url(room_id)
+
+    使用 bilibili_api.live.LiveRoom 获取流地址后下载到本地文件。
     """
     downloadTimer = Signal(str)
     downloadError = Signal(str)
@@ -122,6 +123,12 @@ class RecordThread(QThread):
         self.checkTimer = QTimer(self)
         self.checkTimer.timeout.connect(self.checkDownlods)
         self.reconnectCount = 0
+        self.credential = None
+        self.sessionData = ''
+
+    def setCredential(self, credential, sessionData=''):
+        self.credential = credential
+        self.sessionData = sessionData
 
     def checkDownlods(self):
         with self._lock:
@@ -145,14 +152,20 @@ class RecordThread(QThread):
 
     def run(self):
         self.reconnectCount = 0
-        api = r'https://api.live.bilibili.com/room/v1/Room/playUrl?cid=%s&platform=web&qn=10000' % self.roomID
         try:
-            r = http_utils.get(api, headers=header)
-            url = json.loads(r.text)['data']['durl'][0]['url']
+            from bilibili_api import live, sync
+            from bili_credential import build_credential, normalize_credential_data
+            cred_data = normalize_credential_data(self.credential, sessdata=self.sessionData)
+            room = live.LiveRoom(int(self.roomID), credential=build_credential(cred_data, sessdata=self.sessionData))
+            play_info = sync(room.get_room_play_url(screen_resolution=live.ScreenResolution.ORIGINAL))
+            durl = play_info.get('durl', [])
+            if not durl:
+                raise RuntimeError('未获取到录制流地址')
+            url = durl[0]['url']
             download = http_utils.get(url, stream=True, headers=header)
             with self._lock:
                 self.recordToken = True
-            self.downloadTime = 0  # 初始化下载时间为0s
+            self.downloadTime = 0
             self.cacheVideo = open(self.savePath, 'wb')
             try:
                 for chunk in download.iter_content(chunk_size=512):
@@ -409,6 +422,9 @@ class CoverLabel(QLabel):
                         if self.savePath:  # 保存路径有效
                             if self.liveState == 1:  # 直播中
                                 self.recordThread.setSavePath(self.savePath)
+                                lp = getattr(self, '_liverPanel', None)
+                                if lp is not None:
+                                    self.recordThread.setCredential(getattr(lp, '_credential', None), getattr(lp, '_sessionData', ''))
                                 self.recordThread.start()
                                 self.recordThread.checkTimer.start(3000)
                                 self.recordState = 1  # 改为录制状态
@@ -1101,8 +1117,8 @@ class CollectLiverInfo(QThread):
     + 关键帧 'keyframe'
     + 头像 'face'
 
-    TODO:
-    + bilibili_api.live.get_room_info(room_id)
+    使用 B站 room/v2/Room/get_by_ids + get_status_info_by_uids 批量 API。
+    bilibili-api-python 暂不提供批量接口，手动 HTTP 调用是当前最优方案。
     """
     liverInfo = Signal(list)
 
@@ -1322,6 +1338,7 @@ class LiverPanel(QWidget):
             self.coverList.append(CoverLabel(roomID, topToken))
             self.coverList[-1].addToWindow.connect(self.addCoverToPlayer)  # 添加至窗口播放信号
             self.coverList[-1].deleteCover.connect(self.deleteCover)
+            self.coverList[-1]._liverPanel = self  # 保存面板引用，录制时需要 credential
             self.coverList[-1].changeTopToken.connect(self.changeTop)
         for cover in self.coverList:  # 先添加置顶卡片
             if cover.topToken:
@@ -1370,9 +1387,11 @@ class LiverPanel(QWidget):
     def setSessionData(self, sessionData):
         """接收登录凭据，传递给 AddLiverRoomWidget"""
         self.addLiverRoomWidget.setSessionData(sessionData)
+        self._sessionData = sessionData
 
     def setCredential(self, credential):
         self.addLiverRoomWidget.setCredential(credential)
+        self._credential = credential
 
     def autoFetchFollows(self, uid):
         """自动获取关注列表并添加到面板（登录后自动触发）"""
@@ -1468,6 +1487,7 @@ class LiverPanel(QWidget):
                     if cover.roomID == info[1]:  # 字符串房号
                         if cover.recordState == 2 and cover.liveState == 0 and info[4] == 1:  # 满足等待开播录制的3个条件
                             cover.recordThread.setSavePath(cover.savePath)  # 启动录制线程
+                            cover.recordThread.setCredential(self._credential, self._sessionData)
                             cover.recordThread.start()
                             cover.recordThread.checkTimer.start(3000)
                             cover.recordState = 1  # 改为录制状态
