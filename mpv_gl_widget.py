@@ -175,18 +175,8 @@ class MpvGLWidget(QOpenGLWidget):
 
     def _schedule_danmaku_updates(self):
         if self._danmaku_renderer is not None and self._danmaku_renderer.hasActiveDanmaku():
-            count = self._danmaku_renderer.activeCount()
-            # 自适应帧率：弹幕少时降低刷新率省 CPU
-            if count > 20:
-                interval = 16   # 60fps — 高密度
-            elif count > 5:
-                interval = 33   # 30fps — 中密度
-            else:
-                interval = 50   # 20fps — 低密度
             if not self._danmaku_timer.isActive():
                 self._danmaku_timer.start()
-            elif self._danmaku_timer.interval() != interval:
-                self._danmaku_timer.setInterval(interval)
         else:
             self._danmaku_timer.stop()
 
