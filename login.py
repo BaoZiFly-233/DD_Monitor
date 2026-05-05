@@ -84,10 +84,17 @@ class FetchAvatar(QThread):
         if not self.url:
             return
         try:
-            r = http_utils.get(self.url + '@100w_100h.jpg', timeout=10)
+            # 头像下载超时设长一点，B站 CDN 有时慢
+            r = http_utils.get(self.url + '@100w_100h.jpg', timeout=20)
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self.avatarReady.emit(qimage)
+            else:
+                # 降级：不带尺寸后缀重试
+                r = http_utils.get(self.url, timeout=20)
+                qimage = QImage.fromData(r.content)
+                if not qimage.isNull():
+                    self.avatarReady.emit(qimage)
         except Exception:
             logging.exception('下载头像失败')
 
@@ -231,6 +238,12 @@ class QRLoginWidget(QWidget):
         self._unameLabel.setAlignment(Qt.AlignCenter)
         self._unameLabel.setStyleSheet('color: #e5e5e5; background: transparent;')
         lay.addWidget(self._unameLabel)
+
+        # 等级图标
+        self._levelIconLabel = QLabel()
+        self._levelIconLabel.setFixedSize(26, 14)
+        self._levelIconLabel.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._levelIconLabel, alignment=Qt.AlignCenter)
 
         # UID + 等级 + 大会员
         self._infoLabel = QLabel()
@@ -382,6 +395,8 @@ class QRLoginWidget(QWidget):
                 vt = '年度' if vip_info.get('type') == 2 else '月度'
                 info_parts.append(f'大会员·{vt}')
             self._infoLabel.setText('  ·  '.join(info_parts))
+            # 更新等级图标
+            self._updateLevelIcon(level)
 
             self._coinLabel.setText(str(coins))
             self._bcoinLabel.setText(f'{bcoins:.1f}' if bcoins == int(bcoins) else str(int(bcoins)))
@@ -483,6 +498,34 @@ class QRLoginWidget(QWidget):
         self.login.emit(False)
         self._syncUI()
 
+    def _downloadLevelIcon(self, level):
+        """后台下载 B站等级图标（用 QThread 避免阻塞）"""
+        class _FetchLevelIcon(QThread):
+            iconReady = Signal(QPixmap)
+            def __init__(self, level):
+                super().__init__()
+                self.level = level
+            def run(self):
+                try:
+                    url = f'https://s1.hdslb.com/bfs/static/jinkela/long/images/lv_{self.level}.png'
+                    r = http_utils.get(url, timeout=10)
+                    img = QImage.fromData(r.content)
+                    if not img.isNull():
+                        pm = QPixmap.fromImage(img).scaled(26, 14, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        self.iconReady.emit(pm)
+                except Exception:
+                    pass
+        thread = _FetchLevelIcon(level)
+        thread.iconReady.connect(self._onLevelIconReady)
+        thread.start()
+        thread.wait(5000)  # 5秒超时
+
+    def _onLevelIconReady(self, pixmap):
+        self._levelIconPixmap = pixmap
+        # 更新显示
+        if hasattr(self, '_levelIconLabel'):
+            self._levelIconLabel.setPixmap(pixmap)
+
     def _openUserSpace(self):
         uid = self._user_info.get('uid')
         if not uid:
@@ -533,6 +576,10 @@ class QRLoginWidget(QWidget):
                 self._fetchAvatar.url = face_url
                 if not self._fetchAvatar.isRunning():
                     self._fetchAvatar.start()
+            # 下载等级图标
+            level_val = self._user_info.get('level', 0)
+            if level_val > 0:
+                self._downloadLevelIcon(level_val)
 
         # 成功和过期都需要刷新 UI
         if self.isVisible():
