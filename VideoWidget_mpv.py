@@ -286,6 +286,7 @@ class VideoWidget(QFrame):
         self.saveCachePath = saveCachePath
         self.startWithDanmu = startWithDanmu
         self.retryTimes = 0
+        self._idleStreak = 0  # 连续 idle 计数，防网络波动误判
         self._mpv = None  # 延迟初始化
         self._stream_url = ''
 
@@ -796,26 +797,32 @@ class VideoWidget(QFrame):
     # ==== 播放状态检测 ====
 
     def checkPlayStatus(self):
-        """检测播放是否卡住（跳过未加载房间的空白窗口）"""
+        """检测播放是否卡住 — 连续多次 idle 才触发重试，避免网络波动误判"""
         if self.roomID == '0':
             return
         if self._mpv and not self.isHidden() and self.liveStatus == 1 and not self.userPause:
             try:
                 idle = self._mpv.core_idle
                 if idle:
+                    self._idleStreak += 1
+                    if self._idleStreak < 3:  # 连续3次(9s)才确认是真断流
+                        return
                     if self._tryPlayNextStreamCandidate(max_tries=2):
+                        self._idleStreak = 0
                         return
                     self.retryTimes += 1
                     if self.retryTimes > 4:  # 4×3s=12s 后重载
+                        self._idleStreak = 0
                         self.mediaReload()
-                    # 连续卡顿超过阈值，自动降一档画质
                     if self.retryTimes > 8 and self.quality > 80:
                         old_q = self.quality
                         self.quality = self._nextLowerQuality(self.quality)
                         logging.warning('%s 自适应画质: %s -> %s', self.name_str, old_q, self.quality)
                         self.retryTimes = 0
+                        self._idleStreak = 0
                         self.mediaReload()
                 else:
+                    self._idleStreak = 0
                     self.retryTimes = 0
             except Exception as e:
                 logging.debug('%s checkPlayStatus 异常: %s', self.name_str, e)
@@ -861,6 +868,7 @@ class VideoWidget(QFrame):
                 self._mpv.play(next_url)
                 self._applyVolume()
                 self.retryTimes = 0
+                self._idleStreak = 0
                 self.videoFrame.setPlaybackActive(True)
                 if self._stream_candidate_index > 0:
                     logging.warning(f'{self.name_str} 切换到备用流 #{self._stream_candidate_index + 1}')
