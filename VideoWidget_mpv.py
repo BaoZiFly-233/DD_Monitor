@@ -117,8 +117,15 @@ class GetStreamURL(QThread):
         self.quality = 250
         self.sessionData = sessionData if sessionData else ''
         self.credential = normalize_credential_data(sessdata=self.sessionData)
-        # 兼容性属性桩（DD监控室.py closeEvent 中会访问）
         self.recordToken = False
+        self._preferredCdnHost = ''  # CDN 优选：记录上次稳定播放的 CDN
+
+    def markCdnGood(self, url):
+        """标记当前 CDN 为好用的，下次优先使用"""
+        from urllib.parse import urlparse
+        host = urlparse(str(url)).hostname
+        if host:
+            self._preferredCdnHost = host
 
     def setConfig(self, roomID, quality, sessionData, credential=None):
         self.roomID = roomID
@@ -153,6 +160,13 @@ class GetStreamURL(QThread):
                 invalid_count += 1
         if not stream_urls:
             raise RuntimeError('未获取到可用直播流地址')
+        # CDN 优选：上次好用的 CDN host 排前面
+        from urllib.parse import urlparse
+        preferred_host = self._preferredCdnHost
+        if preferred_host:
+            preferred = [u for u in stream_urls if urlparse(u).hostname == preferred_host]
+            others = [u for u in stream_urls if urlparse(u).hostname != preferred_host]
+            stream_urls = preferred + others
         if invalid_count > 0:
             logging.warning(f'房间 {self.roomID} 过滤掉 {invalid_count} 条无效流地址')
         self.streamUrlCandidates = stream_urls
@@ -870,6 +884,7 @@ class VideoWidget(QFrame):
                 self.retryTimes = 0
                 self._idleStreak = 0
                 self.videoFrame.setPlaybackActive(True)
+                self.getMediaURL.markCdnGood(next_url)  # 记录好用的 CDN
                 if self._stream_candidate_index > 0:
                     logging.warning(f'{self.name_str} 切换到备用流 #{self._stream_candidate_index + 1}')
                 return True
@@ -1090,6 +1105,8 @@ class VideoWidget(QFrame):
                 action.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
             ampActions[action] = amp_val
 
+        switchCdn = menu.addAction('切换 CDN 节点')
+
         if not self.top:
             popWindow = menu.addAction('悬浮窗播放')
         else:
@@ -1132,6 +1149,9 @@ class VideoWidget(QFrame):
         elif action in ampActions:
             self.volumeAmplify = ampActions[action]
             self._applyVolume()
+        elif action == switchCdn:
+            if self._stream_candidates and len(self._stream_candidates) > 1:
+                self._tryPlayNextStreamCandidate(max_tries=1)
         if not self.top:
             if action == popWindow:
                 self.popWindow.emit(
@@ -1444,6 +1464,15 @@ class VideoWidget(QFrame):
         self.topLabel.setText(
             ('    窗口%s  %s' % (self.id + 1, self.title))[:20])
         self.titleLabel.setText(self.uname)
+        # CDN 信息显示在 tooltip 上
+        from urllib.parse import urlparse
+        cdn_info = ''
+        if self._stream_url:
+            host = urlparse(self._stream_url).hostname or ''
+            cdn_info = f'CDN: {host}'
+            if len(self._stream_candidates) > 1:
+                cdn_info += f'  ({self._stream_candidate_index + 1}/{len(self._stream_candidates)})'
+        self.titleLabel.setToolTip(cdn_info or self.uname)
 
     @staticmethod
     def _coerceDanmakuEvent(message):
