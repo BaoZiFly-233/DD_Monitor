@@ -80,10 +80,15 @@ class EmptyTextFilter(DanmakuDataFilter):
 
 
 class DanmakuImageCache:
-    _instance = None
+    """弹幕精灵缓存 — 每个 DanmakuRenderer 实例独立持有。
 
-    def __init__(self, max_items=512):
-        self._max_items = max_items
+    相同文字+样式的弹幕只渲染一次，缓存 QImage 精灵。
+    LRU 淘汰策略，超过上限时移除最久未使用的条目。
+    """
+
+    def __init__(self, max_items=128):
+        self._cache = OrderedDict()
+        self._max_items = max(32, int(max_items))
         self._cache = OrderedDict()
 
     @classmethod
@@ -186,7 +191,7 @@ class DanmakuRenderer:
         self._roll_layout = RollLayout()
         self._top_layout = TopLayout()
         self._bottom_layout = BottomLayout()
-        self._image_cache = DanmakuImageCache.instance()
+        self._image_cache = DanmakuImageCache(max_items=128)
         self._active = []
         self._enabled = True
         self._roll_duration = 12.0
