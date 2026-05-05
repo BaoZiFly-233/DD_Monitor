@@ -884,7 +884,8 @@ class VideoWidget(QFrame):
                 self.retryTimes = 0
                 self._idleStreak = 0
                 self.videoFrame.setPlaybackActive(True)
-                self.getMediaURL.markCdnGood(next_url)  # 记录好用的 CDN
+                self._updateTitleLabels()  # 更新 CDN 提示
+                self.getMediaURL.markCdnGood(next_url)
                 if self._stream_candidate_index > 0:
                     logging.warning(f'{self.name_str} 切换到备用流 #{self._stream_candidate_index + 1}')
                 return True
@@ -1461,18 +1462,23 @@ class VideoWidget(QFrame):
 
     def _updateTitleLabels(self):
         """更新标题和标签文字"""
-        self.topLabel.setText(
-            ('    窗口%s  %s' % (self.id + 1, self.title))[:20])
-        self.titleLabel.setText(self.uname)
-        # CDN 信息显示在 tooltip 上
         from urllib.parse import urlparse
         cdn_info = ''
         if self._stream_url:
             host = urlparse(self._stream_url).hostname or ''
-            cdn_info = f'CDN: {host}'
-            if len(self._stream_candidates) > 1:
-                cdn_info += f'  ({self._stream_candidate_index + 1}/{len(self._stream_candidates)})'
-        self.titleLabel.setToolTip(cdn_info or self.uname)
+            idx = getattr(self, '_stream_candidate_index', -1) + 1
+            total = len(getattr(self, '_stream_candidates', []))
+            cdn_info = f'  [{host.split(".")[0]}'
+            if total > 1:
+                cdn_info += f' {idx}/{total}'
+            cdn_info += ']'
+        self.topLabel.setText(
+            ('    窗口%s  %s%s' % (self.id + 1, self.title, cdn_info))[:50])
+        self.titleLabel.setText(self.uname)
+        if cdn_info:
+            self.titleLabel.setToolTip(f'CDN: {urlparse(self._stream_url).hostname}')
+        else:
+            self.titleLabel.setToolTip(self.uname)
 
     @staticmethod
     def _coerceDanmakuEvent(message):
