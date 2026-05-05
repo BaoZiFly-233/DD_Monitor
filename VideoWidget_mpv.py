@@ -406,6 +406,11 @@ class VideoWidget(QFrame):
         self.danmuButton = PushButton(text='弹')
         self.danmuButton.clicked.connect(self.cycleDanmuDisplayMode)
         frameLayout.addWidget(self.danmuButton)
+        self.danmuDensityLabel = QLabel('')
+        self.danmuDensityLabel.setFixedWidth(32)
+        self.danmuDensityLabel.setAlignment(Qt.AlignCenter)
+        self.danmuDensityLabel.setStyleSheet('color:#aaa;font-size:10px;background:transparent')
+        frameLayout.addWidget(self.danmuDensityLabel)
         self.stop = PushButton(self.style().standardIcon(
             QStyle.SP_DialogCancelButton))
         self.stop.clicked.connect(self._mediaStop)
@@ -444,6 +449,10 @@ class VideoWidget(QFrame):
         self.refreshTimeStampTimer = QTimer(self)
         self.refreshTimeStampTimer.timeout.connect(self.refreshTimeStamp)
         self.refreshTimeStampTimer.setInterval(1000)
+
+        self._danmuDensityTimer = QTimer(self)
+        self._danmuDensityTimer.timeout.connect(self._updateDanmuDensity)
+        self._danmuDensityTimer.setInterval(1000)
 
     def ensureTextBrowser(self):
         if self.textBrowser is not None:
@@ -495,6 +504,7 @@ class VideoWidget(QFrame):
         self.scrollingDanmaku.setBottomEnabled(bool(self.rollingSetting.get('bottom_enabled', True)))
         self.videoFrame.update()
         self._updateDanmuButtonState()
+        self._danmuDensityTimer.start()
 
         if self.textBrowser is None:
             return
@@ -588,6 +598,23 @@ class VideoWidget(QFrame):
     def _updateDanmuButtonState(self):
         state_text = ['弹幕：全开', '弹幕：仅弹幕机', '弹幕：全关'][self._currentDanmuDisplayMode()]
         self.danmuButton.setToolTip(state_text)
+
+    def _updateDanmuDensity(self):
+        """更新弹幕密度指示"""
+        if self.isRollingDanmuEnabled():
+            count = self.scrollingDanmaku.activeCount()
+            if count > 0:
+                self.danmuDensityLabel.setText(str(count))
+                if count > 30:
+                    self.danmuDensityLabel.setStyleSheet('color:#e74c3c;font-size:10px;background:transparent')
+                elif count > 15:
+                    self.danmuDensityLabel.setStyleSheet('color:#f39c12;font-size:10px;background:transparent')
+                else:
+                    self.danmuDensityLabel.setStyleSheet('color:#aaa;font-size:10px;background:transparent')
+            else:
+                self.danmuDensityLabel.setText('')
+        else:
+            self.danmuDensityLabel.setText('')
 
     def _applyDanmuDisplayState(self, browser_enabled, rolling_enabled, restart_thread=False):
         self.textSetting[0] = bool(browser_enabled)
@@ -778,6 +805,13 @@ class VideoWidget(QFrame):
                     self.retryTimes += 1
                     if self.retryTimes > 10:
                         self.mediaReload()
+                    # 连续卡顿超过阈值，自动降一档画质
+                    if self.retryTimes > 20 and self.quality > 80:
+                        old_q = self.quality
+                        self.quality = self._nextLowerQuality(self.quality)
+                        logging.warning('%s 自适应画质: %s -> %s', self.name_str, old_q, self.quality)
+                        self.retryTimes = 0
+                        self.mediaReload()
                 else:
                     self.retryTimes = 0
             except Exception as e:
@@ -786,6 +820,18 @@ class VideoWidget(QFrame):
                 if self.retryTimes > 10:
                     self.mediaReload()
         return False
+
+    @staticmethod
+    def _nextLowerQuality(current):
+        """自适应画质：返回下一档画质"""
+        order = [10000, 400, 250, 80, -1]
+        try:
+            idx = order.index(current)
+            if idx < len(order) - 1:
+                return order[idx + 1]
+        except ValueError:
+            pass
+        return 80  # 默认降到流畅
 
     def refreshTimeStamp(self):
         if self.liveStartTime:

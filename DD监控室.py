@@ -24,6 +24,7 @@ from config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLA
 from bili_credential import normalize_credential_data, build_credential, credential_to_dict
 from bilibili_api import sync
 from danmu import GlobalDanmuOption
+from SettingsDialog import SettingsDialog
 from login import QRLoginWidget
 
 
@@ -401,6 +402,9 @@ class MainWindow(QMainWindow):
         # ---- 菜单设置 ----
         self.optionMenu = self.menuBar().addMenu('设置')
         self.controlBarLayoutToken = self.config['control']
+        settingsAction = QAction('打开设置面板...', self, triggered=self.openSettingsDialog)
+        self.optionMenu.addAction(settingsAction)
+        self.optionMenu.addSeparator()
         layoutConfigAction = QAction('布局方式', self, triggered=self.openLayoutSetting)
         self.optionMenu.addAction(layoutConfigAction)
         globalQualityMenu = self.optionMenu.addMenu('全局画质 ►')
@@ -919,6 +923,31 @@ class MainWindow(QMainWindow):
         version_window.hide()
         version_window.show()
 
+    def openSettingsDialog(self):
+        """打开统一设置面板"""
+        dlg = SettingsDialog(
+            self, self.config, self.configManager,
+            danmu_panel_fn=self.openGlobalDanmuSetting,
+            layout_panel_fn=self.openLayoutSetting,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._applySettingsFromDialog()
+
+    def _applySettingsFromDialog(self):
+        """设置对话框确认后，把 config 变更传播到所有窗口"""
+        quality = self.config['quality'][0]
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            if not videoWidget.isHidden():
+                videoWidget.quality = quality
+                videoWidget.mediaReload()
+            if self.config['hardwareDecode'] != videoWidget.hardwareDecode:
+                videoWidget.hardwareDecode = self.config['hardwareDecode']
+            videoWidget.set_volume_direct(self.config['globalVolume'])
+            videoWidget.volume = self.config['globalVolume']
+            videoWidget.slider.setValue(self.config['globalVolume'])
+            videoWidget.setDanmakuBaseViewport(self._resolveDanmakuBaseViewport())
+            videoWidget.applyDanmuSettings()
+
     def openGithub(self):
         QDesktopServices.openUrl(
             QUrl(r'https://github.com/BaoZiFly-233/DD_Monitor'))
@@ -1281,11 +1310,27 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, QKeyEvent):
         if QKeyEvent.key() == Qt.Key_Escape or QKeyEvent.key() == Qt.Key_F:
-            self.fullScreen()  # 自动判断全屏状态并退出
+            self.fullScreen()
         elif QKeyEvent.key() == Qt.Key_H:
             self.openControlPanel()
         elif QKeyEvent.key() == Qt.Key_M or QKeyEvent.key() == Qt.Key_S:
             self.muteExcept()
+        elif Qt.Key_1 <= QKeyEvent.key() <= Qt.Key_9:
+            idx = QKeyEvent.key() - Qt.Key_1
+            if idx < len(self.videoWidgetList):
+                if QKeyEvent.modifiers() & Qt.ControlModifier:
+                    # Ctrl+数字: 加载卡片面板第一个房间到该窗口
+                    first_room = self.liverPanel.getFirstRoomID()
+                    if first_room:
+                        self.videoWidgetList[idx].roomID = first_room
+                        self.videoWidgetList[idx].mediaReload()
+                        self.config['player'][idx] = first_room
+                        self.liverPanel.updatePlayingStatus(self.config['player'])
+                        self.configManager.save()
+                else:
+                    # 数字键: 聚焦对应窗口
+                    self.videoWidgetList[idx].setFocus()
+                    self.videoWidgetList[idx].raise_()
 
     def addCoverToPlayer(self, info):  # 窗口 房号
         self.addMedia(info)
