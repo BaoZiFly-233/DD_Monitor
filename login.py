@@ -84,19 +84,19 @@ class FetchAvatar(QThread):
         if not self.url:
             return
         try:
-            # 头像下载超时设长一点，B站 CDN 有时慢
-            r = http_utils.get(self.url + '@100w_100h.jpg', timeout=20)
+            # 用小尺寸减少超时概率，B站 CDN 对缩略图响应更快
+            r = http_utils.get(self.url + '@48w_48h.jpg', timeout=15)
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self.avatarReady.emit(qimage)
-            else:
-                # 降级：不带尺寸后缀重试
-                r = http_utils.get(self.url, timeout=20)
-                qimage = QImage.fromData(r.content)
-                if not qimage.isNull():
-                    self.avatarReady.emit(qimage)
+                return
+            # 降级：不带尺寸后缀重试
+            r = http_utils.get(self.url, timeout=15)
+            qimage = QImage.fromData(r.content)
+            if not qimage.isNull():
+                self.avatarReady.emit(qimage)
         except Exception:
-            logging.exception('下载头像失败')
+            logging.exception('下载头像失败（网络超时，将在下次打开账号面板时重试）')
 
 
 class FetchQRCode(QThread):
@@ -396,7 +396,7 @@ class QRLoginWidget(QWidget):
                 info_parts.append(f'大会员·{vt}')
             self._infoLabel.setText('  ·  '.join(info_parts))
             # 更新等级图标
-            self._updateLevelIcon(level)
+            self._downloadLevelIcon(level)
 
             self._coinLabel.setText(str(coins))
             self._bcoinLabel.setText(f'{bcoins:.1f}' if bcoins == int(bcoins) else str(int(bcoins)))
