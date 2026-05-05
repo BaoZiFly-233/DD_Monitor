@@ -517,6 +517,9 @@ class VideoWidget(QFrame):
         self.scrollingDanmaku.setShadowStrength(int(self.rollingSetting.get('shadow_strength', 35)))
         self.scrollingDanmaku.setTopEnabled(bool(self.rollingSetting.get('top_enabled', True)))
         self.scrollingDanmaku.setBottomEnabled(bool(self.rollingSetting.get('bottom_enabled', True)))
+        # 弹幕帧率
+        fps = int(self.rollingSetting.get('fps', 60))
+        self.videoFrame.setDanmakuInterval(fps)
         self.videoFrame.update()
         self._updateDanmuButtonState()
         self._danmuDensityTimer.start()

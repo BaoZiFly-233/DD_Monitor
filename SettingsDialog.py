@@ -190,6 +190,12 @@ class SettingsDialog(QDialog):
         self.rollingBottom.setChecked(rd.get('bottom_enabled', True))
         rolling_layout.addWidget(self.rollingBottom, 7, 1)
 
+        rolling_layout.addWidget(QLabel('帧率上限'), 8, 0)
+        self.rollingFps = QComboBox()
+        self.rollingFps.addItems(['30', '60', '90', '120'])
+        self.rollingFps.setCurrentText(str(rd.get('fps', 60)))
+        rolling_layout.addWidget(self.rollingFps, 8, 1)
+
         layout.addWidget(rolling_group)
         return w
 
@@ -298,6 +304,7 @@ class SettingsDialog(QDialog):
         rd['shadow_enabled'] = self.rollingShadow.isChecked()
         rd['top_enabled'] = self.rollingTop.isChecked()
         rd['bottom_enabled'] = self.rollingBottom.isChecked()
+        rd['fps'] = int(self.rollingFps.currentText())
 
         # 缓存
         try:

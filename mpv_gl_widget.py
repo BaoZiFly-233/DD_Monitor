@@ -27,7 +27,7 @@ class MpvGLWidget(QOpenGLWidget):
         self._left_pressed = False
         self._left_drag_emitted = False
         self._danmaku_timer = QTimer(self)
-        self._danmaku_timer.setInterval(16)
+        self._danmaku_timer.setInterval(16)  # 默认 60fps, setDanmakuInterval 可调
         self._danmaku_timer.timeout.connect(self._on_danmaku_tick)
         self.frameSwapped.connect(self._on_frame_swapped)
         self.setUpdateBehavior(QOpenGLWidget.NoPartialUpdate)
@@ -39,6 +39,11 @@ class MpvGLWidget(QOpenGLWidget):
         if self._danmaku_renderer is not None:
             self._danmaku_renderer.setUpdateCallback(self._schedule_danmaku_updates)
         self.update()
+
+    def setDanmakuInterval(self, fps):
+        """设置弹幕刷新帧率（fps: 30/60/90/120）"""
+        interval = max(8, int(1000 / max(1, int(fps))))
+        self._danmaku_timer.setInterval(interval)
 
     def setPlayer(self, mpv_instance):
         if self._mpv is mpv_instance:

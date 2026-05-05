@@ -29,6 +29,7 @@ DEFAULT_ROLLING_DANMU = {
     'shadow_strength': 35,
     'top_enabled': True,
     'bottom_enabled': True,
+    'fps': 60,
 }
 
 DEFAULT_CONFIG = {
@@ -159,6 +160,7 @@ class ConfigManager(QObject):
         rd['shadow_strength'] = max(0, min(int(rd.get('shadow_strength', 35)), 100))
         rd['top_enabled'] = bool(rd.get('top_enabled', True))
         rd['bottom_enabled'] = bool(rd.get('bottom_enabled', True))
+        rd['fps'] = max(10, min(int(rd.get('fps', 60)), 120))
 
         # 补充缺失字段
         for field, default in DEFAULT_CONFIG.items():
