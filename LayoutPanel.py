@@ -49,7 +49,6 @@ class LayoutSettingPanel(QWidget):
         super(LayoutSettingPanel, self).__init__()
         self.resize(1280, 720)
         self.setWindowTitle('选择布局方式')
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # 排列各种布局方式
         mainLayout = QGridLayout(self)
