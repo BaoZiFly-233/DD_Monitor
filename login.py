@@ -59,6 +59,10 @@ class FetchUserInfo(QThread):
                     'uname': info['uname'],
                     'face': info.get('face', ''),
                     'level': info.get('level_info', {}).get('current_level', 0),
+                    'coins': info.get('money', 0),
+                    'bcoins': info.get('wallet', {}).get('bcoin_balance', 0),
+                    'following': info.get('following', 0),
+                    'vip': info.get('vip', {}),
                 })
             else:
                 logging.warning(f'session 验证失败: code={data["code"]}')
@@ -162,7 +166,7 @@ class QRLoginWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('B站账号')
-        self.setFixedSize(320, 480)
+        self.setFixedSize(340, 560)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据（UI 从这些字段推导）----
@@ -206,59 +210,109 @@ class QRLoginWidget(QWidget):
 
     def _buildLoggedInPanel(self):
         self._loggedInPanel = QFrame()
-        self._loggedInPanel.setFrameShape(QFrame.StyledPanel)
         self._loggedInPanel.setStyleSheet(
-            'QFrame { border: 1px solid #444; border-radius: 8px; padding: 10px; }')
+            'QFrame#loggedIn { border: 1px solid #3a3f47; border-radius: 10px; '
+            'background-color: #21252b; padding: 20px; }'
+            'QLabel#sectionTitle { color: #abb2bf; font-size: 11px; margin-top: 8px; }')
+        self._loggedInPanel.setObjectName('loggedIn')
         lay = QVBoxLayout(self._loggedInPanel)
-        lay.setAlignment(Qt.AlignCenter)
-        lay.setSpacing(12)
+        lay.setSpacing(0)
+        lay.setContentsMargins(16, 20, 16, 16)
 
-        title = QLabel('Bilibili 账号管理')
-        title.setFont(QFont('微软雅黑', 12, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        lay.addWidget(title)
+        # ---- 头像 + 名称区 ----
+        avatarRow = QVBoxLayout()
+        avatarRow.setAlignment(Qt.AlignCenter)
 
         self._avatarLabel = QLabel()
-        self._avatarLabel.setFixedSize(80, 80)
+        self._avatarLabel.setFixedSize(88, 88)
         self._avatarLabel.setAlignment(Qt.AlignCenter)
         self._resetAvatarPlaceholder()
-        lay.addWidget(self._avatarLabel, alignment=Qt.AlignCenter)
+        avatarRow.addWidget(self._avatarLabel, alignment=Qt.AlignCenter)
 
         self._unameLabel = QLabel()
-        self._unameLabel.setFont(QFont('微软雅黑', 14, QFont.Bold))
+        self._unameLabel.setFont(QFont('微软雅黑', 16, QFont.Bold))
         self._unameLabel.setAlignment(Qt.AlignCenter)
-        lay.addWidget(self._unameLabel)
+        self._unameLabel.setStyleSheet('color: #e5e5e5; margin-top: 8px;')
+        avatarRow.addWidget(self._unameLabel)
 
-        self._uidLabel = QLabel()
-        self._uidLabel.setFont(QFont('微软雅黑', 10))
-        self._uidLabel.setAlignment(Qt.AlignCenter)
-        self._uidLabel.setStyleSheet('color: #888;')
-        lay.addWidget(self._uidLabel)
+        self._vipBadge = QLabel()
+        self._vipBadge.setAlignment(Qt.AlignCenter)
+        self._vipBadge.setStyleSheet('font-size: 11px; margin-top: 2px;')
+        avatarRow.addWidget(self._vipBadge)
 
-        dot = QLabel('● 已登录')
-        dot.setFont(QFont('微软雅黑', 10))
-        dot.setAlignment(Qt.AlignCenter)
-        dot.setStyleSheet('color: #00CC00;')
-        lay.addWidget(dot)
+        self._levelLabel = QLabel()
+        self._levelLabel.setAlignment(Qt.AlignCenter)
+        self._levelLabel.setStyleSheet('margin-top: 2px;')
+        avatarRow.addWidget(self._levelLabel)
 
-        for text, color, slot in [
-            ('打开用户主页', '#27ae60', self._openUserSpace),
-            ('切换账号', '#2980b9', self._onSwitchAccount),
-            ('退出登录', '#c0392b', self._onLogout),
+        lay.addLayout(avatarRow)
+        lay.addSpacing(12)
+
+        # ---- 分隔线 ----
+        sep = QLabel()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet('background-color: #3a3f47;')
+        lay.addWidget(sep)
+        lay.addSpacing(12)
+
+        # ---- 数据卡片 ----
+        stats = QVBoxLayout()
+        stats.setSpacing(6)
+
+        self._coinLabel = self._makeStatLabel('硬币')
+        stats.addWidget(self._coinLabel)
+        self._bcoinLabel = self._makeStatLabel('B币')
+        stats.addWidget(self._bcoinLabel)
+        self._followLabel = self._makeStatLabel('关注')
+        stats.addWidget(self._followLabel)
+
+        lay.addLayout(stats)
+        lay.addSpacing(14)
+
+        # ---- 操作按钮 ----
+        btnStyle = (
+            'QPushButton { border-radius: 6px; padding: 8px; font-size: 13px; color: white; }'
+            'QPushButton:hover { opacity: 0.85; }'
+        )
+        for text, bg in [
+            ('打开 B站 个人空间', '#219a52'),
+            ('切换账号', '#3a7ec4'),
+            ('退出登录', '#ba3b3b'),
         ]:
             btn = QPushButton(text)
-            btn.setFixedHeight(36)
+            btn.setFixedHeight(38)
             btn.setAutoDefault(False)
             btn.setDefault(False)
             btn.setFocusPolicy(Qt.NoFocus)
-            btn.setStyleSheet(
-                f'QPushButton {{ background-color: {color}; border-radius: 4px; color: white; }}'
-                f'QPushButton:hover {{ background-color: {color}; opacity: 0.8; }}')
-            btn.clicked.connect(slot)
+            btn.setStyleSheet(f'QPushButton {{ background-color: {bg}; {btnStyle} }}')
+            btn.setCursor(Qt.PointingHandCursor)
+            if text == '打开 B站 个人空间':
+                btn.clicked.connect(self._openUserSpace)
+            elif text == '切换账号':
+                btn.clicked.connect(self._onSwitchAccount)
+            else:
+                btn.clicked.connect(self._onLogout)
             lay.addWidget(btn)
+            lay.addSpacing(6)
 
         self._loggedInPanel.hide()
         self._mainLayout.addWidget(self._loggedInPanel)
+
+    @staticmethod
+    def _makeStatLabel(title):
+        w = QWidget()
+        w.setStyleSheet('background-color: #282c34; border-radius: 6px; padding: 6px 10px;')
+        h = QVBoxLayout(w)
+        h.setContentsMargins(10, 4, 10, 4)
+        h.setSpacing(1)
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName('sectionTitle')
+        h.addWidget(title_lbl)
+        value_lbl = QLabel('--')
+        value_lbl.setStyleSheet('color: #e5e5e5; font-size: 18px; font-weight: bold;')
+        h.addWidget(value_lbl)
+        w._valueLabel = value_lbl
+        return w
 
     def _buildVerifyingPanel(self):
         self._verifyingPanel = QWidget()
@@ -341,14 +395,39 @@ class QRLoginWidget(QWidget):
             uname = self._user_info.get('uname', '已登录')
             uid = self._user_info.get('uid', '')
             level = self._user_info.get('level', 0)
+            coins = self._user_info.get('coins', 0)
+            bcoins = self._user_info.get('bcoins', 0)
+            following = self._user_info.get('following', 0)
+            vip_info = self._user_info.get('vip', {})
+
             self._unameLabel.setText(uname)
-            self._uidLabel.setText(f'UID: {uid}   Lv.{level}')
+
+            # 大会员标识
+            if vip_info and vip_info.get('status') == 1:
+                vip_type = '年度' if vip_info.get('type') == 2 else '月度'
+                self._vipBadge.setText(f'大会员·{vip_type}')
+                self._vipBadge.setStyleSheet('color: #f5a623; font-size: 11px; margin-top: 2px;')
+            else:
+                self._vipBadge.setText('')
+
+            # 等级
+            level_colors = ['#8c8c8c', '#6db75b', '#5ba0d0', '#d05b5b', '#c05bd0', '#d0a05b', '#5bd0c0']
+            lv_color = level_colors[min(level, len(level_colors) - 1)]
+            self._levelLabel.setText(f'UID: {uid}  ·  Lv.{level}')
+            self._levelLabel.setStyleSheet(f'color: {lv_color}; font-size: 11px; margin-top: 2px; font-weight: bold;')
+
+            # 数据卡片
+            self._findValueLabel(self._coinLabel).setText(str(coins))
+            self._findValueLabel(self._bcoinLabel).setText(f'{bcoins:.1f}')
+            self._findValueLabel(self._followLabel).setText(str(following))
+
+            # 头像
             if self._avatarPixmap and not self._avatarPixmap.isNull():
                 self._avatarLabel.setPixmap(self._avatarPixmap)
                 self._avatarLabel.setStyleSheet('')
             else:
-                self._avatarLabel.setText(uname[:1] if uname else '?')
                 self._resetAvatarPlaceholder()
+
             self.setWindowTitle(f'B站账号 - {uname}')
             self._loggedInPanel.show()
 
@@ -615,12 +694,18 @@ class QRLoginWidget(QWidget):
     # 工具方法
     # ================================================================
 
+    @staticmethod
+    def _findValueLabel(statWidget):
+        """从 stat widget 中取回值 label"""
+        return statWidget._valueLabel
+
     def _resetAvatarPlaceholder(self):
         self._avatarLabel.setPixmap(QPixmap())
-        self._avatarLabel.setText('?')
+        self._avatarLabel.setText('')
         self._avatarLabel.setStyleSheet(
-            'border-radius: 40px; border: 2px solid #555; '
-            'background-color: #3daee9; color: white; font-size: 28px;')
+            'border-radius: 44px; border: 2px solid #3daee9; '
+            'background-color: #2c313a; '
+            'image: url();')
 
     @staticmethod
     def _makeCircularPixmap(src, size):
