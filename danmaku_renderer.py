@@ -240,6 +240,10 @@ class DanmakuRenderer:
     def hasActiveDanmaku(self):
         return bool(self._active)
 
+    def activeCount(self):
+        """返回当前活跃弹幕数量（用于密度显示）"""
+        return len(self._active)
+
     def _request_update(self):
         if self._update_callback is not None:
             self._update_callback()

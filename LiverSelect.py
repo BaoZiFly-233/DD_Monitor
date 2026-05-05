@@ -1581,3 +1581,10 @@ class LiverPanel(QWidget):
             self.layout.addWidget(cover, cnt // self.multiple, cnt % self.multiple)
             cover.show()
         self.adjustSize()
+
+    def getFirstRoomID(self):
+        """获取卡片面板中第一个有效的房间号（用于快捷键加载）"""
+        for roomID in self.roomIDDict:
+            if roomID and roomID != '0':
+                return str(roomID)
+        return ''
