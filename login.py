@@ -229,13 +229,13 @@ class QRLoginWidget(QWidget):
         self._unameLabel = QLabel()
         self._unameLabel.setFont(QFont('微软雅黑', 14, QFont.Bold))
         self._unameLabel.setAlignment(Qt.AlignCenter)
-        self._unameLabel.setStyleSheet('color: #e5e5e5;')
+        self._unameLabel.setStyleSheet('color: #e5e5e5; background: transparent;')
         lay.addWidget(self._unameLabel)
 
         # UID + 等级 + 大会员
         self._infoLabel = QLabel()
         self._infoLabel.setAlignment(Qt.AlignCenter)
-        self._infoLabel.setStyleSheet('color: #999; font-size: 11px;')
+        self._infoLabel.setStyleSheet('color: #999; font-size: 11px; background: transparent;')
         lay.addWidget(self._infoLabel)
 
         # 分隔
@@ -283,10 +283,10 @@ class QRLoginWidget(QWidget):
         row = QVBoxLayout()
         row.setSpacing(1)
         t = QLabel(title)
-        t.setStyleSheet('color: #666; font-size: 10px;')
+        t.setStyleSheet('color: #666; font-size: 10px; background: transparent;')
         row.addWidget(t)
         v = QLabel('--')
-        v.setStyleSheet('color: #c5c5c5; font-size: 16px; font-weight: bold;')
+        v.setStyleSheet('color: #c5c5c5; font-size: 16px; font-weight: bold; background: transparent;')
         row.addWidget(v)
         parent_layout.addLayout(row)
         return v
@@ -663,9 +663,8 @@ class QRLoginWidget(QWidget):
         self._avatarLabel.setPixmap(QPixmap())
         self._avatarLabel.setText('')
         self._avatarLabel.setStyleSheet(
-            'border-radius: 44px; border: 2px solid #3daee9; '
-            'background-color: #2c313a; '
-            'image: url();')
+            'border-radius: 36px; border: 2px solid #3daee9; '
+            'background-color: #2c313a;')
 
     @staticmethod
     def _makeCircularPixmap(src, size):
