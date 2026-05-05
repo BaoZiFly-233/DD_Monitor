@@ -663,7 +663,7 @@ class MainWindow(QMainWindow):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.setDanmakuBaseViewport(viewport)
 
-    def setGlobalDanmuOpacity(self, value):
+    def openGlobalDanmuSetting(self):
         panel = GlobalDanmuOption(self.config['danmu'][0], self.config['rollingDanmu'])
         panel.setAttribute(Qt.WA_DeleteOnClose)
         panel.syncBrowserSetting(self.config['danmu'][0])
