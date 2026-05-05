@@ -84,7 +84,7 @@ class FetchAvatar(QThread):
         if not self.url:
             return
         try:
-            r = http_utils.get(self.url, timeout=20)
+            r = http_utils.get(self.url, timeout=20, retries=2, retry_backoff=1.0)
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self.avatarReady.emit(qimage)

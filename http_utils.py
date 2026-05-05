@@ -6,8 +6,8 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 
-# 默认超时（秒）：连接超时 5s，读取超时 15s
-DEFAULT_TIMEOUT = (5, 15)
+# 默认超时（秒）：连接超时 8s，读取超时 20s
+DEFAULT_TIMEOUT = (8, 20)
 
 # 默认请求头
 DEFAULT_HEADERS = {
@@ -21,7 +21,7 @@ def _create_session() -> requests.Session:
     s = requests.Session()
     s.headers.update(DEFAULT_HEADERS)
     # 连接池配置：最大 20 连接，每个 host 最多 10 连接
-    adapter = HTTPAdapter(pool_connections=20, pool_maxsize=10, max_retries=1)
+    adapter = HTTPAdapter(pool_connections=20, pool_maxsize=10, max_retries=2)
     s.mount('https://', adapter)
     s.mount('http://', adapter)
     return s
