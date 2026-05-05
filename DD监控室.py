@@ -930,23 +930,10 @@ class MainWindow(QMainWindow):
             danmu_panel_fn=self.openGlobalDanmuSetting,
             layout_panel_fn=self.openLayoutSetting,
         )
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._applySettingsFromDialog()
-
-    def _applySettingsFromDialog(self):
-        """设置对话框确认后，把 config 变更传播到所有窗口"""
-        quality = self.config['quality'][0]
-        for videoWidget in self._iterVideoWidgets(include_popups=True):
-            if not videoWidget.isHidden():
-                videoWidget.quality = quality
-                videoWidget.mediaReload()
-            if self.config['hardwareDecode'] != videoWidget.hardwareDecode:
-                videoWidget.hardwareDecode = self.config['hardwareDecode']
-            videoWidget.set_volume_direct(self.config['globalVolume'])
-            videoWidget.volume = self.config['globalVolume']
-            videoWidget.slider.setValue(self.config['globalVolume'])
-            videoWidget.setDanmakuBaseViewport(self._resolveDanmakuBaseViewport())
-            videoWidget.applyDanmuSettings()
+        dlg.exec()
+        # 设置已通过 SettingsDialog._apply() 直接写入 config 并保存
+        # 弹幕设置通过 applyDanmuSettings 在各窗口下次交互时生效
+        # 画质/解码等需要重载的变更由用户手动控制
 
     def openGithub(self):
         QDesktopServices.openUrl(
@@ -1192,8 +1179,9 @@ class MainWindow(QMainWindow):
         QCloseEvent.accept()
 
     def openLayoutSetting(self):
-        self.layoutSettingPanel.hide()
         self.layoutSettingPanel.show()
+        self.layoutSettingPanel.raise_()
+        self.layoutSettingPanel.activateWindow()
 
     def changeLayout(self, layoutConfig):
         for videoWidget in self.videoWidgetList:
