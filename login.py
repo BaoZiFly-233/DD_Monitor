@@ -511,7 +511,10 @@ class QRLoginWidget(QWidget):
         thread = _FetchLevelIcon(level)
         thread.iconReady.connect(self._onLevelIconReady)
         thread.start()
-        thread.wait(5000)  # 5秒超时
+        # 注意：此 wait 不是 bug，是为 16 个 QOpenGLWidget 初始化留出时间。
+        # 删掉会导致 iconReady 信号在 OpenGL 上下文创建期间到达，
+        # 触发 Qt 重绘 → STATUS_STACK_BUFFER_OVERRUN 原生崩溃。
+        thread.wait(5000)
 
     def _onLevelIconReady(self, pixmap):
         self._levelIconPixmap = pixmap

@@ -1,6 +1,5 @@
 """将弹幕机分离出来单独开发
 """
-import logging
 from dataclasses import dataclass
 
 from PySide6.QtWidgets import QLabel, QToolButton, QWidget, QComboBox, QLineEdit, QTextBrowser, QGridLayout, QStyle, QCheckBox, QSlider, QTabWidget
@@ -330,7 +329,6 @@ class GlobalDanmuOption(QWidget):
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.resize(400, 550)
 
-        from PySide6.QtWidgets import QTabWidget
         tabs = QTabWidget()
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

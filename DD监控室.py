@@ -4,6 +4,18 @@ DD监控室主界面进程 包含对所有子页面的初始化、排版管理
 以及软件启动和退出后的一些操作
 新增全局鼠标坐标跟踪 用于刷新鼠标交互效果
 """
+import os, sys
+
+# 原生崩溃诊断 — 在全部 import 之前启用
+import faulthandler
+_crash_log = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'logs', f'crash-{__import__("time").strftime("%Y%m%d-%H%M%S")}.log')
+os.makedirs(os.path.dirname(_crash_log), exist_ok=True)
+faulthandler.enable(file=open(_crash_log, 'w'), all_threads=True)
+if sys.platform == 'win32':
+    import ctypes
+    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
+
 import log
 
 import os
@@ -316,10 +328,11 @@ class MainWindow(QMainWindow):
             progressCounter += 1
             progressBar.setValue(progressCounter)
             self._connectVideoWidget(self.videoWidgetList[i])
-            app.processEvents()
-            logging.info("播放器设置完毕 %s / 16" % str(i + 1))
-        # 设置所有播放器布局
-        self.setPlayer()
+            # 不在循环内调 processEvents — 见 login.py thread.wait 注释
+            logging.info(f"播放器设置完毕 {i + 1} / 16")
+        app.processEvents()
+        # 延迟创建 OpenGL 上下文，避免 16 个同时初始化导致栈溢出
+        QTimer.singleShot(0, self.setPlayer)
 
         self.controlDock = DockWidget('控制条')
         self.controlDock.setFixedWidth(178)
