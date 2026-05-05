@@ -231,11 +231,11 @@ class BLiveClient(ws_base.WebSocketClientBase):
             self._room_owner_uid = 0
 
         if not await self._init_host_server():
-            # 失败了则降级，使用默认弹幕服务器
+            res = False
+            # 失败了则降级
             self._host_server_list = DEFAULT_DANMAKU_SERVER_LIST
             self._host_server_token = None
-        # 即使降级也返回 True，避免 ws_base 抛出 InitError
-        return True
+        return res
 
     async def _init_uid(self):
         cookies = self._session.cookie_jar.filter_cookies(yarl.URL(UID_INIT_URL))
