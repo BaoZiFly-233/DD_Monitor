@@ -249,6 +249,9 @@ class LoginDialog(QDialog):
         else:
             logging.info(f"登录用户: {info.get('uname', '?')} (UID: {info.get('uid', '?')})")
             self.userInfoReady.emit(info)
+        # 验证流程已结束，"刚扫码登录"保护期到此为止
+        # 否则 _justLoggedIn 永不复位，session 过期后永远走"保留凭据"分支，永不登出
+        self._justLoggedIn = False
 
     # ================================================================
     # QR 登录流程

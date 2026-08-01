@@ -358,7 +358,10 @@ class GlobalDanmuOption(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(tabs)
 
-        setting = list(danmu_config_list[:7]) if isinstance(danmu_config_list, list) else [50, 1, 7, 0, "【 [ {", 10, 0]
+        # config 弹幕格式为 9 项 [enabled, opacity, horiz, vert, translate, filter, font_size, show_enter, rolling]
+        # TextOption 期望 7 项 [opacity, horiz, vert, translate, filter, font_size, show_enter]
+        # 必须跳过 enabled(索引0) 取 [1:8]，否则错位导致 setCurrentIndex(str) TypeError 崩溃
+        setting = list(danmu_config_list[1:8]) if isinstance(danmu_config_list, list) else [50, 1, 7, 0, "【 [ {", 10, 0]
         self.browserOptionWidget = TextOption(setting)
         tabs.addTab(self.browserOptionWidget, "弹幕窗")
 
