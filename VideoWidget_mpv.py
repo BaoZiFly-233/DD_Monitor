@@ -1307,7 +1307,10 @@ class VideoWidget(QFrame):
         self.playerRestart()
         self.videoFrame.setPlaybackActive(False)
         self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        if deleteMedia:
+        # 悬浮窗(popup, id=16..31)的播放记录属于主窗口，由 closePopWindow 同步回主窗口；
+        # 若在此 emit deleteMedia，主窗口 config["player"]（仅 16 项）会越界 IndexError
+        # 且异常会中断本方法后续的 stopDanmu/refreshTimeStampTimer.stop/hideTextBrowser 清理
+        if deleteMedia and not self.top:
             self.deleteMedia.emit(self.id)
         self.getMediaURL.recordToken = False
         self.checkPlaying.stop()

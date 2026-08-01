@@ -656,11 +656,15 @@ class MainWindow(QMainWindow):
 
     def addMedia(self, info):  # 窗口 房号
         id, roomID = info
+        if not (0 <= id < MAX_WINDOWS):  # 防御：悬浮窗(id=16..31)的播放记录不写入主窗口 config
+            return
         self.config["player"][id] = roomID
         self.liverPanel.updatePlayingStatus(self.config["player"])
         self.configManager.save()
 
     def deleteMedia(self, id):
+        if not (0 <= id < MAX_WINDOWS):  # 防御：悬浮窗 id 越界时直接忽略
+            return
         self.config["player"][id] = 0
         self.liverPanel.updatePlayingStatus(self.config["player"])
         self.configManager.save()

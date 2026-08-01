@@ -1557,6 +1557,7 @@ class LiverPanel(QWidget):
                         elif cover.recordState == 1 and info[4] != 1:  # 满足停止录制的2个条件
                             cover.recordState = 0  # 取消录制
                             cover.recordThread.recordToken = False  # 设置录像线程标志位让它自行退出结束
+                            cover.recordThread.checkTimer.stop()  # 停止轮询，避免 180s 后误弹"录制结束"提示
                         cover.updateLabel(info)  # 更新数据
                 if info[1] not in self.oldLiveStatus:  # 软件启动后第一次更新添加
                     self.oldLiveStatus[info[1]] = info[4]  # 房号: 直播状态
