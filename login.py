@@ -56,23 +56,6 @@ QLabel {
     font-size: 12px;
     background: transparent;
 }
-/* 统计图标：统一浅灰单色符号（¥ ◆ ★），颜色留给按钮 */
-#loginStatIcon {
-    color: #8a94a0;
-    font-size: 14px;
-    background: transparent;
-}
-#loginStatTitle {
-    color: #6b7684;
-    font-size: 10px;
-    background: transparent;
-}
-#loginStatValue {
-    color: #e8edf2;
-    font-size: 18px;
-    font-weight: bold;
-    background: transparent;
-}
 #loginAvatar {
     border-radius: 44px;
     border: 2px solid #547a94;
@@ -275,7 +258,7 @@ class QRLoginWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("B站账号")
-        self.setFixedSize(420, 620)
+        self.setFixedSize(420, 540)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据（UI 从这些字段推导）----
@@ -379,19 +362,16 @@ class QRLoginWidget(QWidget):
         infoRow.addStretch()
         lay.addLayout(infoRow)
 
-        # 数据行（横排三列，单色符号图标引导 — 颜色统一浅灰，不干扰数值阅读）
-        stats = QHBoxLayout()
-        stats.setSpacing(12)
-        self._coinLabel = self._makeStatCell("¥", "硬币", stats)
-        self._bcoinLabel = self._makeStatCell("◆", "B币", stats)
-        self._followLabel = self._makeStatCell("★", "关注", stats)
-        lay.addLayout(stats)
-
         lay.addSpacing(10)
 
         # 操作按钮 — 层级：主操作（打开个人空间，莫兰迪蓝）/ 默认（切换账号）/ 静默危险（退出登录）
         buttons = [
-            ("打开 B站 个人空间", self.style().standardIcon(QStyle.SP_ComputerIcon), "loginPrimaryBtn", self._openUserSpace),
+            (
+                "打开 B站 个人空间",
+                self.style().standardIcon(QStyle.SP_ComputerIcon),
+                "loginPrimaryBtn",
+                self._openUserSpace,
+            ),
             ("切换账号", self.style().standardIcon(QStyle.SP_ArrowForward), None, self._onSwitchAccount),
             ("退出登录", self.style().standardIcon(QStyle.SP_DialogCloseButton), "loginQuietDangerBtn", self._onLogout),
         ]
@@ -410,26 +390,6 @@ class QRLoginWidget(QWidget):
 
         self._loggedInPanel.hide()
         self._mainLayout.addWidget(self._loggedInPanel)
-
-    @staticmethod
-    def _makeStatCell(icon, title, parent_layout):
-        """横排统计单元格：图标 + 标题 + 数值"""
-        cell = QVBoxLayout()
-        cell.setSpacing(3)
-        icon_label = QLabel(icon)
-        icon_label.setObjectName("loginStatIcon")
-        icon_label.setAlignment(Qt.AlignCenter)
-        t = QLabel(title)
-        t.setObjectName("loginStatTitle")
-        t.setAlignment(Qt.AlignCenter)
-        v = QLabel("--")
-        v.setObjectName("loginStatValue")
-        v.setAlignment(Qt.AlignCenter)
-        cell.addWidget(icon_label)
-        cell.addWidget(t)
-        cell.addWidget(v)
-        parent_layout.addLayout(cell)
-        return v
 
     def _buildVerifyingPanel(self):
         self._verifyingPanel = QWidget()
@@ -512,9 +472,6 @@ class QRLoginWidget(QWidget):
             uname = self._user_info.get("uname", "已登录")
             uid = self._user_info.get("uid", "")
             level = self._user_info.get("level", 0)
-            coins = self._user_info.get("coins", 0)
-            bcoins = float(self._user_info.get("bcoins", 0))
-            following = self._user_info.get("following", 0)
             vip_info = self._user_info.get("vip", {})
 
             self._unameLabel.setText(uname)
@@ -525,10 +482,6 @@ class QRLoginWidget(QWidget):
             self._infoLabel.setText("  ·  ".join(info_parts))
             # 更新等级图标
             self._downloadLevelIcon(level)
-
-            self._coinLabel.setText(str(coins))
-            self._bcoinLabel.setText(f"{bcoins:.1f}" if bcoins == int(bcoins) else str(int(bcoins)))
-            self._followLabel.setText(str(following))
 
             if self._avatarPixmap and not self._avatarPixmap.isNull():
                 self._applyAvatar()
