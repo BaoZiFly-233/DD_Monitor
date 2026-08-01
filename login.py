@@ -691,7 +691,10 @@ class QRLoginWidget(QWidget):
     def _onAvatarReady(self, qimage):
         """头像下载完成 → 裁剪为圆形并缓存（主窗口就绪前挂起应用）"""
         pixmap = QPixmap.fromImage(qimage)
-        scaled = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # 先按短边放大到覆盖 88x88，再居中裁出中心区域，
+        # 保证圆形裁剪后圆内无透明缝隙（非正方形原图也不会留边）
+        scaled = pixmap.scaled(88, 88, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        scaled = scaled.copy((scaled.width() - 88) // 2, (scaled.height() - 88) // 2, 88, 88)
         self._avatarPixmap = self._makeCircularPixmap(scaled, 88)
         if self._paintSafe:
             self._applyAvatar()
