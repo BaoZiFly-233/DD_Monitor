@@ -3,6 +3,7 @@
 提供全局 requests.Session 实现 TCP 连接复用，统一超时和 User-Agent 配置
 """
 import time
+
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -31,15 +32,22 @@ def _create_session() -> requests.Session:
 session = _create_session()
 
 
-def get(url, **kwargs):
+def get(url, **kwargs) -> requests.Response:
     """带默认超时的 GET 请求
 
     可选参数：
     - retries: 失败后重试次数（默认 0）
     - retry_backoff: 指数退避起始秒数（默认 0.2）
+    失败时抛出 requests.RequestException，不返回 None。
     """
-    retries = max(0, int(kwargs.pop('retries', 0) or 0))
-    retry_backoff = max(0.0, float(kwargs.pop('retry_backoff', 0.2) or 0.0))
+    try:
+        retries = max(0, int(kwargs.pop('retries', 0) or 0))
+    except (TypeError, ValueError):
+        retries = 0
+    try:
+        retry_backoff = max(0.0, float(kwargs.pop('retry_backoff', 0.2) or 0.0))
+    except (TypeError, ValueError):
+        retry_backoff = 0.2
     kwargs.setdefault('timeout', DEFAULT_TIMEOUT)
     last_error = None
     for attempt in range(retries + 1):
@@ -51,11 +59,13 @@ def get(url, **kwargs):
                 raise
             if retry_backoff > 0:
                 time.sleep(retry_backoff * (2 ** attempt))
+    # 循环结束必为全部尝试失败（成功路径已 return，末次异常已 raise）
     if last_error is not None:
         raise last_error
+    raise requests.RequestException('unreachable: 所有尝试均已返回或抛出')
 
 
-def post(url, **kwargs):
+def post(url, **kwargs) -> requests.Response:
     """带默认超时的 POST 请求"""
     kwargs.setdefault('timeout', DEFAULT_TIMEOUT)
     return session.post(url, **kwargs)

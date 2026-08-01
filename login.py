@@ -13,16 +13,55 @@ import logging
 import time
 from urllib.parse import urlparse, parse_qs
 import http_utils
+import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QUrl
 from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath, QDesktopServices
-from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout,
+from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                                 QFrame, QMessageBox)
 
-try:
-    import qrcode
-    HAS_QRCODE = True
-except ImportError:
-    HAS_QRCODE = False
+# 集中管理面板样式 — 颜色统一在此定义，不散落各处
+_PANEL_QSS = """
+#loggedInPanel {
+    background: #2b3138;
+    border: 1px solid #3a4048;
+    border-radius: 12px;
+}
+#loginInfoLabel {
+    color: #9aa4b0;
+    font-size: 12px;
+    background: transparent;
+}
+#loginStatTitle {
+    color: #6b7684;
+    font-size: 10px;
+    background: transparent;
+}
+#loginStatValue {
+    color: #e8edf2;
+    font-size: 18px;
+    font-weight: bold;
+    background: transparent;
+}
+#loginAvatar {
+    border-radius: 40px;
+    border: 2px solid #3daee9;
+    background: #2b3138;
+}
+#loginQrFrame {
+    border: 1px solid #555;
+    border-radius: 8px;
+    background: white;
+}
+#qrStatusOk {
+    color: #00cc66;
+}
+#qrStatusScan {
+    color: #3399ff;
+}
+#qrStatusExpired {
+    color: #ff5555;
+}
+"""
 
 HEADERS = {
     **http_utils.DEFAULT_HEADERS,
@@ -49,7 +88,7 @@ class FetchUserInfo(QThread):
             cookies = {'SESSDATA': self.sessdata} if self.sessdata else {}
             resp = http_utils.get(
                 'https://api.bilibili.com/x/web-interface/nav',
-                headers=HEADERS, cookies=cookies, timeout=10
+                headers=HEADERS, cookies=cookies, timeout=4
             )
             data = resp.json()
             if data['code'] == 0 and data['data'].get('isLogin'):
@@ -84,7 +123,7 @@ class FetchAvatar(QThread):
         if not self.url:
             return
         try:
-            r = http_utils.get(self.url, timeout=20, retries=2, retry_backoff=1.0)
+            r = http_utils.get(self.url, timeout=8, retries=2, retry_backoff=1.0)
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self.avatarReady.emit(qimage)
@@ -101,7 +140,7 @@ class FetchQRCode(QThread):
         try:
             resp = http_utils.get(
                 'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
-                headers=HEADERS, timeout=10)
+                headers=HEADERS, timeout=4)
             data = resp.json()
             if data['code'] != 0:
                 self.fetchError.emit(f'获取失败: {data["message"]}')
@@ -130,7 +169,7 @@ class PollLoginStatus(QThread):
             resp = http_utils.get(
                 'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
                 params={'qrcode_key': self.qrcode_key},
-                headers=HEADERS, timeout=10)
+                headers=HEADERS, timeout=4)
             result = resp.json()['data']
             code = result['code']
 
@@ -166,7 +205,7 @@ class QRLoginWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('B站账号')
-        self.setFixedSize(340, 560)
+        self.setFixedSize(400, 580)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据（UI 从这些字段推导）----
@@ -176,8 +215,14 @@ class QRLoginWidget(QWidget):
         self._qrcode_key = ''
         self._credential = {}
         self._destructiveGuardUntil = 0.0
+        # 主窗口就绪门闩：启动早期下载的头像/等级图标先缓存，
+        # 等主窗口 OpenGL 初始化完成后才应用（替代旧的 thread.wait 阻塞方案）
+        self._paintSafe = False
+        self._pendingAvatar = False
+        self._pendingLevelIcon = False
 
         # ---- 后台线程 ----
+        self._levelIconThread = None
         self._fetchUserInfo = FetchUserInfo()
         self._fetchUserInfo.userInfo.connect(self._onUserInfo)
         self._fetchAvatar = FetchAvatar()
@@ -194,6 +239,8 @@ class QRLoginWidget(QWidget):
         self._mainLayout = QVBoxLayout(self)
         self._mainLayout.setAlignment(Qt.AlignCenter)
         self._mainLayout.setSpacing(10)
+        self._mainLayout.setContentsMargins(16, 16, 16, 16)
+        self.setStyleSheet(_PANEL_QSS)
 
         self._buildLoggedInPanel()
         self._buildVerifyingPanel()
@@ -210,91 +257,82 @@ class QRLoginWidget(QWidget):
 
     def _buildLoggedInPanel(self):
         self._loggedInPanel = QFrame()
-        self._loggedInPanel.setObjectName('loggedIn')
-        self._loggedInPanel.setStyleSheet(
-            'QFrame#loggedIn { border: 1px solid #444; border-radius: 10px; '
-            'background-color: #2c313a; padding: 10px; }')
+        self._loggedInPanel.setObjectName('loggedInPanel')
         lay = QVBoxLayout(self._loggedInPanel)
-        lay.setSpacing(10)
-        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+        lay.setContentsMargins(24, 24, 24, 24)
 
         # 头像
         self._avatarLabel = QLabel()
-        self._avatarLabel.setFixedSize(72, 72)
+        self._avatarLabel.setFixedSize(80, 80)
         self._avatarLabel.setAlignment(Qt.AlignCenter)
         self._resetAvatarPlaceholder()
         lay.addWidget(self._avatarLabel, alignment=Qt.AlignCenter)
 
         # 用户名
         self._unameLabel = QLabel()
-        self._unameLabel.setFont(QFont('微软雅黑', 14, QFont.Bold))
+        self._unameLabel.setFont(QFont('微软雅黑', 16, QFont.Bold))
         self._unameLabel.setAlignment(Qt.AlignCenter)
-        self._unameLabel.setStyleSheet('color: #e5e5e5; background: transparent;')
         lay.addWidget(self._unameLabel)
 
-        # 等级图标
+        # 等级图标 + UID/等级/大会员信息（同一行）
         self._levelIconLabel = QLabel()
-        self._levelIconLabel.setFixedSize(26, 14)
+        self._levelIconLabel.setFixedSize(30, 16)
         self._levelIconLabel.setAlignment(Qt.AlignCenter)
-        lay.addWidget(self._levelIconLabel, alignment=Qt.AlignCenter)
-
-        # UID + 等级 + 大会员
         self._infoLabel = QLabel()
+        self._infoLabel.setObjectName('loginInfoLabel')
         self._infoLabel.setAlignment(Qt.AlignCenter)
-        self._infoLabel.setStyleSheet('color: #999; font-size: 11px; background: transparent;')
-        lay.addWidget(self._infoLabel)
+        infoRow = QHBoxLayout()
+        infoRow.setSpacing(6)
+        infoRow.addStretch()
+        infoRow.addWidget(self._levelIconLabel)
+        infoRow.addWidget(self._infoLabel)
+        infoRow.addStretch()
+        lay.addLayout(infoRow)
 
-        # 分隔
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet('background-color: #3a3f47;')
-        lay.addWidget(sep)
-
-        # 数据行
-        stats = QVBoxLayout()
-        stats.setSpacing(4)
-        self._coinLabel = self._makeStatRow('硬币', stats)
-        self._bcoinLabel = self._makeStatRow('B币', stats)
-        self._followLabel = self._makeStatRow('关注', stats)
+        # 数据行（横排三列）
+        stats = QHBoxLayout()
+        stats.setSpacing(8)
+        self._coinLabel = self._makeStatCell('硬币', stats)
+        self._bcoinLabel = self._makeStatCell('B币', stats)
+        self._followLabel = self._makeStatCell('关注', stats)
         lay.addLayout(stats)
 
-        lay.addSpacing(6)
+        lay.addSpacing(8)
 
-        # 按钮
-        btn_base = (
-            'QPushButton { border-radius: 4px; padding: 6px; color: white; font-size: 13px; }'
-            'QPushButton:hover { opacity: 0.85; }'
-        )
-        for text, bg, slot in [
-            ('打开 B站 个人空间', '#219a52', self._openUserSpace),
-            ('切换账号', '#3a7ec4', self._onSwitchAccount),
-            ('退出登录', '#ba3b3b', self._onLogout),
+        # 操作按钮 — 全部走全局 qdark 主题，不再内联配色
+        for text, slot in [
+            ('打开 B站 个人空间', self._openUserSpace),
+            ('切换账号', self._onSwitchAccount),
+            ('退出登录', self._onLogout),
         ]:
             btn = QPushButton(text)
-            btn.setFixedHeight(34)
+            btn.setFixedHeight(36)
             btn.setAutoDefault(False)
             btn.setDefault(False)
             btn.setFocusPolicy(Qt.NoFocus)
-            btn.setStyleSheet(f'QPushButton {{ background-color: {bg}; {btn_base} }}')
-            btn.clicked.connect(slot)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(slot)
             lay.addWidget(btn)
-            lay.addSpacing(4)
+            lay.addSpacing(2)
 
         self._loggedInPanel.hide()
         self._mainLayout.addWidget(self._loggedInPanel)
 
     @staticmethod
-    def _makeStatRow(title, parent_layout):
-        row = QVBoxLayout()
-        row.setSpacing(1)
+    def _makeStatCell(title, parent_layout):
+        """横排统计单元格：上标题下数值"""
+        cell = QVBoxLayout()
+        cell.setSpacing(2)
         t = QLabel(title)
-        t.setStyleSheet('color: #666; font-size: 10px; background: transparent;')
-        row.addWidget(t)
+        t.setObjectName('loginStatTitle')
+        t.setAlignment(Qt.AlignCenter)
         v = QLabel('--')
-        v.setStyleSheet('color: #c5c5c5; font-size: 16px; font-weight: bold; background: transparent;')
-        row.addWidget(v)
-        parent_layout.addLayout(row)
+        v.setObjectName('loginStatValue')
+        v.setAlignment(Qt.AlignCenter)
+        cell.addWidget(t)
+        cell.addWidget(v)
+        parent_layout.addLayout(cell)
         return v
 
     def _buildVerifyingPanel(self):
@@ -310,15 +348,13 @@ class QRLoginWidget(QWidget):
 
         self._verifyingHint = QLabel('请稍候')
         self._verifyingHint.setFont(QFont('微软雅黑', 10))
+        self._verifyingHint.setObjectName('loginInfoLabel')
         self._verifyingHint.setAlignment(Qt.AlignCenter)
-        self._verifyingHint.setStyleSheet('color: #888;')
         lay.addWidget(self._verifyingHint)
 
         retryBtn = QPushButton('重试')
         retryBtn.setFixedHeight(36)
-        retryBtn.setStyleSheet(
-            'QPushButton { background-color: #3daee9; border-radius: 4px; color: white; }'
-            'QPushButton:hover { background-color: #5bc0de; }')
+        retryBtn.setCursor(Qt.PointingHandCursor)
         retryBtn.clicked.connect(self._retryVerify)
         lay.addWidget(retryBtn)
 
@@ -329,10 +365,10 @@ class QRLoginWidget(QWidget):
         self._qrPanel = QWidget()
         lay = QVBoxLayout(self._qrPanel)
         lay.setAlignment(Qt.AlignCenter)
-        lay.setSpacing(10)
+        lay.setSpacing(12)
 
         self._qrTitle = QLabel('请使用 Bilibili 客户端扫码登录')
-        self._qrTitle.setFont(QFont('微软雅黑', 11))
+        self._qrTitle.setFont(QFont('微软雅黑', 12, QFont.Bold))
         self._qrTitle.setAlignment(Qt.AlignCenter)
         self._qrTitle.setWordWrap(True)
         lay.addWidget(self._qrTitle)
@@ -340,19 +376,18 @@ class QRLoginWidget(QWidget):
         self._qrLabel = QLabel()
         self._qrLabel.setFixedSize(260, 260)
         self._qrLabel.setAlignment(Qt.AlignCenter)
-        self._qrLabel.setStyleSheet('border: 1px solid #555; background: white;')
+        self._qrLabel.setObjectName('loginQrFrame')
         lay.addWidget(self._qrLabel, alignment=Qt.AlignCenter)
 
         self._qrStatus = QLabel()
         self._qrStatus.setFont(QFont('微软雅黑', 10))
         self._qrStatus.setAlignment(Qt.AlignCenter)
+        self._qrStatus.setWordWrap(True)
         lay.addWidget(self._qrStatus)
 
         refreshBtn = QPushButton('刷新二维码')
         refreshBtn.setFixedHeight(36)
-        refreshBtn.setStyleSheet(
-            'QPushButton { background-color: #3daee9; border-radius: 4px; color: white; }'
-            'QPushButton:hover { background-color: #5bc0de; }')
+        refreshBtn.setCursor(Qt.PointingHandCursor)
         refreshBtn.clicked.connect(self._fetchQRCode)
         lay.addWidget(refreshBtn)
 
@@ -396,8 +431,7 @@ class QRLoginWidget(QWidget):
             self._followLabel.setText(str(following))
 
             if self._avatarPixmap and not self._avatarPixmap.isNull():
-                self._avatarLabel.setPixmap(self._avatarPixmap)
-                self._avatarLabel.setStyleSheet('')
+                self._applyAvatar()
             else:
                 self._resetAvatarPlaceholder()
 
@@ -492,7 +526,11 @@ class QRLoginWidget(QWidget):
         self._syncUI()
 
     def _downloadLevelIcon(self, level):
-        """后台下载 B站等级图标（用 QThread 避免阻塞）"""
+        """后台下载 B站等级图标
+
+        下载完成后不立即 setPixmap：若主窗口 OpenGL 初始化尚未完成，
+        先挂起待主窗口就绪后再应用（替代旧方案的 thread.wait(5000) 阻塞）。
+        """
         class _FetchLevelIcon(QThread):
             iconReady = Signal(QPixmap)
             def __init__(self, level):
@@ -504,23 +542,26 @@ class QRLoginWidget(QWidget):
                     r = http_utils.get(url, timeout=10)
                     img = QImage.fromData(r.content)
                     if not img.isNull():
-                        pm = QPixmap.fromImage(img).scaled(26, 14, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        pm = QPixmap.fromImage(img).scaled(30, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         self.iconReady.emit(pm)
                 except Exception:
-                    pass
+                    logging.debug('等级图标下载失败', exc_info=True)
         thread = _FetchLevelIcon(level)
         thread.iconReady.connect(self._onLevelIconReady)
+        # 保存为成员：防止函数返回后线程对象被 GC 析构（running 状态析构会原生崩溃）
+        self._levelIconThread = thread
         thread.start()
-        # 注意：此 wait 不是 bug，是为 16 个 QOpenGLWidget 初始化留出时间。
-        # 删掉会导致 iconReady 信号在 OpenGL 上下文创建期间到达，
-        # 触发 Qt 重绘 → STATUS_STACK_BUFFER_OVERRUN 原生崩溃。
-        thread.wait(5000)
 
     def _onLevelIconReady(self, pixmap):
         self._levelIconPixmap = pixmap
-        # 更新显示
-        if hasattr(self, '_levelIconLabel'):
-            self._levelIconLabel.setPixmap(pixmap)
+        if self._paintSafe:
+            self._applyLevelIcon()
+        else:
+            self._pendingLevelIcon = True
+
+    def _applyLevelIcon(self):
+        if self._levelIconPixmap and not self._levelIconPixmap.isNull():
+            self._levelIconLabel.setPixmap(self._levelIconPixmap)
 
     def _openUserSpace(self):
         uid = self._user_info.get('uid')
@@ -582,13 +623,14 @@ class QRLoginWidget(QWidget):
             self._syncUI()
 
     def _onAvatarReady(self, qimage):
-        """头像下载完成 → 裁剪为圆形并缓存"""
+        """头像下载完成 → 裁剪为圆形并缓存（主窗口就绪前挂起应用）"""
         pixmap = QPixmap.fromImage(qimage)
-        scaled = pixmap.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._avatarPixmap = self._makeCircularPixmap(scaled, 72)
-        self._avatarLabel.setPixmap(self._avatarPixmap)
-        self._avatarLabel.setStyleSheet(
-            'border-radius: 36px; border: 2px solid #3daee9;')
+        scaled = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._avatarPixmap = self._makeCircularPixmap(scaled, 80)
+        if self._paintSafe:
+            self._applyAvatar()
+        else:
+            self._pendingAvatar = True
 
     # ================================================================
     # 内部：QR 登录流程
@@ -597,7 +639,7 @@ class QRLoginWidget(QWidget):
     def _fetchQRCode(self):
         """获取并显示二维码（后台线程执行，不阻塞 UI）"""
         self._qrStatus.setText('正在获取二维码...')
-        self._qrStatus.setStyleSheet('')
+        self._qrStatus.setProperty('class', '')
         self._pollTimer.stop()
         if not self._fetchQRCodeThread.isRunning():
             self._fetchQRCodeThread.start()
@@ -614,18 +656,24 @@ class QRLoginWidget(QWidget):
         self._qrStatus.setText(msg)
 
     def _renderQR(self, url):
-        if HAS_QRCODE:
-            qr = qrcode.QRCode(version=1, box_size=8, border=2)
-            qr.add_data(url)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color='black', back_color='white').convert('RGB')
+        qr = qrcode.QRCode(version=1, box_size=8, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='black', back_color='white')
+        if hasattr(img, 'convert'):
+            # PIL 后端：直接转 RGB 取像素
+            img = img.convert('RGB')
             raw = img.tobytes('raw', 'RGB')
             qimg = QImage(raw, img.width, img.height, img.width * 3, QImage.Format_RGB888)
-            pm = QPixmap.fromImage(qimg)
-            self._qrLabel.setPixmap(pm.scaled(
-                self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
-            self._qrLabel.setText('需要安装 qrcode:\npip install qrcode[pil]')
+            # pypng 后端：经 BytesIO 中转
+            import io
+            buf = io.BytesIO()
+            img.save(buf, 'PNG')
+            qimg = QImage.fromData(buf.getvalue())
+        pm = QPixmap.fromImage(qimg)
+        self._qrLabel.setPixmap(pm.scaled(
+            self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _doPollLogin(self):
         """定时器回调：启动后台轮询线程（不阻塞主线程）"""
@@ -640,12 +688,12 @@ class QRLoginWidget(QWidget):
         """二维码过期回调"""
         self._pollTimer.stop()
         self._qrStatus.setText('二维码已过期，请点击刷新')
-        self._qrStatus.setStyleSheet('color: #CC0000;')
+        self._qrStatus.setObjectName('qrStatusExpired')
 
     def _onQRScanned(self):
         """已扫码回调"""
         self._qrStatus.setText('已扫码，请在手机上确认登录')
-        self._qrStatus.setStyleSheet('color: #3399FF;')
+        self._qrStatus.setObjectName('qrStatusScan')
 
     def _onQRLoginSuccess(self, resp, result):
         """扫码登录成功处理"""
@@ -682,7 +730,7 @@ class QRLoginWidget(QWidget):
         self.credentialReady.emit(self._credential)
 
         self._qrStatus.setText('登录成功！正在获取用户信息...')
-        self._qrStatus.setStyleSheet('color: #00CC00;')
+        self._qrStatus.setObjectName('qrStatusOk')
 
         # 启动用户信息验证
         self._startVerify()
@@ -705,9 +753,27 @@ class QRLoginWidget(QWidget):
     def _resetAvatarPlaceholder(self):
         self._avatarLabel.setPixmap(QPixmap())
         self._avatarLabel.setText('')
-        self._avatarLabel.setStyleSheet(
-            'border-radius: 36px; border: 2px solid #3daee9; '
-            'background-color: #2c313a;')
+        self._avatarLabel.setObjectName('loginAvatar')
+
+    def _applyAvatar(self):
+        """应用头像（主窗口就绪后调用）"""
+        if self._avatarPixmap and not self._avatarPixmap.isNull():
+            self._avatarLabel.setPixmap(self._avatarPixmap)
+            self._avatarLabel.setObjectName('loginAvatar')
+
+    def setMainWindowReady(self):
+        """主窗口初始化完成回调 — 此后才安全执行 setPixmap 等重绘操作
+
+        替代旧的 thread.wait(5000) 阻塞方案：启动早期到达的头像/等级图标
+        先缓存，待 OpenGL 初始化窗口期结束后统一应用。
+        """
+        self._paintSafe = True
+        if self._pendingAvatar:
+            self._pendingAvatar = False
+            self._applyAvatar()
+        if self._pendingLevelIcon:
+            self._pendingLevelIcon = False
+            self._applyLevelIcon()
 
     @staticmethod
     def _makeCircularPixmap(src, size):
@@ -733,4 +799,15 @@ class QRLoginWidget(QWidget):
 
     def closeEvent(self, event):
         self._pollTimer.stop()
+        # 等待所有后台线程退出后再关闭窗口
+        # （线程在 running 状态下被析构会触发 STATUS_STACK_BUFFER_OVERRUN 原生崩溃）
+        threads = [
+            self._fetchUserInfo, self._fetchAvatar,
+            self._fetchQRCodeThread, self._pollLoginThread,
+        ]
+        if self._levelIconThread is not None:
+            threads.append(self._levelIconThread)
+        for thread in threads:
+            if thread.isRunning():
+                thread.wait(6000)
         super().closeEvent(event)

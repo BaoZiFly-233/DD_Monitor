@@ -513,6 +513,9 @@ class MainWindow(QMainWindow):
 
         if self.config['checkUpdate']:
             self.updateChecker()
+        # 主窗口初始化完成 — 登录窗口此时才安全应用头像/等级图标重绘
+        # （替代旧方案 login.py 里 thread.wait(5000) 的阻塞 hack）
+        self.loginBrowser.setMainWindowReady()
 
     def setPlayer(self):
         for index, layoutConfig in enumerate(self.config['layout']):
@@ -1136,7 +1139,7 @@ class MainWindow(QMainWindow):
                 videoWidget.topLabel.hide()  # 隐藏悬浮窗口的控制条
                 videoWidget.frame.hide()
 
-    def moveEvent(self, QMoveEvent):  # 捕获主窗口moveEvent来实时同步弹幕机位置
+    def moveEvent(self, event):  # 捕获主窗口moveEvent来实时同步弹幕机位置
         self._applyDanmakuBaseViewport()
         for videoWidget in self.videoWidgetList:
             if videoWidget.textBrowser is None:
@@ -1150,7 +1153,7 @@ class MainWindow(QMainWindow):
         """主窗口隐藏：关闭、最小化
         隐藏所有弹幕机
         """
-        logging.debug(f"主窗口已隐藏")
+        logging.debug("主窗口已隐藏")
         for videoWidget in self.videoWidgetList:
             videoWidget.hideTextBrowser()
 
@@ -1158,13 +1161,13 @@ class MainWindow(QMainWindow):
         """主窗口显示：打开、最大化
         显示开启的弹幕机
         """
-        logging.debug(f"主窗口已显示")
+        logging.debug("主窗口已显示")
         self._applyDanmakuBaseViewport()
         for index, videoWidget in enumerate(self.videoWidgetList):
             if self.config['danmu'][index][0] and not videoWidget.isHidden():
                 videoWidget.showTextBrowser()
 
-    def closeEvent(self, QCloseEvent):
+    def closeEvent(self, event):
         self.hide()
         self.layoutSettingPanel.close()
         self.liverPanel.addLiverRoomWidget.close()
@@ -1177,7 +1180,7 @@ class MainWindow(QMainWindow):
             videoWidget.close()
         self.saveDockLayout()
         self.configManager.save_now()
-        QCloseEvent.accept()
+        event.accept()
 
     def openLayoutSetting(self):
         self.layoutSettingPanel.show()
@@ -1202,7 +1205,8 @@ class MainWindow(QMainWindow):
             self.mainLayout.addWidget(videoWidget, y, x, h, w)
             if videoWidget.roomID != '0':
                 videoWidget.mediaPlay(2)  # 显示的窗口播放
-        for videoWidget in self.videoWidgetList[index + 1:]:  # 被隐藏起来的窗口
+        # 隐藏布局之外的窗口（按布局数量而非循环变量，避免空布局时未绑定）
+        for videoWidget in self.videoWidgetList[len(layoutConfig):]:
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
         self.config['layout'] = layoutConfig
@@ -1242,7 +1246,7 @@ class MainWindow(QMainWindow):
     def saveDockLayout(self):
         self.config['geometry'] = str(self.saveGeometry().toBase64(), 'ASCII')
         self.config['windowState'] = str(self.saveState().toBase64(), 'ASCII')
-        logging.info(f'save Window layout.')
+        logging.info('save Window layout.')
 
     def loadDockLayout(self):
         if 'geometry' in self.config:
@@ -1253,7 +1257,7 @@ class MainWindow(QMainWindow):
             windowState = QByteArray().fromBase64(
                 self.config['windowState'].encode('ASCII'))
             self.restoreState(windowState)
-        logging.info(f'restore Window layout.')
+        logging.info('restore Window layout.')
 
     def exportConfig(self):
         savePath = QFileDialog.getSaveFileName(
@@ -1297,17 +1301,17 @@ class MainWindow(QMainWindow):
             self.liverPanel.updatePlayingStatus(self.config['player'])
             self.configManager.save()
 
-    def keyPressEvent(self, QKeyEvent):
-        if QKeyEvent.key() == Qt.Key_Escape or QKeyEvent.key() == Qt.Key_F:
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape or event.key() == Qt.Key_F:
             self.fullScreen()
-        elif QKeyEvent.key() == Qt.Key_H:
+        elif event.key() == Qt.Key_H:
             self.openControlPanel()
-        elif QKeyEvent.key() == Qt.Key_M or QKeyEvent.key() == Qt.Key_S:
+        elif event.key() == Qt.Key_M or event.key() == Qt.Key_S:
             self.muteExcept()
-        elif Qt.Key_1 <= QKeyEvent.key() <= Qt.Key_9:
-            idx = QKeyEvent.key() - Qt.Key_1
+        elif Qt.Key_1 <= event.key() <= Qt.Key_9:
+            idx = event.key() - Qt.Key_1
             if idx < len(self.videoWidgetList):
-                if QKeyEvent.modifiers() & Qt.ControlModifier:
+                if event.modifiers() & Qt.ControlModifier:
                     # Ctrl+数字: 加载卡片面板第一个房间到该窗口
                     first_room = self.liverPanel.getFirstRoomID()
                     if first_room:
