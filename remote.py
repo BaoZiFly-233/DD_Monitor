@@ -7,6 +7,7 @@
 import asyncio
 import http.cookies
 import logging
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -78,6 +79,9 @@ class remoteThread(QThread):
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop_event: Optional[asyncio.Event] = None
+        # 停止请求标记（threading.Event 保证跨线程可见性）
+        # 修复竞态：stop() 若在 _stop_event 创建前被调用，_connect() 创建后需能感知
+        self._stop_requested = threading.Event()
 
     def setRoomID(self, roomID):
         self.roomID = str(roomID)
@@ -86,8 +90,14 @@ class remoteThread(QThread):
         self.sessionData = sessionData if sessionData else ""
 
     def stop(self):
-        """安全停止弹幕线程 — 通过 asyncio.Event 通知协程优雅退出"""
+        """安全停止弹幕线程 — 通过 asyncio.Event 通知协程优雅退出
+
+        竞态修复：即使 stop() 早于 _connect() 创建 _stop_event，
+        _stop_requested 标记也会被 _connect() 检查到并立即退出，
+        避免线程永久阻塞在 await self._stop_event.wait()。
+        """
         self._running = False
+        self._stop_requested.set()
         if self._loop and self._loop.is_running() and self._stop_event is not None:
             self._loop.call_soon_threadsafe(self._stop_event.set)
 
@@ -96,6 +106,8 @@ class remoteThread(QThread):
             return
 
         self._running = True
+        # 新一轮连接开始，清除历史停止请求（stop→start 是合法的重启流程）
+        self._stop_requested.clear()
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
@@ -113,6 +125,7 @@ class remoteThread(QThread):
             if not self._loop.is_closed():
                 self._loop.close()
             self._loop = None
+            self._running = False
 
     async def _connect(self):
         """建立弹幕 WebSocket 连接"""
@@ -139,6 +152,10 @@ class remoteThread(QThread):
             logging.info(f"弹幕连接已启动 room={self.roomID}")
             try:
                 self._stop_event = asyncio.Event()
+                # 竞态修复：stop() 若在 _stop_event 创建前被调用（_stop_requested 已置位），
+                # 立即置位 event，避免 await 永久阻塞导致 QThread 运行中被析构崩溃
+                if self._stop_requested.is_set():
+                    self._stop_event.set()
                 await self._stop_event.wait()  # 阻塞直到 stop() 设置 event
             finally:
                 await client.stop_and_close()

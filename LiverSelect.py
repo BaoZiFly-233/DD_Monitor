@@ -1578,12 +1578,23 @@ class LiverPanel(QWidget):
     def addCoverToPlayer(self, info):
         self.addToWindow.emit(info)
 
+    def _stopCoverRecording(self, cover):
+        """删除卡片前安全停止录制线程，避免运行中的 QThread 被析构触发 Qt abort"""
+        thread = cover.recordThread
+        if thread is None:
+            return
+        thread.checkTimer.stop()
+        if thread.isRunning():
+            thread.stopRecording()  # 置 recordToken=False，让 run() 循环自行退出
+            thread.wait(3000)  # 等待退出（超时保护，防止阻塞 UI）
+
     def deleteCover(self, roomID):
         roomID = self._normalize_room_id(roomID)
         self.roomIDDict.pop(roomID, None)
         self.oldLiveStatus.pop(roomID, None)
         for index, cover in enumerate(list(self.coverList)):
             if cover.roomID == roomID:
+                self._stopCoverRecording(cover)
                 cover.hide()
                 self.layout.removeWidget(cover)
                 self.coverList.pop(index)
@@ -1597,6 +1608,7 @@ class LiverPanel(QWidget):
         self.roomIDDict.clear()
         self.oldLiveStatus.clear()
         for cover in self.coverList:
+            self._stopCoverRecording(cover)
             cover.hide()
             cover.deleteLater()
         self.coverList.clear()
