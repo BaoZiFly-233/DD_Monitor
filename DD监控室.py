@@ -73,7 +73,7 @@ from bili_credential import normalize_credential_data, build_credential, credent
 from bilibili_api import sync
 from danmu import GlobalDanmuOption
 from SettingsDialog import SettingsDialog
-from login import QRLoginWidget
+from login import LoginDialog
 from app_version import APP_NAME, DISPLAY_VERSION, VERSION, RELEASE_DATE, parse_version
 
 # 程序所在路径
@@ -340,19 +340,17 @@ class MainWindow(QMainWindow):
         self.hotKey = None
         self._pay = None  # 延迟创建
         self.startLiveWindow = None
-        self.loginBrowser = QRLoginWidget()
+        self.loginDialog = LoginDialog(self)
         # 先连接信号，再触发验证（确保回调到达时信号已就绪）
-        self.loginBrowser.sessionData.connect(self.updateSessionData)
-        self.loginBrowser.credentialReady.connect(self.updateCredential)
-        self.loginBrowser.login.connect(self.updateLogin)
-        self.loginBrowser.userInfoReady.connect(self.onUserInfoReady)
-        # 启动时如果有已保存的 sessionData，验证登录状态
+        self.loginDialog.sessionData.connect(self.updateSessionData)
+        self.loginDialog.credentialReady.connect(self.updateCredential)
+        self.loginDialog.login.connect(self.updateLogin)
+        self.loginDialog.userInfoReady.connect(self.onUserInfoReady)
+        # 启动时如果有已保存的 sessionData，静默验证登录状态（不弹窗）
         if any(self.credential.values()):
-            self.loginBrowser.setSessionData(self.credential.get("sessdata", ""))
+            self.loginDialog.setSessionData(self.credential.get("sessdata", ""))
         elif self.config["sessionData"]:
-            self.loginBrowser.setSessionData(self.config["sessionData"])
-        else:
-            self.loginBrowser.show()
+            self.loginDialog.setSessionData(self.config["sessionData"])
         self.credentialRefreshTimer = QTimer(self)
         self.credentialRefreshTimer.timeout.connect(self.refreshCredentialIfNeeded)
         self.credentialRefreshTimer.setInterval(6 * 60 * 60 * 1000)
@@ -539,11 +537,7 @@ class MainWindow(QMainWindow):
         progressText.setText("设置关于菜单...")
 
         self.loginMenu = self.menuBar().addMenu("B站账号")
-        self.loginAction = QAction("扫码登录", self, triggered=self.openLoginPage)
-        cached_uname = self.config.get("loginUserInfo", {}).get("uname", "")
-        if self.config.get("sessionData") and cached_uname:
-            self.loginAction.setText(f"账号管理 ({cached_uname})")
-        self.loginMenu.addAction(self.loginAction)
+        self._rebuildLoginMenu()
 
         # 鼠标和计时器
         self.oldMousePos = QPoint(0, 0)  # 初始化鼠标坐标
@@ -559,9 +553,6 @@ class MainWindow(QMainWindow):
 
         if self.config["checkUpdate"]:
             self.updateChecker()
-        # 主窗口初始化完成 — 登录窗口此时才安全应用头像/等级图标重绘
-        # （替代旧方案 login.py 里 thread.wait(5000) 的阻塞 hack）
-        self.loginBrowser.setMainWindowReady()
 
     def setPlayer(self):
         for index, layoutConfig in enumerate(self.config["layout"]):
@@ -1021,7 +1012,7 @@ class MainWindow(QMainWindow):
         cache_setting.show()
 
     def openLoginPage(self):
-        self.loginBrowser.show()
+        self.loginDialog.show()
 
     def updateSessionData(self, sessionData):
         logging.info(
@@ -1083,7 +1074,7 @@ class MainWindow(QMainWindow):
     def _onCredentialRefreshed(self, refreshed):
         logging.info("[LOGIN] 凭据刷新成功")
         self.updateCredential(refreshed)
-        self.loginBrowser.setSessionData(refreshed.get("sessdata", ""))
+        self.loginDialog.setSessionData(refreshed.get("sessdata", ""))
 
     def _onCredentialRefreshFailed(self, error):
         logging.warning(f"[LOGIN] 凭据刷新失败: {error}")
@@ -1096,11 +1087,10 @@ class MainWindow(QMainWindow):
     def updateLogin(self, login):
         if not login:
             self.setWindowTitle(f"DD监控室{self.versionDisplay} - 未登录")
-            if hasattr(self, "loginAction"):
-                self.loginAction.setText("扫码登录")
-            # 登出：清除 sessionData
+            # 登出：清除 sessionData 与缓存的用户信息
             self.config["sessionData"] = ""
             self.config["credential"] = {}
+            self.config["loginUserInfo"] = {}
             for videoWidget in self._iterVideoWidgets(include_popups=True):
                 if hasattr(videoWidget, "applyCredentialContext"):
                     videoWidget.applyCredentialContext(sessionData="", credential={})
@@ -1109,10 +1099,72 @@ class MainWindow(QMainWindow):
                     if hasattr(videoWidget, "credential"):
                         videoWidget.credential = {}
             self.configManager.save()
+            self._rebuildLoginMenu()
         else:
             self.setWindowTitle(f"DD监控室{self.versionDisplay} - 已登录")
-            if hasattr(self, "loginAction"):
-                self.loginAction.setText("账号管理")
+            self._rebuildLoginMenu()
+
+    # ================================================================
+    # 「B站账号」菜单 — 登录入口完全收敛到菜单栏
+    # ================================================================
+
+    def _rebuildLoginMenu(self):
+        """根据登录状态重建「B站账号」菜单
+
+        未登录：扫码登录…
+        已登录：账号名 / UID / 打开个人空间 / 切换账号 / 退出登录
+        """
+        self.loginMenu.clear()
+        info = self.config.get("loginUserInfo", {})
+        uname = info.get("uname", "")
+        uid = info.get("uid", "")
+        if uname and self.config.get("sessionData"):
+            userAction = QAction(f"{uname}", self)
+            userAction.setEnabled(False)
+            self.loginMenu.addAction(userAction)
+            uidAction = QAction(f"UID: {uid}", self)
+            uidAction.setEnabled(False)
+            self.loginMenu.addAction(uidAction)
+            self.loginMenu.addSeparator()
+            self.loginMenu.addAction(QAction("打开个人空间", self, triggered=self.openUserSpace))
+            self.loginMenu.addAction(QAction("切换账号", self, triggered=self.switchAccount))
+            self.loginMenu.addAction(QAction("退出登录", self, triggered=self.logoutAccount))
+        else:
+            self.loginMenu.addAction(QAction("扫码登录…", self, triggered=self.openLoginPage))
+
+    def openUserSpace(self):
+        """打开当前账号的 B站个人空间"""
+        uid = self.config.get("loginUserInfo", {}).get("uid", "")
+        if not uid:
+            logging.warning("[LOGIN] 当前没有可打开的用户 UID")
+            return
+        QDesktopServices.openUrl(QUrl(f"https://space.bilibili.com/{uid}"))
+
+    def switchAccount(self):
+        """切换账号：退出当前登录并弹出扫码窗"""
+        if not self._confirmLoginAction("切换账号", "切换账号需要先退出当前登录，是否继续？"):
+            return
+        self.updateLogin(False)
+        self.openLoginPage()
+
+    def logoutAccount(self):
+        """退出登录"""
+        if not self._confirmLoginAction("退出登录", "确定要退出当前 B站账号吗？"):
+            return
+        self.updateLogin(False)
+
+    @staticmethod
+    def _confirmLoginAction(title, message):
+        return (
+            QMessageBox.question(
+                None,
+                title,
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
 
     def _onDumpRoomConfig(self):
         """回写房间列表到 config 并保存 — 否则 roomid 永不持久化"""
@@ -1131,8 +1183,7 @@ class MainWindow(QMainWindow):
         }
         self.configManager.save()
         self.setWindowTitle(f"DD监控室{self.versionDisplay} - {uname}")
-        if hasattr(self, "loginAction"):
-            self.loginAction.setText(f"账号管理 ({uname})")
+        self._rebuildLoginMenu()
         # 确保 liverPanel 已持有 sessionData（启动恢复 session 时不会触发 updateSessionData）
         sessdata = getattr(self, "sessionData", "") or self.config.get("sessionData", "")
         if sessdata:
@@ -1220,7 +1271,7 @@ class MainWindow(QMainWindow):
         self.layoutSettingPanel.close()
         self.liverPanel.addLiverRoomWidget.close()
         self.liverPanel.collectLiverInfo.stop()
-        self.loginBrowser.close()
+        self.loginDialog.close()
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
