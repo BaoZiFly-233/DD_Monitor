@@ -9,15 +9,15 @@
 
 import re
 
-APP_NAME = 'DD监控室'
-VERSION = '3.51'             # 主版本号（x.y 或 x.y.z）
-VERSION_SUFFIX = '魔改版'     # 展示后缀（可为空字符串）
-RELEASE_DATE = '2026/04/28'  # 发版日期
+APP_NAME = "DD监控室"
+VERSION = "3.51"  # 主版本号（x.y 或 x.y.z）
+VERSION_SUFFIX = "魔改版"  # 展示后缀（可为空字符串）
+RELEASE_DATE = "2026/04/28"  # 发版日期
 
 # 展示用："3.51魔改版"
-DISPLAY_VERSION = f'{VERSION}{VERSION_SUFFIX}'
+DISPLAY_VERSION = f"{VERSION}{VERSION_SUFFIX}"
 
 
 def parse_version(text):
     """'3.51' -> (3, 51)；'3.5.2' -> (3, 5, 2)。用于版本比较，规避 float 比较的坑。"""
-    return tuple(int(part) for part in re.findall(r'\d+', text or ''))
+    return tuple(int(part) for part in re.findall(r"\d+", text or ""))

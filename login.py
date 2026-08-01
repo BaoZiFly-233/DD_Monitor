@@ -9,6 +9,7 @@ B站扫码登录模块
   _sessdata 非空且 _user_info 为空 → 验证中
   都为空 → 未登录，显示扫码面板
 """
+
 import logging
 import time
 from urllib.parse import urlparse, parse_qs
@@ -16,8 +17,7 @@ import http_utils
 import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QUrl
 from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath, QDesktopServices
-from PySide6.QtWidgets import (QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-                                QFrame, QMessageBox)
+from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QMessageBox
 
 # 集中管理面板样式 — 颜色统一在此定义，不散落各处
 _PANEL_QSS = """
@@ -65,7 +65,7 @@ _PANEL_QSS = """
 
 HEADERS = {
     **http_utils.DEFAULT_HEADERS,
-    'Referer': 'https://www.bilibili.com',
+    "Referer": "https://www.bilibili.com",
 }
 
 
@@ -77,47 +77,50 @@ class FetchUserInfo(QThread):
     - {'_expired': True}             → API 明确返回未登录
     - {'_error': True}               → 网络错误，session 可能仍有效
     """
+
     userInfo = Signal(dict)
 
     def __init__(self):
         super().__init__()
-        self.sessdata = ''
+        self.sessdata = ""
 
     def run(self):
         try:
-            cookies = {'SESSDATA': self.sessdata} if self.sessdata else {}
+            cookies = {"SESSDATA": self.sessdata} if self.sessdata else {}
             resp = http_utils.get(
-                'https://api.bilibili.com/x/web-interface/nav',
-                headers=HEADERS, cookies=cookies, timeout=4
+                "https://api.bilibili.com/x/web-interface/nav", headers=HEADERS, cookies=cookies, timeout=4
             )
             data = resp.json()
-            if data['code'] == 0 and data['data'].get('isLogin'):
-                info = data['data']
-                self.userInfo.emit({
-                    'uid': info['mid'],
-                    'uname': info['uname'],
-                    'face': info.get('face', ''),
-                    'level': info.get('level_info', {}).get('current_level', 0),
-                    'coins': info.get('money', 0),
-                    'bcoins': info.get('wallet', {}).get('bcoin_balance', 0),
-                    'following': info.get('following', 0),
-                    'vip': info.get('vip', {}),
-                })
+            if data["code"] == 0 and data["data"].get("isLogin"):
+                info = data["data"]
+                self.userInfo.emit(
+                    {
+                        "uid": info["mid"],
+                        "uname": info["uname"],
+                        "face": info.get("face", ""),
+                        "level": info.get("level_info", {}).get("current_level", 0),
+                        "coins": info.get("money", 0),
+                        "bcoins": info.get("wallet", {}).get("bcoin_balance", 0),
+                        "following": info.get("following", 0),
+                        "vip": info.get("vip", {}),
+                    }
+                )
             else:
-                logging.warning(f'session 验证失败: code={data["code"]}')
-                self.userInfo.emit({'_expired': True})
+                logging.warning(f"session 验证失败: code={data['code']}")
+                self.userInfo.emit({"_expired": True})
         except Exception:
-            logging.exception('验证登录状态失败（网络错误）')
-            self.userInfo.emit({'_error': True})
+            logging.exception("验证登录状态失败（网络错误）")
+            self.userInfo.emit({"_error": True})
 
 
 class FetchAvatar(QThread):
     """后台下载头像（线程安全：用 QImage 跨线程，主线程转 QPixmap）"""
+
     avatarReady = Signal(QImage)
 
     def __init__(self):
         super().__init__()
-        self.url = ''
+        self.url = ""
 
     def run(self):
         if not self.url:
@@ -128,50 +131,54 @@ class FetchAvatar(QThread):
             if not qimage.isNull():
                 self.avatarReady.emit(qimage)
         except Exception:
-            logging.exception('下载头像失败（网络超时，将在下次打开账号面板时重试）')
+            logging.exception("下载头像失败（网络超时，将在下次打开账号面板时重试）")
 
 
 class FetchQRCode(QThread):
     """后台获取二维码（避免阻塞主线程）"""
+
     qrcodeReady = Signal(str, str)  # (qrcode_key, url)
-    fetchError = Signal(str)        # 错误消息
+    fetchError = Signal(str)  # 错误消息
 
     def run(self):
         try:
             resp = http_utils.get(
-                'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
-                headers=HEADERS, timeout=4)
+                "https://passport.bilibili.com/x/passport-login/web/qrcode/generate", headers=HEADERS, timeout=4
+            )
             data = resp.json()
-            if data['code'] != 0:
-                self.fetchError.emit(f'获取失败: {data["message"]}')
+            if data["code"] != 0:
+                self.fetchError.emit(f"获取失败: {data['message']}")
                 return
-            self.qrcodeReady.emit(data['data']['qrcode_key'], data['data']['url'])
+            self.qrcodeReady.emit(data["data"]["qrcode_key"], data["data"]["url"])
         except Exception:
-            logging.exception('获取二维码失败')
-            self.fetchError.emit('网络错误，请点击刷新')
+            logging.exception("获取二维码失败")
+            self.fetchError.emit("网络错误，请点击刷新")
 
 
 class PollLoginStatus(QThread):
     """后台轮询登录状态（避免阻塞主线程）"""
-    loginSuccess = Signal(object, dict)   # (response, result_data)
+
+    loginSuccess = Signal(object, dict)  # (response, result_data)
     qrExpired = Signal()
     qrScanned = Signal()
     pollError = Signal()
 
     def __init__(self):
         super().__init__()
-        self.qrcode_key = ''
+        self.qrcode_key = ""
 
     def run(self):
         if not self.qrcode_key:
             return
         try:
             resp = http_utils.get(
-                'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
-                params={'qrcode_key': self.qrcode_key},
-                headers=HEADERS, timeout=4)
-            result = resp.json()['data']
-            code = result['code']
+                "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
+                params={"qrcode_key": self.qrcode_key},
+                headers=HEADERS,
+                timeout=4,
+            )
+            result = resp.json()["data"]
+            code = result["code"]
 
             if code == 0:
                 self.loginSuccess.emit(resp, result)
@@ -180,13 +187,14 @@ class PollLoginStatus(QThread):
             elif code == 86090:
                 self.qrScanned.emit()
         except Exception:
-            logging.exception('轮询登录状态失败')
+            logging.exception("轮询登录状态失败")
             self.pollError.emit()
 
 
 # ---------------------------------------------------------------------------
 # QRLoginWidget
 # ---------------------------------------------------------------------------
+
 
 class QRLoginWidget(QWidget):
     """扫码登录 / 账号管理窗口
@@ -197,6 +205,7 @@ class QRLoginWidget(QWidget):
       credentialReady(dict) 完整凭据（SESSDATA, bili_jct 等）
       userInfoReady(dict) 用户信息就绪
     """
+
     sessionData = Signal(str)
     login = Signal(bool)
     credentialReady = Signal(dict)
@@ -204,15 +213,15 @@ class QRLoginWidget(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('B站账号')
+        self.setWindowTitle("B站账号")
         self.setFixedSize(400, 580)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据（UI 从这些字段推导）----
-        self._sessdata = ''      # 有值 = 有凭据
-        self._user_info = {}     # 有值 = 已确认登录
+        self._sessdata = ""  # 有值 = 有凭据
+        self._user_info = {}  # 有值 = 已确认登录
         self._avatarPixmap = None
-        self._qrcode_key = ''
+        self._qrcode_key = ""
         self._credential = {}
         self._destructiveGuardUntil = 0.0
         # 主窗口就绪门闩：启动早期下载的头像/等级图标先缓存，
@@ -257,7 +266,7 @@ class QRLoginWidget(QWidget):
 
     def _buildLoggedInPanel(self):
         self._loggedInPanel = QFrame()
-        self._loggedInPanel.setObjectName('loggedInPanel')
+        self._loggedInPanel.setObjectName("loggedInPanel")
         lay = QVBoxLayout(self._loggedInPanel)
         lay.setSpacing(12)
         lay.setContentsMargins(24, 24, 24, 24)
@@ -271,7 +280,7 @@ class QRLoginWidget(QWidget):
 
         # 用户名
         self._unameLabel = QLabel()
-        self._unameLabel.setFont(QFont('微软雅黑', 16, QFont.Bold))
+        self._unameLabel.setFont(QFont("微软雅黑", 16, QFont.Bold))
         self._unameLabel.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._unameLabel)
 
@@ -280,7 +289,7 @@ class QRLoginWidget(QWidget):
         self._levelIconLabel.setFixedSize(30, 16)
         self._levelIconLabel.setAlignment(Qt.AlignCenter)
         self._infoLabel = QLabel()
-        self._infoLabel.setObjectName('loginInfoLabel')
+        self._infoLabel.setObjectName("loginInfoLabel")
         self._infoLabel.setAlignment(Qt.AlignCenter)
         infoRow = QHBoxLayout()
         infoRow.setSpacing(6)
@@ -293,18 +302,18 @@ class QRLoginWidget(QWidget):
         # 数据行（横排三列）
         stats = QHBoxLayout()
         stats.setSpacing(8)
-        self._coinLabel = self._makeStatCell('硬币', stats)
-        self._bcoinLabel = self._makeStatCell('B币', stats)
-        self._followLabel = self._makeStatCell('关注', stats)
+        self._coinLabel = self._makeStatCell("硬币", stats)
+        self._bcoinLabel = self._makeStatCell("B币", stats)
+        self._followLabel = self._makeStatCell("关注", stats)
         lay.addLayout(stats)
 
         lay.addSpacing(8)
 
         # 操作按钮 — 全部走全局 qdark 主题，不再内联配色
         for text, slot in [
-            ('打开 B站 个人空间', self._openUserSpace),
-            ('切换账号', self._onSwitchAccount),
-            ('退出登录', self._onLogout),
+            ("打开 B站 个人空间", self._openUserSpace),
+            ("切换账号", self._onSwitchAccount),
+            ("退出登录", self._onLogout),
         ]:
             btn = QPushButton(text)
             btn.setFixedHeight(36)
@@ -325,10 +334,10 @@ class QRLoginWidget(QWidget):
         cell = QVBoxLayout()
         cell.setSpacing(2)
         t = QLabel(title)
-        t.setObjectName('loginStatTitle')
+        t.setObjectName("loginStatTitle")
         t.setAlignment(Qt.AlignCenter)
-        v = QLabel('--')
-        v.setObjectName('loginStatValue')
+        v = QLabel("--")
+        v.setObjectName("loginStatValue")
         v.setAlignment(Qt.AlignCenter)
         cell.addWidget(t)
         cell.addWidget(v)
@@ -341,18 +350,18 @@ class QRLoginWidget(QWidget):
         lay.setAlignment(Qt.AlignCenter)
         lay.setSpacing(16)
 
-        self._verifyingLabel = QLabel('正在验证登录状态...')
-        self._verifyingLabel.setFont(QFont('微软雅黑', 12))
+        self._verifyingLabel = QLabel("正在验证登录状态...")
+        self._verifyingLabel.setFont(QFont("微软雅黑", 12))
         self._verifyingLabel.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._verifyingLabel)
 
-        self._verifyingHint = QLabel('请稍候')
-        self._verifyingHint.setFont(QFont('微软雅黑', 10))
-        self._verifyingHint.setObjectName('loginInfoLabel')
+        self._verifyingHint = QLabel("请稍候")
+        self._verifyingHint.setFont(QFont("微软雅黑", 10))
+        self._verifyingHint.setObjectName("loginInfoLabel")
         self._verifyingHint.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._verifyingHint)
 
-        retryBtn = QPushButton('重试')
+        retryBtn = QPushButton("重试")
         retryBtn.setFixedHeight(36)
         retryBtn.setCursor(Qt.PointingHandCursor)
         retryBtn.clicked.connect(self._retryVerify)
@@ -367,8 +376,8 @@ class QRLoginWidget(QWidget):
         lay.setAlignment(Qt.AlignCenter)
         lay.setSpacing(12)
 
-        self._qrTitle = QLabel('请使用 Bilibili 客户端扫码登录')
-        self._qrTitle.setFont(QFont('微软雅黑', 12, QFont.Bold))
+        self._qrTitle = QLabel("请使用 Bilibili 客户端扫码登录")
+        self._qrTitle.setFont(QFont("微软雅黑", 12, QFont.Bold))
         self._qrTitle.setAlignment(Qt.AlignCenter)
         self._qrTitle.setWordWrap(True)
         lay.addWidget(self._qrTitle)
@@ -376,16 +385,16 @@ class QRLoginWidget(QWidget):
         self._qrLabel = QLabel()
         self._qrLabel.setFixedSize(260, 260)
         self._qrLabel.setAlignment(Qt.AlignCenter)
-        self._qrLabel.setObjectName('loginQrFrame')
+        self._qrLabel.setObjectName("loginQrFrame")
         lay.addWidget(self._qrLabel, alignment=Qt.AlignCenter)
 
         self._qrStatus = QLabel()
-        self._qrStatus.setFont(QFont('微软雅黑', 10))
+        self._qrStatus.setFont(QFont("微软雅黑", 10))
         self._qrStatus.setAlignment(Qt.AlignCenter)
         self._qrStatus.setWordWrap(True)
         lay.addWidget(self._qrStatus)
 
-        refreshBtn = QPushButton('刷新二维码')
+        refreshBtn = QPushButton("刷新二维码")
         refreshBtn.setFixedHeight(36)
         refreshBtn.setCursor(Qt.PointingHandCursor)
         refreshBtn.clicked.connect(self._fetchQRCode)
@@ -401,33 +410,35 @@ class QRLoginWidget(QWidget):
     def _syncUI(self):
         """根据 _user_info / _sessdata 决定显示哪个面板。
         这是所有面板切换的唯一入口。"""
-        logging.info(f'[LOGIN] _syncUI: _user_info={bool(self._user_info)}, '
-                     f'_sessdata={"有" if self._sessdata else "空"}(len={len(self._sessdata)})')
+        logging.info(
+            f"[LOGIN] _syncUI: _user_info={bool(self._user_info)}, "
+            f"_sessdata={'有' if self._sessdata else '空'}(len={len(self._sessdata)})"
+        )
         self._loggedInPanel.hide()
         self._verifyingPanel.hide()
         self._qrPanel.hide()
         self._pollTimer.stop()
 
         if self._user_info:
-            uname = self._user_info.get('uname', '已登录')
-            uid = self._user_info.get('uid', '')
-            level = self._user_info.get('level', 0)
-            coins = self._user_info.get('coins', 0)
-            bcoins = float(self._user_info.get('bcoins', 0))
-            following = self._user_info.get('following', 0)
-            vip_info = self._user_info.get('vip', {})
+            uname = self._user_info.get("uname", "已登录")
+            uid = self._user_info.get("uid", "")
+            level = self._user_info.get("level", 0)
+            coins = self._user_info.get("coins", 0)
+            bcoins = float(self._user_info.get("bcoins", 0))
+            following = self._user_info.get("following", 0)
+            vip_info = self._user_info.get("vip", {})
 
             self._unameLabel.setText(uname)
-            info_parts = [f'UID: {uid}', f'Lv.{level}']
-            if vip_info and vip_info.get('status') == 1:
-                vt = '年度' if vip_info.get('type') == 2 else '月度'
-                info_parts.append(f'大会员·{vt}')
-            self._infoLabel.setText('  ·  '.join(info_parts))
+            info_parts = [f"UID: {uid}", f"Lv.{level}"]
+            if vip_info and vip_info.get("status") == 1:
+                vt = "年度" if vip_info.get("type") == 2 else "月度"
+                info_parts.append(f"大会员·{vt}")
+            self._infoLabel.setText("  ·  ".join(info_parts))
             # 更新等级图标
             self._downloadLevelIcon(level)
 
             self._coinLabel.setText(str(coins))
-            self._bcoinLabel.setText(f'{bcoins:.1f}' if bcoins == int(bcoins) else str(int(bcoins)))
+            self._bcoinLabel.setText(f"{bcoins:.1f}" if bcoins == int(bcoins) else str(int(bcoins)))
             self._followLabel.setText(str(following))
 
             if self._avatarPixmap and not self._avatarPixmap.isNull():
@@ -435,14 +446,14 @@ class QRLoginWidget(QWidget):
             else:
                 self._resetAvatarPlaceholder()
 
-            self.setWindowTitle(f'B站账号 - {uname}')
+            self.setWindowTitle(f"B站账号 - {uname}")
             self._loggedInPanel.show()
 
         elif self._sessdata:
             # ---- 有凭据，验证中 ----
-            self.setWindowTitle('B站账号 - 验证中')
-            self._verifyingLabel.setText('正在验证登录状态...')
-            self._verifyingHint.setText('请稍候')
+            self.setWindowTitle("B站账号 - 验证中")
+            self._verifyingLabel.setText("正在验证登录状态...")
+            self._verifyingHint.setText("请稍候")
             self._verifyingPanel.show()
             # 如果线程不在跑，启动验证
             if not self._fetchUserInfo.isRunning():
@@ -450,7 +461,7 @@ class QRLoginWidget(QWidget):
 
         else:
             # ---- 无凭据，扫码 ----
-            self.setWindowTitle('B站账号')
+            self.setWindowTitle("B站账号")
             self._qrPanel.show()
             self._fetchQRCode()
 
@@ -474,10 +485,11 @@ class QRLoginWidget(QWidget):
         if not sessdata:
             return
         # 防御性 URL 解码：旧版本可能保存了 URL 编码的 SESSDATA
-        if '%' in sessdata:
+        if "%" in sessdata:
             from urllib.parse import unquote
+
             decoded = unquote(sessdata)
-            logging.info(f'[LOGIN] setSessionData: URL 解码 {sessdata[:30]}... → {decoded[:30]}...')
+            logging.info(f"[LOGIN] setSessionData: URL 解码 {sessdata[:30]}... → {decoded[:30]}...")
             sessdata = decoded
         self._sessdata = sessdata
         self._startVerify()
@@ -498,30 +510,35 @@ class QRLoginWidget(QWidget):
     def _retryVerify(self):
         """重试按钮"""
         if self._sessdata:
-            self._verifyingLabel.setText('正在验证登录状态...')
-            self._verifyingHint.setText('请稍候')
+            self._verifyingLabel.setText("正在验证登录状态...")
+            self._verifyingHint.setText("请稍候")
             self._startVerify()
 
     def _isGhostClick(self, action_name):
         if time.monotonic() < self._destructiveGuardUntil:
-            logging.warning(f'[LOGIN] 忽略窗口刚打开后的误触动作: {action_name}')
+            logging.warning(f"[LOGIN] 忽略窗口刚打开后的误触动作: {action_name}")
             return True
         return False
 
     def _confirmAction(self, title, message):
-        return QMessageBox.question(
-            self, title, message,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        ) == QMessageBox.Yes
+        return (
+            QMessageBox.question(
+                self,
+                title,
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
 
     def _performLogout(self):
-        self._sessdata = ''
+        self._sessdata = ""
         self._user_info = {}
         self._credential = {}
         self._avatarPixmap = None
         self._resetAvatarPlaceholder()
-        self.sessionData.emit('')
+        self.sessionData.emit("")
         self.login.emit(False)
         self._syncUI()
 
@@ -531,21 +548,25 @@ class QRLoginWidget(QWidget):
         下载完成后不立即 setPixmap：若主窗口 OpenGL 初始化尚未完成，
         先挂起待主窗口就绪后再应用（替代旧方案的 thread.wait(5000) 阻塞）。
         """
+
         class _FetchLevelIcon(QThread):
             iconReady = Signal(QPixmap)
+
             def __init__(self, level):
                 super().__init__()
                 self.level = level
+
             def run(self):
                 try:
-                    url = f'https://s1.hdslb.com/bfs/static/jinkela/long/images/lv_{self.level}.png'
+                    url = f"https://s1.hdslb.com/bfs/static/jinkela/long/images/lv_{self.level}.png"
                     r = http_utils.get(url, timeout=10)
                     img = QImage.fromData(r.content)
                     if not img.isNull():
                         pm = QPixmap.fromImage(img).scaled(30, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         self.iconReady.emit(pm)
                 except Exception:
-                    logging.debug('等级图标下载失败', exc_info=True)
+                    logging.debug("等级图标下载失败", exc_info=True)
+
         thread = _FetchLevelIcon(level)
         thread.iconReady.connect(self._onLevelIconReady)
         # 保存为成员：防止函数返回后线程对象被 GC 析构（running 状态析构会原生崩溃）
@@ -564,38 +585,40 @@ class QRLoginWidget(QWidget):
             self._levelIconLabel.setPixmap(self._levelIconPixmap)
 
     def _openUserSpace(self):
-        uid = self._user_info.get('uid')
+        uid = self._user_info.get("uid")
         if not uid:
-            logging.warning('[LOGIN] 当前没有可打开的用户 UID')
+            logging.warning("[LOGIN] 当前没有可打开的用户 UID")
             return
-        QDesktopServices.openUrl(QUrl(f'https://space.bilibili.com/{uid}'))
+        QDesktopServices.openUrl(QUrl(f"https://space.bilibili.com/{uid}"))
 
     def _onSwitchAccount(self):
-        if self._isGhostClick('switch-account'):
+        if self._isGhostClick("switch-account"):
             return
-        if not self._confirmAction('切换账号', '切换账号需要先退出当前登录，是否继续？'):
+        if not self._confirmAction("切换账号", "切换账号需要先退出当前登录，是否继续？"):
             return
         self._performLogout()
 
     def _onUserInfo(self, info):
         """FetchUserInfo 回调 — 区分成功/过期/网络错误"""
-        logging.info(f'[LOGIN] _onUserInfo 回调: keys={list(info.keys())}, '
-                     f'_expired={info.get("_expired")}, _error={info.get("_error")}')
-        if info.get('_expired'):
+        logging.info(
+            f"[LOGIN] _onUserInfo 回调: keys={list(info.keys())}, "
+            f"_expired={info.get('_expired')}, _error={info.get('_error')}"
+        )
+        if info.get("_expired"):
             # API 明确说未登录 → 清除凭据
-            logging.warning('session 已过期，需要重新登录')
-            self._sessdata = ''
+            logging.warning("session 已过期，需要重新登录")
+            self._sessdata = ""
             self._user_info = {}
             self._avatarPixmap = None
-            self.sessionData.emit('')
+            self.sessionData.emit("")
             self.login.emit(False)
 
-        elif info.get('_error'):
+        elif info.get("_error"):
             # 网络问题 → 保留 sessdata 不清除
-            logging.warning('网络错误，保留现有凭据')
+            logging.warning("网络错误，保留现有凭据")
             if self.isVisible():
-                self._verifyingLabel.setText('网络错误')
-                self._verifyingHint.setText('请点击重试')
+                self._verifyingLabel.setText("网络错误")
+                self._verifyingHint.setText("请点击重试")
 
             # 不清除 _sessdata，不发信号，不切面板
             return
@@ -603,18 +626,18 @@ class QRLoginWidget(QWidget):
         else:
             # 验证成功
             self._user_info = info
-            uname = info.get('uname', '')
-            logging.info(f'登录用户: {uname} (UID: {info.get("uid", "?")})')
+            uname = info.get("uname", "")
+            logging.info(f"登录用户: {uname} (UID: {info.get('uid', '?')})")
             self.userInfoReady.emit(info)
 
             # 下载头像
-            face_url = info.get('face', '')
+            face_url = info.get("face", "")
             if face_url:
                 self._fetchAvatar.url = face_url
                 if not self._fetchAvatar.isRunning():
                     self._fetchAvatar.start()
             # 下载等级图标
-            level_val = self._user_info.get('level', 0)
+            level_val = self._user_info.get("level", 0)
             if level_val > 0:
                 self._downloadLevelIcon(level_val)
 
@@ -638,8 +661,8 @@ class QRLoginWidget(QWidget):
 
     def _fetchQRCode(self):
         """获取并显示二维码（后台线程执行，不阻塞 UI）"""
-        self._qrStatus.setText('正在获取二维码...')
-        self._qrStatus.setProperty('class', '')
+        self._qrStatus.setText("正在获取二维码...")
+        self._qrStatus.setProperty("class", "")
         self._pollTimer.stop()
         if not self._fetchQRCodeThread.isRunning():
             self._fetchQRCodeThread.start()
@@ -648,7 +671,7 @@ class QRLoginWidget(QWidget):
         """二维码获取成功回调"""
         self._qrcode_key = qrcode_key
         self._renderQR(url)
-        self._qrStatus.setText('请使用 Bilibili 客户端扫描二维码')
+        self._qrStatus.setText("请使用 Bilibili 客户端扫描二维码")
         self._pollTimer.start()
 
     def _onQRCodeError(self, msg):
@@ -659,21 +682,21 @@ class QRLoginWidget(QWidget):
         qr = qrcode.QRCode(version=1, box_size=8, border=2)
         qr.add_data(url)
         qr.make(fit=True)
-        img = qr.make_image(fill_color='black', back_color='white')
-        if hasattr(img, 'convert'):
+        img = qr.make_image(fill_color="black", back_color="white")
+        if hasattr(img, "convert"):
             # PIL 后端：直接转 RGB 取像素
-            img = img.convert('RGB')
-            raw = img.tobytes('raw', 'RGB')
+            img = img.convert("RGB")
+            raw = img.tobytes("raw", "RGB")
             qimg = QImage(raw, img.width, img.height, img.width * 3, QImage.Format_RGB888)
         else:
             # pypng 后端：经 BytesIO 中转
             import io
+
             buf = io.BytesIO()
-            img.save(buf, 'PNG')
+            img.save(buf, "PNG")
             qimg = QImage.fromData(buf.getvalue())
         pm = QPixmap.fromImage(qimg)
-        self._qrLabel.setPixmap(pm.scaled(
-            self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self._qrLabel.setPixmap(pm.scaled(self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _doPollLogin(self):
         """定时器回调：启动后台轮询线程（不阻塞主线程）"""
@@ -687,50 +710,49 @@ class QRLoginWidget(QWidget):
     def _onQRExpired(self):
         """二维码过期回调"""
         self._pollTimer.stop()
-        self._qrStatus.setText('二维码已过期，请点击刷新')
-        self._qrStatus.setObjectName('qrStatusExpired')
+        self._qrStatus.setText("二维码已过期，请点击刷新")
+        self._qrStatus.setObjectName("qrStatusExpired")
 
     def _onQRScanned(self):
         """已扫码回调"""
-        self._qrStatus.setText('已扫码，请在手机上确认登录')
-        self._qrStatus.setObjectName('qrStatusScan')
+        self._qrStatus.setText("已扫码，请在手机上确认登录")
+        self._qrStatus.setObjectName("qrStatusScan")
 
     def _onQRLoginSuccess(self, resp, result):
         """扫码登录成功处理"""
         self._pollTimer.stop()
         # 解析凭据（URL 解码）
-        url = result.get('url', '')
+        url = result.get("url", "")
         self._credential = self._parseCookiesFromURL(url)
-        logging.info(f'[LOGIN] 登录成功 URL 参数: {list(self._credential.keys())}')
+        logging.info(f"[LOGIN] 登录成功 URL 参数: {list(self._credential.keys())}")
 
         # 提取 SESSDATA：优先 response cookies，其次 URL 参数
-        sessdata = ''
-        source = ''
+        sessdata = ""
+        source = ""
         for cookie in resp.cookies:
-            if cookie.name == 'SESSDATA':
+            if cookie.name == "SESSDATA":
                 sessdata = cookie.value
-                source = 'resp.cookies'
+                source = "resp.cookies"
                 break
         if not sessdata:
-            sessdata = self._credential.get('SESSDATA', '')
-            source = 'URL参数'
+            sessdata = self._credential.get("SESSDATA", "")
+            source = "URL参数"
 
-        logging.info(f'[LOGIN] SESSDATA 来源={source}, 长度={len(sessdata)}, '
-                     f'前20字符={sessdata[:20]}')
+        logging.info(f"[LOGIN] SESSDATA 来源={source}, 长度={len(sessdata)}, 前20字符={sessdata[:20]}")
 
         if not sessdata:
-            self._qrStatus.setText('登录成功但获取凭据失败，请重试')
-            logging.error('[LOGIN] 登录成功但 SESSDATA 为空!')
+            self._qrStatus.setText("登录成功但获取凭据失败，请重试")
+            logging.error("[LOGIN] 登录成功但 SESSDATA 为空!")
             return
 
         self._sessdata = sessdata
-        logging.info(f'[LOGIN] 发射 sessionData 信号 (len={len(sessdata)})')
+        logging.info(f"[LOGIN] 发射 sessionData 信号 (len={len(sessdata)})")
         self.sessionData.emit(sessdata)
         self.login.emit(True)
         self.credentialReady.emit(self._credential)
 
-        self._qrStatus.setText('登录成功！正在获取用户信息...')
-        self._qrStatus.setObjectName('qrStatusOk')
+        self._qrStatus.setText("登录成功！正在获取用户信息...")
+        self._qrStatus.setObjectName("qrStatusOk")
 
         # 启动用户信息验证
         self._startVerify()
@@ -740,9 +762,9 @@ class QRLoginWidget(QWidget):
     # ================================================================
 
     def _onLogout(self):
-        if self._isGhostClick('logout'):
+        if self._isGhostClick("logout"):
             return
-        if not self._confirmAction('退出登录', '确定要退出当前 B站账号吗？'):
+        if not self._confirmAction("退出登录", "确定要退出当前 B站账号吗？"):
             return
         self._performLogout()
 
@@ -752,14 +774,14 @@ class QRLoginWidget(QWidget):
 
     def _resetAvatarPlaceholder(self):
         self._avatarLabel.setPixmap(QPixmap())
-        self._avatarLabel.setText('')
-        self._avatarLabel.setObjectName('loginAvatar')
+        self._avatarLabel.setText("")
+        self._avatarLabel.setObjectName("loginAvatar")
 
     def _applyAvatar(self):
         """应用头像（主窗口就绪后调用）"""
         if self._avatarPixmap and not self._avatarPixmap.isNull():
             self._avatarLabel.setPixmap(self._avatarPixmap)
-            self._avatarLabel.setObjectName('loginAvatar')
+            self._avatarLabel.setObjectName("loginAvatar")
 
     def setMainWindowReady(self):
         """主窗口初始化完成回调 — 此后才安全执行 setPixmap 等重绘操作
@@ -794,7 +816,7 @@ class QRLoginWidget(QWidget):
         result = {}
         parsed = urlparse(url)
         for key, values in parse_qs(parsed.query, keep_blank_values=True).items():
-            result[key] = values[0] if values else ''
+            result[key] = values[0] if values else ""
         return result
 
     def closeEvent(self, event):
@@ -802,8 +824,10 @@ class QRLoginWidget(QWidget):
         # 等待所有后台线程退出后再关闭窗口
         # （线程在 running 状态下被析构会触发 STATUS_STACK_BUFFER_OVERRUN 原生崩溃）
         threads = [
-            self._fetchUserInfo, self._fetchAvatar,
-            self._fetchQRCodeThread, self._pollLoginThread,
+            self._fetchUserInfo,
+            self._fetchAvatar,
+            self._fetchQRCodeThread,
+            self._pollLoginThread,
         ]
         if self._levelIconThread is not None:
             threads.append(self._levelIconThread)
