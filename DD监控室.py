@@ -699,6 +699,12 @@ class MainWindow(QMainWindow):
         self.config["player"][fromID] = toRoomID
         self.configManager.save()
         # self.changeLayout(self.config['layout'])  # 刷新layout
+        # 交换前保存弹幕机归一化坐标（基于旧窗口尺寸；addWidget 触发的 resizeEvent 会用旧绝对偏移重算比例，故必须提前捕获）
+        danmuRatios = {}
+        for videoWidget in (fromVideo, toVideo):
+            if videoWidget.textBrowser is not None:
+                danmuRatios[id(videoWidget)] = (videoWidget.deltaX, videoWidget.deltaY)
+
         # 用新的方法直接交换两个窗口
         fromLayout, toLayout = self.config["layout"][fromID], self.config["layout"][toID]
         y, x, h, w = fromLayout
@@ -706,7 +712,20 @@ class MainWindow(QMainWindow):
         y, x, h, w = toLayout
         self.mainLayout.addWidget(fromVideo, y, x, h, w)
 
-        # FIXME: 弹幕窗坐标在交换后需按比例重新计算，当前 deltaX/deltaY 定位不准确
+        # 强制同步重新布局，确保下面按比例重算时读到交换后的新窗口尺寸
+        self.mainLayout.activate()
+
+        # 弹幕机坐标按比例重算：窗口交换后尺寸可能不同，保持弹幕机相对视频区域的位置不变
+        for videoWidget in (fromVideo, toVideo):
+            savedRatio = danmuRatios.get(id(videoWidget))
+            if savedRatio is None:
+                continue
+            videoPos = videoWidget.mapToGlobal(videoWidget.videoFrame.pos())
+            target = QPoint(
+                videoPos.x() + round(savedRatio[0] * videoWidget.width()),
+                videoPos.y() + round(savedRatio[1] * videoWidget.height()),
+            )
+            videoWidget.moveTextBrowser(target)  # 重定位 + 边界钳制 + 刷新 textPosDelta/deltaX/deltaY
 
     def clearLiverPanel(self):  # 清空卡片槽
         reply = QMessageBox.information(
