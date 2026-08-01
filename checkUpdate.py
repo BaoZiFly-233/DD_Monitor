@@ -1,12 +1,13 @@
 import re
 import http_utils
-from PySide6.QtWidgets import *
-from PySide6.QtCore import *
+from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton, QTextBrowser, QWidget
+from app_version import parse_version
 
 
 class checkUpdate(QThread):
-    update = Signal(str, float, str)
+    update = Signal(str, tuple, str)
 
     def __init__(self, version):
         super(checkUpdate, self).__init__()
@@ -15,6 +16,7 @@ class checkUpdate(QThread):
     def run(self):
         token = False
         infos = ''
+        new_version = ()
         try:
             html = http_utils.get(
                 r'https://github.com/BaoZiFly-233/DD_Monitor/releases',
@@ -31,10 +33,8 @@ class checkUpdate(QThread):
                 match = re.search(r'[\d.]+', version_str)
                 if not match:
                     return
-                version = float(match.group())
-                print(version, self.version)
-                if version > self.version:
-                    print('检测到新版本')
+                new_version = parse_version(match.group())
+                if new_version > self.version:
                     token = True
             if '<p>' in line:
                 l = line.split('>')
@@ -49,7 +49,7 @@ class checkUpdate(QThread):
             if 'committed-info' in line:
                 break
         if token:
-            self.update.emit(link, version, infos)
+            self.update.emit(link, new_version, infos)
 
 
 class updateReminder(QWidget):

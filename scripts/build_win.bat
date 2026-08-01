@@ -19,6 +19,10 @@ exit /b 1
 rem MPV_RUNTIME_DIR 仅用于可选携带 d3dcompiler_43.dll，不再打包整个 mpv runtime 目录
 
 set "APP_VERSION=%APP_VERSION%"
+if "%APP_VERSION%"=="" (
+    rem 自动从 app_version.py 读取版本号（打包环境必有 python）
+    for /f "delims=" %%V in ('python -c "import app_version; print(app_version.VERSION)" 2^>nul') do set "APP_VERSION=%%V"
+)
 if "%APP_VERSION%"=="" set "APP_VERSION=3.51"
 
 set "DIST_NAME=DDMonitor"

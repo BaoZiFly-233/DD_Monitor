@@ -26,9 +26,17 @@ import shutil
 import logging
 import platform
 import threading
-from PySide6.QtWidgets import * 	# QAction,QFileDialog
-from PySide6.QtGui import *		# QIcon,QPixmap
-from PySide6.QtCore import * 		# QSize
+from PySide6.QtWidgets import (QAction, QApplication, QDockWidget, QFileDialog,
+                                QGridLayout, QIntValidator, QLabel, QLineEdit,
+                                QMainWindow, QMenu, QMessageBox, QProgressBar,
+                                QPushButton, QScrollArea, QSplashScreen, QStyle,
+                                QWidget)
+from PySide6.QtGui import (QCloseEvent, QCursor, QDesktopServices, QFont,
+                           QGuiApplication, QHideEvent, QIcon, QKeyEvent,
+                           QMouseEvent, QMoveEvent, QPixmap, QResizeEvent,
+                           QShowEvent)
+from PySide6.QtCore import (QByteArray, QEvent, QPoint, QSize, QThread, QTimer,
+                            QUrl, Qt, Signal)
 from LayoutPanel import LayoutSettingPanel
 from VideoWidget_mpv import PushButton, Slider, VideoWidget, load_mpv_module
 from LiverSelect import LiverPanel
@@ -38,7 +46,7 @@ from bilibili_api import sync
 from danmu import GlobalDanmuOption
 from SettingsDialog import SettingsDialog
 from login import QRLoginWidget
-
+from app_version import DISPLAY_VERSION, VERSION, RELEASE_DATE, parse_version
 
 # 程序所在路径
 application_path = ""
@@ -191,12 +199,12 @@ class CacheSetting(QWidget):
 class Version(QWidget):
     """版本说明窗口"""
 
-    def __init__(self, version):
+    def __init__(self):
         super(Version, self).__init__()
         self.resize(350, 220)
         self.setWindowTitle('当前版本')
         layout = QGridLayout(self)
-        layout.addWidget(QLabel(f'DD监控室 v{version} (2026/04/28)'), 0, 0, 1, 2)
+        layout.addWidget(QLabel(f'{APP_NAME} v{DISPLAY_VERSION} ({RELEASE_DATE})'), 0, 0, 1, 2)
         layout.addWidget(QLabel('原作者：神君Channel'), 1, 0, 1, 2)
         layout.addWidget(QLabel('魔改维护：BaoZi_Fly'), 2, 0, 1, 2)
         layout.addWidget(QLabel('特别鸣谢：大锅饭 美东矿业 inkydragon 聪_哥 PR'), 3, 0, 1, 2)
@@ -258,8 +266,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, cacheFolder, progressBar, progressText):
         super(MainWindow, self).__init__()
-        self.versionNumber = 3.51
-        self.versionDisplay = '3.51魔改版'
+        self.versionNumber = parse_version(VERSION)  # tuple 比较，兼容 x.y.z
+        self.versionDisplay = DISPLAY_VERSION
         self.setWindowTitle(f'DD监控室{self.versionDisplay}')
         self.resize(1600, 900)
         self.maximumToken = True
@@ -579,7 +587,7 @@ class MainWindow(QMainWindow):
 
     def _getVersionWindow(self):
         if self.version is None:
-            self.version = Version(self.versionDisplay)
+            self.version = Version()
         return self.version
 
     def _getHotKeyWindow(self):
@@ -1410,6 +1418,14 @@ if __name__ == '__main__':
     progressBar = QProgressBar(splash)
     progressBar.setMaximum(16)  # 仅在启动时初始化 16 个主层播放器
     progressBar.setGeometry(0, splash.height() - 20, splash.width(), 20)
+    # 版本号动态叠加 — 不再烧在背景图里，发版无需改 PSD
+    versionLabel = QLabel(splash)
+    versionLabel.setText(f'v{DISPLAY_VERSION}')
+    versionLabel.setFont(QFont('微软雅黑', 11))
+    versionLabel.setStyleSheet('color: rgba(255,255,255,0.75); background: transparent;')
+    versionLabel.adjustSize()
+    versionLabel.move(splash.width() - versionLabel.width() - 18,
+                      splash.height() - 40 - versionLabel.height())
     progressText = QLabel(splash)
     progressText.setText("加载中...")
     progressText.setGeometry(0, 0, 170, 20)
