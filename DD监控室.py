@@ -5,27 +5,33 @@ DD监控室主界面进程 包含对所有子页面的初始化、排版管理
 新增全局鼠标坐标跟踪 用于刷新鼠标交互效果
 """
 
-import os, sys
+import os, sys, time
 
 # 原生崩溃诊断 — 在全部 import 之前启用
 import faulthandler
 
-_crash_log = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "logs", f"crash-{__import__('time').strftime('%Y%m%d-%H%M%S')}.log"
-)
-os.makedirs(os.path.dirname(_crash_log), exist_ok=True)
+_logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(_logs_dir, exist_ok=True)
+# 清理 7 天前的旧崩溃日志（faulthandler 每次启动都会建文件，正常退出时为空）
+try:
+    _cutoff = time.time() - 7 * 86400
+    for _old in os.listdir(_logs_dir):
+        if _old.startswith("crash-") and _old.endswith(".log"):
+            _p = os.path.join(_logs_dir, _old)
+            if os.path.getmtime(_p) < _cutoff:
+                os.remove(_p)
+except OSError:
+    pass  # 清理失败不影响启动
+
+_crash_log = os.path.join(_logs_dir, f"crash-{time.strftime('%Y%m%d-%H%M%S')}.log")
+# faulthandler 需要长期持有该文件句柄，不能用 with 上下文
 faulthandler.enable(file=open(_crash_log, "w"), all_threads=True)
 if sys.platform == "win32":
     import ctypes
 
     ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
 
-import log
-
-import os
-import sys
 import json
-import time
 import shutil
 import logging
 import platform
@@ -70,6 +76,7 @@ from VideoWidget_mpv import PushButton, Slider, VideoWidget, load_mpv_module
 from LiverSelect import LiverPanel
 from config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS
 from bili_credential import normalize_credential_data, build_credential, credential_to_dict
+import log  # 本地日志模块（faulthandler 块之后才安全）
 from bilibili_api import sync
 from danmu import GlobalDanmuOption
 from SettingsDialog import SettingsDialog
