@@ -20,12 +20,18 @@ from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath, QDeskt
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QMessageBox, QStyle
 
 # 集中管理面板样式 — 颜色统一在此定义，不散落各处
+# 配色原则：低饱和莫兰迪色系 + B站蓝灰，避免高饱和红蓝；
+# 色彩只留给真正的操作触发点，信息图标一律浅灰。
 _PANEL_QSS = """
-#loginHeader {
-    qproperty-alignment: AlignCenter;
+/* 兜底：qdark 的 QWidget 全局背景会漏到未设背景的 QLabel 上，
+   形成生硬的深灰矩形块。窗口内所有 QLabel 默认透明（ID 选择器优先，
+   #loginAvatar 等有背景的控件不受影响）。 */
+QLabel {
+    background: transparent;
+    border: none;
 }
 #loginTitle {
-    color: #f0f4f8;
+    color: #e8edf2;
     font-size: 20px;
     font-weight: bold;
     background: transparent;
@@ -35,9 +41,14 @@ _PANEL_QSS = """
     font-size: 11px;
     background: transparent;
 }
+#loginHeaderSep {
+    background: #333a43;
+    border: none;
+    max-height: 1px;
+}
 #loggedInPanel {
-    background: #2b3138;
-    border: 1px solid #3a4048;
+    background: #252b33;
+    border: 1px solid #333b45;
     border-radius: 14px;
 }
 #loginInfoLabel {
@@ -45,8 +56,10 @@ _PANEL_QSS = """
     font-size: 12px;
     background: transparent;
 }
+/* 统计图标：统一浅灰单色符号（¥ ◆ ★），颜色留给按钮 */
 #loginStatIcon {
-    font-size: 16px;
+    color: #8a94a0;
+    font-size: 14px;
     background: transparent;
 }
 #loginStatTitle {
@@ -62,7 +75,7 @@ _PANEL_QSS = """
 }
 #loginAvatar {
     border-radius: 44px;
-    border: 2px solid #3daee9;
+    border: 2px solid #547a94;
     background: #2b3138;
     font-size: 36px;
     color: #5a6470;
@@ -81,31 +94,33 @@ _PANEL_QSS = """
 #qrStatusExpired {
     color: #ff5555;
 }
-/* 按钮三级视觉层级：主操作（蓝）/ 危险（红）/ 默认（主题色） */
+/* 按钮层级：主操作（莫兰迪蓝）/ 静默危险（线框砖红字）/ 默认（主题灰） */
 #loginPrimaryBtn {
-    background: #3daee9;
+    background: #6d8fa6;
     border: none;
     border-radius: 6px;
     color: white;
     font-weight: bold;
 }
 #loginPrimaryBtn:hover {
-    background: #5bc0de;
+    background: #7fa3bb;
 }
 #loginPrimaryBtn:pressed {
-    background: #2e8fc4;
+    background: #5b7c92;
 }
-#loginDangerBtn {
-    background: #c94f4f;
-    border: none;
+#loginQuietDangerBtn {
+    background: transparent;
+    border: 1px solid #55484c;
     border-radius: 6px;
-    color: white;
+    color: #c08080;
 }
-#loginDangerBtn:hover {
-    background: #e06565;
+#loginQuietDangerBtn:hover {
+    background: #332b2d;
+    border-color: #6e565c;
+    color: #d49292;
 }
-#loginDangerBtn:pressed {
-    background: #a63f3f;
+#loginQuietDangerBtn:pressed {
+    background: #2a2426;
 }
 """
 
@@ -299,7 +314,7 @@ class QRLoginWidget(QWidget):
 
         # ---- 窗口头部（三个面板共享，提供品牌感与导航上下文）----
         header = QVBoxLayout()
-        header.setSpacing(4)
+        header.setSpacing(2)
         title = QLabel("DD监控室")
         title.setObjectName("loginTitle")
         title.setAlignment(Qt.AlignCenter)
@@ -309,7 +324,12 @@ class QRLoginWidget(QWidget):
         header.addWidget(title)
         header.addWidget(subtitle)
         self._mainLayout.addLayout(header)
-        self._mainLayout.addSpacing(6)
+        # 分割线：让头部与下方内容形成清晰的分区
+        sep = QFrame()
+        sep.setObjectName("loginHeaderSep")
+        sep.setFrameShape(QFrame.HLine)
+        self._mainLayout.addWidget(sep)
+        self._mainLayout.addSpacing(10)
 
         self._buildLoggedInPanel()
         self._buildVerifyingPanel()
@@ -359,21 +379,21 @@ class QRLoginWidget(QWidget):
         infoRow.addStretch()
         lay.addLayout(infoRow)
 
-        # 数据行（横排三列，带 emoji 图标引导）
+        # 数据行（横排三列，单色符号图标引导 — 颜色统一浅灰，不干扰数值阅读）
         stats = QHBoxLayout()
         stats.setSpacing(12)
-        self._coinLabel = self._makeStatCell("💰", "硬币", stats)
-        self._bcoinLabel = self._makeStatCell("💎", "B币", stats)
-        self._followLabel = self._makeStatCell("⭐", "关注", stats)
+        self._coinLabel = self._makeStatCell("¥", "硬币", stats)
+        self._bcoinLabel = self._makeStatCell("◆", "B币", stats)
+        self._followLabel = self._makeStatCell("★", "关注", stats)
         lay.addLayout(stats)
 
         lay.addSpacing(10)
 
-        # 操作按钮 — 三级视觉层级：次要（默认主题）/ 主操作（蓝）/ 危险（红）
+        # 操作按钮 — 层级：主操作（打开个人空间，莫兰迪蓝）/ 默认（切换账号）/ 静默危险（退出登录）
         buttons = [
-            ("打开 B站 个人空间", self.style().standardIcon(QStyle.SP_ComputerIcon), None, self._openUserSpace),
-            ("切换账号", self.style().standardIcon(QStyle.SP_ArrowForward), "loginPrimaryBtn", self._onSwitchAccount),
-            ("退出登录", self.style().standardIcon(QStyle.SP_DialogCloseButton), "loginDangerBtn", self._onLogout),
+            ("打开 B站 个人空间", self.style().standardIcon(QStyle.SP_ComputerIcon), "loginPrimaryBtn", self._openUserSpace),
+            ("切换账号", self.style().standardIcon(QStyle.SP_ArrowForward), None, self._onSwitchAccount),
+            ("退出登录", self.style().standardIcon(QStyle.SP_DialogCloseButton), "loginQuietDangerBtn", self._onLogout),
         ]
         for text, icon, object_name, slot in buttons:
             btn = QPushButton(icon, text)
@@ -428,9 +448,7 @@ class QRLoginWidget(QWidget):
         self._verifyingHint.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._verifyingHint)
 
-        retryBtn = QPushButton(
-            self.style().standardIcon(QStyle.SP_BrowserReload), "重试"
-        )
+        retryBtn = QPushButton(self.style().standardIcon(QStyle.SP_BrowserReload), "重试")
         retryBtn.setObjectName("loginPrimaryBtn")
         retryBtn.setFixedHeight(38)
         retryBtn.setCursor(Qt.PointingHandCursor)
@@ -464,9 +482,7 @@ class QRLoginWidget(QWidget):
         self._qrStatus.setWordWrap(True)
         lay.addWidget(self._qrStatus)
 
-        refreshBtn = QPushButton(
-            self.style().standardIcon(QStyle.SP_BrowserReload), "刷新二维码"
-        )
+        refreshBtn = QPushButton(self.style().standardIcon(QStyle.SP_BrowserReload), "刷新二维码")
         refreshBtn.setObjectName("loginPrimaryBtn")
         refreshBtn.setFixedHeight(38)
         refreshBtn.setCursor(Qt.PointingHandCursor)
