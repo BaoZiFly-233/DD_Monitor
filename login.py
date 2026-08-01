@@ -17,18 +17,36 @@ import http_utils
 import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QUrl
 from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPainterPath, QDesktopServices
-from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QMessageBox
+from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QMessageBox, QStyle
 
 # 集中管理面板样式 — 颜色统一在此定义，不散落各处
 _PANEL_QSS = """
+#loginHeader {
+    qproperty-alignment: AlignCenter;
+}
+#loginTitle {
+    color: #f0f4f8;
+    font-size: 20px;
+    font-weight: bold;
+    background: transparent;
+}
+#loginSubtitle {
+    color: #7c8794;
+    font-size: 11px;
+    background: transparent;
+}
 #loggedInPanel {
     background: #2b3138;
     border: 1px solid #3a4048;
-    border-radius: 12px;
+    border-radius: 14px;
 }
 #loginInfoLabel {
     color: #9aa4b0;
     font-size: 12px;
+    background: transparent;
+}
+#loginStatIcon {
+    font-size: 16px;
     background: transparent;
 }
 #loginStatTitle {
@@ -43,13 +61,15 @@ _PANEL_QSS = """
     background: transparent;
 }
 #loginAvatar {
-    border-radius: 40px;
+    border-radius: 44px;
     border: 2px solid #3daee9;
     background: #2b3138;
+    font-size: 36px;
+    color: #5a6470;
 }
 #loginQrFrame {
     border: 1px solid #555;
-    border-radius: 8px;
+    border-radius: 10px;
     background: white;
 }
 #qrStatusOk {
@@ -60,6 +80,32 @@ _PANEL_QSS = """
 }
 #qrStatusExpired {
     color: #ff5555;
+}
+/* 按钮三级视觉层级：主操作（蓝）/ 危险（红）/ 默认（主题色） */
+#loginPrimaryBtn {
+    background: #3daee9;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-weight: bold;
+}
+#loginPrimaryBtn:hover {
+    background: #5bc0de;
+}
+#loginPrimaryBtn:pressed {
+    background: #2e8fc4;
+}
+#loginDangerBtn {
+    background: #c94f4f;
+    border: none;
+    border-radius: 6px;
+    color: white;
+}
+#loginDangerBtn:hover {
+    background: #e06565;
+}
+#loginDangerBtn:pressed {
+    background: #a63f3f;
 }
 """
 
@@ -214,7 +260,7 @@ class QRLoginWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("B站账号")
-        self.setFixedSize(400, 580)
+        self.setFixedSize(420, 620)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据（UI 从这些字段推导）----
@@ -247,9 +293,23 @@ class QRLoginWidget(QWidget):
         # ---- 布局 ----
         self._mainLayout = QVBoxLayout(self)
         self._mainLayout.setAlignment(Qt.AlignCenter)
-        self._mainLayout.setSpacing(10)
-        self._mainLayout.setContentsMargins(16, 16, 16, 16)
+        self._mainLayout.setSpacing(14)
+        self._mainLayout.setContentsMargins(24, 24, 24, 24)
         self.setStyleSheet(_PANEL_QSS)
+
+        # ---- 窗口头部（三个面板共享，提供品牌感与导航上下文）----
+        header = QVBoxLayout()
+        header.setSpacing(4)
+        title = QLabel("DD监控室")
+        title.setObjectName("loginTitle")
+        title.setAlignment(Qt.AlignCenter)
+        subtitle = QLabel("B站账号")
+        subtitle.setObjectName("loginSubtitle")
+        subtitle.setAlignment(Qt.AlignCenter)
+        header.addWidget(title)
+        header.addWidget(subtitle)
+        self._mainLayout.addLayout(header)
+        self._mainLayout.addSpacing(6)
 
         self._buildLoggedInPanel()
         self._buildVerifyingPanel()
@@ -268,19 +328,19 @@ class QRLoginWidget(QWidget):
         self._loggedInPanel = QFrame()
         self._loggedInPanel.setObjectName("loggedInPanel")
         lay = QVBoxLayout(self._loggedInPanel)
-        lay.setSpacing(12)
-        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
+        lay.setContentsMargins(28, 28, 28, 28)
 
         # 头像
         self._avatarLabel = QLabel()
-        self._avatarLabel.setFixedSize(80, 80)
+        self._avatarLabel.setFixedSize(88, 88)
         self._avatarLabel.setAlignment(Qt.AlignCenter)
         self._resetAvatarPlaceholder()
         lay.addWidget(self._avatarLabel, alignment=Qt.AlignCenter)
 
         # 用户名
         self._unameLabel = QLabel()
-        self._unameLabel.setFont(QFont("微软雅黑", 16, QFont.Bold))
+        self._unameLabel.setFont(QFont("微软雅黑", 17, QFont.Bold))
         self._unameLabel.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._unameLabel)
 
@@ -292,53 +352,60 @@ class QRLoginWidget(QWidget):
         self._infoLabel.setObjectName("loginInfoLabel")
         self._infoLabel.setAlignment(Qt.AlignCenter)
         infoRow = QHBoxLayout()
-        infoRow.setSpacing(6)
+        infoRow.setSpacing(8)
         infoRow.addStretch()
         infoRow.addWidget(self._levelIconLabel)
         infoRow.addWidget(self._infoLabel)
         infoRow.addStretch()
         lay.addLayout(infoRow)
 
-        # 数据行（横排三列）
+        # 数据行（横排三列，带 emoji 图标引导）
         stats = QHBoxLayout()
-        stats.setSpacing(8)
-        self._coinLabel = self._makeStatCell("硬币", stats)
-        self._bcoinLabel = self._makeStatCell("B币", stats)
-        self._followLabel = self._makeStatCell("关注", stats)
+        stats.setSpacing(12)
+        self._coinLabel = self._makeStatCell("💰", "硬币", stats)
+        self._bcoinLabel = self._makeStatCell("💎", "B币", stats)
+        self._followLabel = self._makeStatCell("⭐", "关注", stats)
         lay.addLayout(stats)
 
-        lay.addSpacing(8)
+        lay.addSpacing(10)
 
-        # 操作按钮 — 全部走全局 qdark 主题，不再内联配色
-        for text, slot in [
-            ("打开 B站 个人空间", self._openUserSpace),
-            ("切换账号", self._onSwitchAccount),
-            ("退出登录", self._onLogout),
-        ]:
-            btn = QPushButton(text)
-            btn.setFixedHeight(36)
+        # 操作按钮 — 三级视觉层级：次要（默认主题）/ 主操作（蓝）/ 危险（红）
+        buttons = [
+            ("打开 B站 个人空间", self.style().standardIcon(QStyle.SP_ComputerIcon), None, self._openUserSpace),
+            ("切换账号", self.style().standardIcon(QStyle.SP_ArrowForward), "loginPrimaryBtn", self._onSwitchAccount),
+            ("退出登录", self.style().standardIcon(QStyle.SP_DialogCloseButton), "loginDangerBtn", self._onLogout),
+        ]
+        for text, icon, object_name, slot in buttons:
+            btn = QPushButton(icon, text)
+            btn.setFixedHeight(38)
             btn.setAutoDefault(False)
             btn.setDefault(False)
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setCursor(Qt.PointingHandCursor)
+            if object_name:
+                btn.setObjectName(object_name)
             btn.clicked.connect(slot)
             lay.addWidget(btn)
-            lay.addSpacing(2)
+            lay.addSpacing(4)
 
         self._loggedInPanel.hide()
         self._mainLayout.addWidget(self._loggedInPanel)
 
     @staticmethod
-    def _makeStatCell(title, parent_layout):
-        """横排统计单元格：上标题下数值"""
+    def _makeStatCell(icon, title, parent_layout):
+        """横排统计单元格：图标 + 标题 + 数值"""
         cell = QVBoxLayout()
-        cell.setSpacing(2)
+        cell.setSpacing(3)
+        icon_label = QLabel(icon)
+        icon_label.setObjectName("loginStatIcon")
+        icon_label.setAlignment(Qt.AlignCenter)
         t = QLabel(title)
         t.setObjectName("loginStatTitle")
         t.setAlignment(Qt.AlignCenter)
         v = QLabel("--")
         v.setObjectName("loginStatValue")
         v.setAlignment(Qt.AlignCenter)
+        cell.addWidget(icon_label)
         cell.addWidget(t)
         cell.addWidget(v)
         parent_layout.addLayout(cell)
@@ -348,10 +415,10 @@ class QRLoginWidget(QWidget):
         self._verifyingPanel = QWidget()
         lay = QVBoxLayout(self._verifyingPanel)
         lay.setAlignment(Qt.AlignCenter)
-        lay.setSpacing(16)
+        lay.setSpacing(18)
 
         self._verifyingLabel = QLabel("正在验证登录状态...")
-        self._verifyingLabel.setFont(QFont("微软雅黑", 12))
+        self._verifyingLabel.setFont(QFont("微软雅黑", 13))
         self._verifyingLabel.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._verifyingLabel)
 
@@ -361,8 +428,11 @@ class QRLoginWidget(QWidget):
         self._verifyingHint.setAlignment(Qt.AlignCenter)
         lay.addWidget(self._verifyingHint)
 
-        retryBtn = QPushButton("重试")
-        retryBtn.setFixedHeight(36)
+        retryBtn = QPushButton(
+            self.style().standardIcon(QStyle.SP_BrowserReload), "重试"
+        )
+        retryBtn.setObjectName("loginPrimaryBtn")
+        retryBtn.setFixedHeight(38)
         retryBtn.setCursor(Qt.PointingHandCursor)
         retryBtn.clicked.connect(self._retryVerify)
         lay.addWidget(retryBtn)
@@ -374,7 +444,7 @@ class QRLoginWidget(QWidget):
         self._qrPanel = QWidget()
         lay = QVBoxLayout(self._qrPanel)
         lay.setAlignment(Qt.AlignCenter)
-        lay.setSpacing(12)
+        lay.setSpacing(14)
 
         self._qrTitle = QLabel("请使用 Bilibili 客户端扫码登录")
         self._qrTitle.setFont(QFont("微软雅黑", 12, QFont.Bold))
@@ -394,8 +464,11 @@ class QRLoginWidget(QWidget):
         self._qrStatus.setWordWrap(True)
         lay.addWidget(self._qrStatus)
 
-        refreshBtn = QPushButton("刷新二维码")
-        refreshBtn.setFixedHeight(36)
+        refreshBtn = QPushButton(
+            self.style().standardIcon(QStyle.SP_BrowserReload), "刷新二维码"
+        )
+        refreshBtn.setObjectName("loginPrimaryBtn")
+        refreshBtn.setFixedHeight(38)
         refreshBtn.setCursor(Qt.PointingHandCursor)
         refreshBtn.clicked.connect(self._fetchQRCode)
         lay.addWidget(refreshBtn)
@@ -650,7 +723,7 @@ class QRLoginWidget(QWidget):
         """头像下载完成 → 裁剪为圆形并缓存（主窗口就绪前挂起应用）"""
         pixmap = QPixmap.fromImage(qimage)
         scaled = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._avatarPixmap = self._makeCircularPixmap(scaled, 80)
+        self._avatarPixmap = self._makeCircularPixmap(scaled, 88)
         if self._paintSafe:
             self._applyAvatar()
         else:
@@ -775,7 +848,7 @@ class QRLoginWidget(QWidget):
 
     def _resetAvatarPlaceholder(self):
         self._avatarLabel.setPixmap(QPixmap())
-        self._avatarLabel.setText("")
+        self._avatarLabel.setText("👤")  # 未加载头像时的占位图标
         self._avatarLabel.setObjectName("loginAvatar")
 
     def _applyAvatar(self):

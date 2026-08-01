@@ -649,6 +649,7 @@ class GetFollows(QThread):
             return
         followsIDs = set()
         roomIDList = []
+        network_error = None
         req_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -664,7 +665,8 @@ class GetFollows(QThread):
                 ).get_all_followings()
             )
             followsIDs = self._extract_follow_ids(follow_list)
-        except Exception:
+        except Exception as e:
+            network_error = e
             logging.exception("通过 bilibili-api-python 获取关注列表失败，回退至 HTTP API")
             try:
                 for p in range(1, 11):
@@ -679,12 +681,16 @@ class GetFollows(QThread):
                         break
                     followsIDs.update(self._extract_follow_ids(followList))
                     time.sleep(0.2)
-            except Exception:
+            except Exception as e2:
+                network_error = e2
                 logging.exception("关注列表添加失败")
 
         followsIDs = list(followsIDs)
         if not followsIDs:
-            logging.error("没有获取到关注列表，请检查 UID 是否正确")
+            if network_error is not None:
+                logging.error(f"获取关注列表失败（网络错误: {network_error}）— 请检查网络或代理设置")
+            else:
+                logging.error("没有获取到关注列表，请检查 UID 是否正确")
             self.roomInfoSummary.emit([])
             return
 
