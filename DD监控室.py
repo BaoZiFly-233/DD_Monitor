@@ -1071,8 +1071,11 @@ class MainWindow(QMainWindow):
     def updateCredential(self, credential):
         self.credential = normalize_credential_data(credential)
         self.config["credential"] = self.credential
-        self.sessionData = self.credential.get("sessdata", "")
-        self.config["sessionData"] = self.sessionData
+        # 防御：传入的 credential 若未携带 sessdata（如扫码 URL 无 SESSDATA 参数），
+        # 保留现有 sessionData，避免覆盖清空导致菜单退回"扫码登录"、播放失效
+        sessdata = self.credential.get("sessdata", "") or self.sessionData or self.config.get("sessionData", "")
+        self.sessionData = sessdata
+        self.config["sessionData"] = sessdata
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             if hasattr(videoWidget, "applyCredentialContext"):
                 videoWidget.applyCredentialContext(

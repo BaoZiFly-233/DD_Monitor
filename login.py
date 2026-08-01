@@ -337,6 +337,11 @@ class LoginDialog(QDialog):
             logging.error("[LOGIN] 登录成功但 SESSDATA 为空!")
             return
 
+        # 把实际取到的 SESSDATA 写回 credential（URL 参数里可能没有），
+        # 否则 credentialReady 发出的凭据不含 sessdata，主窗口 updateCredential
+        # 会用空值覆盖 config["sessionData"]，导致菜单退回"扫码登录"
+        self._credential["SESSDATA"] = sessdata
+
         self._sessdata = sessdata
         logging.info(f"[LOGIN] 发射 sessionData 信号 (len={len(sessdata)})")
         self._justLoggedIn = True
