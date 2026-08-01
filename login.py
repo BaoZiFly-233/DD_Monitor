@@ -548,6 +548,10 @@ class QRLoginWidget(QWidget):
         下载完成后不立即 setPixmap：若主窗口 OpenGL 初始化尚未完成，
         先挂起待主窗口就绪后再应用（替代旧方案的 thread.wait(5000) 阻塞）。
         """
+        # 去重保护：重复调用时若上次下载仍在进行，直接复用，
+        # 防止覆盖引用导致 running 状态的线程被 GC 析构（原生崩溃）
+        if self._levelIconThread is not None and self._levelIconThread.isRunning():
+            return
 
         class _FetchLevelIcon(QThread):
             iconReady = Signal(QPixmap)
@@ -636,10 +640,7 @@ class QRLoginWidget(QWidget):
                 self._fetchAvatar.url = face_url
                 if not self._fetchAvatar.isRunning():
                     self._fetchAvatar.start()
-            # 下载等级图标
-            level_val = self._user_info.get("level", 0)
-            if level_val > 0:
-                self._downloadLevelIcon(level_val)
+            # 等级图标由 _syncUI 统一触发（本函数末尾会调用），此处不重复下载
 
         # 成功和过期都需要刷新 UI
         if self.isVisible():
