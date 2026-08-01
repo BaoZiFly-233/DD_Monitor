@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QSplashScreen,
     QStyle,
     QWidget,
+    QWidgetAction,
 )
 from PySide6.QtGui import (
     QAction,
@@ -1045,9 +1046,7 @@ class MainWindow(QMainWindow):
         self.loginDialog.show()
 
     def updateSessionData(self, sessionData):
-        logging.info(
-            f"[LOGIN] updateSessionData: len={len(sessionData)}, 前20字符={sessionData[:20] if sessionData else '空'}"
-        )
+        logging.info(f"[LOGIN] updateSessionData: len={len(sessionData)}")
         if not sessionData:
             import traceback
 
@@ -1141,6 +1140,19 @@ class MainWindow(QMainWindow):
     # 「B站账号」菜单 — 登录入口完全收敛到菜单栏
     # ================================================================
 
+    def _addLoginInfoAction(self, text):
+        """以 QLabel 形式添加不可交互的登录信息展示项
+
+        setEnabled(False) 会让菜单项呈灰色，用户误以为登录异常；
+        用 QWidgetAction + QLabel 正常颜色显示，且不可点击。
+        """
+        label = QLabel(text)
+        label.setContentsMargins(8, 5, 8, 5)
+        label.setStyleSheet("background: transparent;")
+        action = QWidgetAction(self)
+        action.setDefaultWidget(label)
+        self.loginMenu.addAction(action)
+
     def _rebuildLoginMenu(self):
         """根据登录状态重建「B站账号」菜单
 
@@ -1153,12 +1165,8 @@ class MainWindow(QMainWindow):
         uname = info.get("uname", "")
         uid = info.get("uid", "")
         if uname and self.config.get("sessionData"):
-            userAction = QAction(f"{uname}", self)
-            userAction.setEnabled(False)
-            self.loginMenu.addAction(userAction)
-            uidAction = QAction(f"UID: {uid}", self)
-            uidAction.setEnabled(False)
-            self.loginMenu.addAction(uidAction)
+            self._addLoginInfoAction(f"{uname}")
+            self._addLoginInfoAction(f"UID: {uid}")
             self.loginMenu.addSeparator()
             self.loginMenu.addAction(QAction("打开个人空间", self, triggered=self.openUserSpace))
             self.loginMenu.addAction(QAction("切换账号", self, triggered=self.switchAccount))
