@@ -1119,6 +1119,7 @@ class MainWindow(QMainWindow):
         """根据登录状态重建「B站账号」菜单
 
         未登录：扫码登录…
+        已登录（验证中）：占位提示 + 退出登录
         已登录：账号名 / UID / 打开个人空间 / 切换账号 / 退出登录
         """
         self.loginMenu.clear()
@@ -1135,6 +1136,13 @@ class MainWindow(QMainWindow):
             self.loginMenu.addSeparator()
             self.loginMenu.addAction(QAction("打开个人空间", self, triggered=self.openUserSpace))
             self.loginMenu.addAction(QAction("切换账号", self, triggered=self.switchAccount))
+            self.loginMenu.addAction(QAction("退出登录", self, triggered=self.logoutAccount))
+        elif self.config.get("sessionData"):
+            # 已登录但用户信息未就绪（网络验证中或失败）— 保留退出入口
+            pending = QAction("已登录（验证中…）", self)
+            pending.setEnabled(False)
+            self.loginMenu.addAction(pending)
+            self.loginMenu.addSeparator()
             self.loginMenu.addAction(QAction("退出登录", self, triggered=self.logoutAccount))
         else:
             self.loginMenu.addAction(QAction("扫码登录…", self, triggered=self.openLoginPage))
@@ -1277,7 +1285,10 @@ class MainWindow(QMainWindow):
         self.hide()
         self.layoutSettingPanel.close()
         self.liverPanel.addLiverRoomWidget.close()
+        # 等待轮询线程退出后再继续 — 否则进程退出时线程阻塞在 HTTP 请求中
+        # 会被强杀，触发原生 access violation 崩溃（FlClash 代理下尤为常见）
         self.liverPanel.collectLiverInfo.stop()
+        self.liverPanel.collectLiverInfo.wait(5000)
         self.loginDialog.close()
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.getMediaURL.recordToken = False

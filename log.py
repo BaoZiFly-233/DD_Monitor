@@ -89,7 +89,7 @@ def init_log(application_path):
     stdout_stream = sys.__stdout__ or sys.stdout
     stderr_stream = sys.__stderr__ or sys.stderr
 
-    handlers = [logging.FileHandler(log_path, "w", "utf-8")]
+    handlers = [logging.FileHandler(log_path, "a", "utf-8")]  # 追加模式，保留历史日志便于排查
     if stderr_stream and hasattr(stderr_stream, "write"):
         handlers.append(logging.StreamHandler(stderr_stream))
 

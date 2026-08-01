@@ -1,41 +1,41 @@
 @echo off
-chcp 65001 >nul
-title DD监控室 快速测试
+chcp 936 >nul
+title DD����� ���ٲ���
 cd /d "%~dp0"
 
 echo ==========================================
-echo   DD监控室 快速测试模式
+echo   DD����� ���ٲ���ģʽ
 echo ==========================================
 echo.
 
-rem 检查 Python
+rem ��� Python
 where python >nul 2>nul
 if errorlevel 1 (
-    echo [错误] 未找到 Python，请先安装 Python 3.9+
+    echo [����] δ�ҵ� Python�����Ȱ�װ Python 3.9+
     pause
     exit /b 1
 )
 
-rem 检查 libmpv（缺失时视频无法播放，但 UI 可以启动）
+rem ��� libmpv��ȱʧʱ��Ƶ�޷����ţ��� UI ����������
 if not exist "libmpv-2.dll" (
-    echo [警告] 未找到 libmpv-2.dll，视频将无法播放
-    echo         下载 mpv-dev-x86_64 包解压后，把 libmpv-2.dll 放到本目录
+    echo [����] δ�ҵ� libmpv-2.dll����Ƶ���޷�����
+    echo        ���� mpv-dev-x86_64 ����ѹ�󣬰� libmpv-2.dll �ŵ���Ŀ¼
     echo.
 )
 
-echo [信息] 正在启动 DD监控室（源码直跑）...
-echo        本窗口是调试终端，请保持打开；关闭窗口即退出程序
+echo [��Ϣ] �������� DD����ң�Դ��ֱ�ܣ�...
+echo        �������ǵ����նˣ��뱣�ִ򿪣��رմ��ڼ��˳�����
 echo.
 
-python DD监控室.py
+python DD�����.py
 set EXIT_CODE=%ERRORLEVEL%
 
 echo.
 if "%EXIT_CODE%"=="0" (
-    echo [信息] 程序正常退出
+    echo [��Ϣ] ���������˳�
 ) else (
-    echo [错误] 程序异常退出，退出码: %EXIT_CODE%
-    echo        崩溃日志: logs\crash-*.log
-    echo        运行日志: logs\app.log
+    echo [����] �����쳣�˳����˳���: %EXIT_CODE%
+    echo        ������־: logs\crash-*.log
+    echo        ������־: logs\app.log
 )
 pause

@@ -9,6 +9,7 @@ B站扫码登录模块 — 极简版
   2. 后台验证链路（setSessionData → FetchUserInfo），
      供启动时静默验证 session 是否有效
 """
+
 import logging
 from urllib.parse import urlparse, parse_qs
 
@@ -43,7 +44,12 @@ class FetchUserInfo(QThread):
         try:
             cookies = {"SESSDATA": self.sessdata} if self.sessdata else {}
             resp = http_utils.get(
-                "https://api.bilibili.com/x/web-interface/nav", headers=HEADERS, cookies=cookies, timeout=4
+                "https://api.bilibili.com/x/web-interface/nav",
+                headers=HEADERS,
+                cookies=cookies,
+                timeout=4,
+                retries=2,
+                retry_backoff=1.0,
             )
             data = resp.json()
             if data["code"] == 0 and data["data"].get("isLogin"):
@@ -69,7 +75,7 @@ class FetchQRCode(QThread):
     """后台获取二维码（避免阻塞主线程）"""
 
     qrcodeReady = Signal(str, str)  # (qrcode_key, url)
-    fetchError = Signal(str)        # 错误消息
+    fetchError = Signal(str)  # 错误消息
 
     def run(self):
         try:
@@ -91,7 +97,7 @@ class FetchQRCode(QThread):
 class PollLoginStatus(QThread):
     """后台轮询登录状态（避免阻塞主线程）"""
 
-    loginSuccess = Signal(object, dict)   # (response, result_data)
+    loginSuccess = Signal(object, dict)  # (response, result_data)
     qrExpired = Signal()
     qrScanned = Signal()
     pollError = Signal()
@@ -146,9 +152,10 @@ class LoginDialog(QDialog):
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据 ----
-        self._sessdata = ""       # 有值 = 有凭据（用于启动时静默验证）
+        self._sessdata = ""  # 有值 = 有凭据（用于启动时静默验证）
         self._qrcode_key = ""
         self._credential = {}
+        self._justLoggedIn = False  # 刚扫码成功：验证失败不登出（凭据是新拿到的）
 
         # ---- 后台线程（全部保存为成员，防止 running 状态被 GC 析构崩溃）----
         self._fetchUserInfo = FetchUserInfo()
@@ -224,12 +231,19 @@ class LoginDialog(QDialog):
             self._fetchUserInfo.start()
 
     def _onUserInfo(self, info):
-        """验证回调：成功发 userInfoReady；过期清凭据发登出信号"""
+        """验证回调：成功发 userInfoReady；过期清凭据发登出信号
+
+        刚扫码成功后的验证失败不登出（凭据是新拿到的，可能只是网络抖动），
+        保留凭据等下次启动重新验证。
+        """
         if info.get("_expired"):
-            logging.warning("session 已过期，需要重新登录")
-            self._sessdata = ""
-            self.sessionData.emit("")
-            self.login.emit(False)
+            if self._justLoggedIn:
+                logging.warning("登录后验证返回未登录，保留凭据待下次启动重试")
+            else:
+                logging.warning("session 已过期，需要重新登录")
+                self._sessdata = ""
+                self.sessionData.emit("")
+                self.login.emit(False)
         elif info.get("_error"):
             logging.warning("网络错误，保留现有凭据")
         else:
@@ -322,6 +336,7 @@ class LoginDialog(QDialog):
 
         self._sessdata = sessdata
         logging.info(f"[LOGIN] 发射 sessionData 信号 (len={len(sessdata)})")
+        self._justLoggedIn = True
         self.sessionData.emit(sessdata)
         self.login.emit(True)
         self.credentialReady.emit(self._credential)
