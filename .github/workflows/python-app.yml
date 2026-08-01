@@ -65,55 +65,51 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download MPV runtime files
+      - name: Download libmpv DLL
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
-          $runtimeAsset = $release.assets |
-            Where-Object { $_.name -match '^mpv-x86_64-.*\.7z$' -and $_.name -notmatch '-v3-' } |
-            Select-Object -First 1
+          $release = Invoke-RestMethod -Uri \
+            'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
           $devAsset = $release.assets |
-            Where-Object { $_.name -match '^mpv-dev-x86_64-.*\.7z$' -and $_.name -notmatch '-v3-' } |
+            Where-Object {
+              $_.name -match '^mpv-dev-x86_64-.*\.7z$' -and
+              $_.name -notmatch '-v3-'
+            } |
             Select-Object -First 1
 
-          if (-not $runtimeAsset) { throw 'mpv runtime asset for x64 was not found' }
           if (-not $devAsset) { throw 'mpv dev asset for x64 was not found' }
 
           $downloadDir = Join-Path $env:RUNNER_TEMP 'mpv-download'
-          $runtimeDir = Join-Path $env:RUNNER_TEMP 'mpv-runtime'
           $devDir = Join-Path $env:RUNNER_TEMP 'mpv-dev'
           New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
-          New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
           New-Item -ItemType Directory -Force -Path $devDir | Out-Null
 
-          $runtimeArchive = Join-Path $downloadDir $runtimeAsset.name
           $devArchive = Join-Path $downloadDir $devAsset.name
-          Invoke-WebRequest -Uri $runtimeAsset.browser_download_url -OutFile $runtimeArchive
-          Invoke-WebRequest -Uri $devAsset.browser_download_url -OutFile $devArchive
-
-          & 7z x $runtimeArchive "-o$runtimeDir" -y | Out-Host
+          Invoke-WebRequest -Uri $devAsset.browser_download_url `
+            -OutFile $devArchive
           & 7z x $devArchive "-o$devDir" -y | Out-Host
 
           $mpvDll = Join-Path $devDir 'libmpv-2.dll'
-          if (-not (Test-Path $mpvDll)) { throw "libmpv-2.dll was not found: $mpvDll" }
+          if (-not (Test-Path $mpvDll)) {
+            throw "libmpv-2.dll was not found: $mpvDll"
+          }
 
-          "MPV_DLL=$mpvDll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "MPV_RUNTIME_DIR=$runtimeDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MPV_DLL=$mpvDll" | Out-File -FilePath $env:GITHUB_ENV `
+            -Encoding utf8 -Append
 
       - name: Build release package
         shell: cmd
         env:
           APP_VERSION: ${{ needs.prepare.outputs.app_version }}
           MPV_DLL: ${{ env.MPV_DLL }}
-          MPV_RUNTIME_DIR: ${{ env.MPV_RUNTIME_DIR }}
         run: scripts\build_win.bat x64
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: ddmonitor-windows-x64
-          path: release/DDMonitor-${{ needs.prepare.outputs.app_version }}-windows-x64.zip
+          path: release/DDMonitor-*.zip
           if-no-files-found: error
 
   release:

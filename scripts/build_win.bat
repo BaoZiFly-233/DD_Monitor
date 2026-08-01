@@ -13,9 +13,10 @@ echo.
 echo Optional env vars:
 echo   APP_VERSION=3.50
 echo   MPV_DLL=D:/path/to/libmpv-2.dll
-echo   MPV_RUNTIME_DIR=D:/path/to/mpv-runtime-dir
 exit /b 1
 )
+
+rem MPV_RUNTIME_DIR 仅用于可选携带 d3dcompiler_43.dll，不再打包整个 mpv runtime 目录
 
 set "APP_VERSION=%APP_VERSION%"
 if "%APP_VERSION%"=="" set "APP_VERSION=3.51"
@@ -59,9 +60,10 @@ if exist "%DIST_DIR%\utils\splash.psd" del /F /Q "%DIST_DIR%\utils\splash.psd"
 if exist "%DIST_DIR%\utils\entitlements.plist" del /F /Q "%DIST_DIR%\utils\entitlements.plist"
 copy /Y "%MPV_DLL%" "%DIST_DIR%\libmpv-2.dll" >nul
 
+rem libmpv 嵌入只需要 DLL 本体；d3dcompiler_43.dll 可选（mpv gpu 输出需要），
+rem 整个 mpv runtime 目录（mpv.exe/fonts/shaders）对嵌入场景无用，不再打包。
 if not "%MPV_RUNTIME_DIR%"=="" (
     if exist "%MPV_RUNTIME_DIR%\d3dcompiler_43.dll" copy /Y "%MPV_RUNTIME_DIR%\d3dcompiler_43.dll" "%DIST_DIR%\d3dcompiler_43.dll" >nul
-    if exist "%MPV_RUNTIME_DIR%\mpv" xcopy "%MPV_RUNTIME_DIR%\mpv" "%DIST_DIR%\mpv\" /E /I /Y >nul
 )
 
 powershell.exe -NoProfile -Command "Compress-Archive -Path '%DIST_DIR%' -DestinationPath '%ARCHIVE_PATH%' -Force"
