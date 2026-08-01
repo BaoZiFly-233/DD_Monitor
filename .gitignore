@@ -22,3 +22,6 @@ config.json
 # VLC bin
 plugins/
 *.dll
+
+# Reasonix 本地工具配置
+reasonix.toml
