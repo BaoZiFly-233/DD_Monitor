@@ -14,11 +14,11 @@ from danmaku_layout import BottomLayout, RollLayout, TopLayout
 
 @dataclass(frozen=True)
 class DanmakuStyle:
-    font_family: str = 'Microsoft YaHei'
+    font_family: str = "Microsoft YaHei"
     font_size: int = 36
     bold: bool = True
     stroke_width: float = 3.0
-    stroke_color: str = '#000000'
+    stroke_color: str = "#000000"
     opacity: float = 0.85
     display_ratio: float = 0.55
     shadow_enabled: bool = False
@@ -50,16 +50,16 @@ class ActiveDanmaku:
 @dataclass(frozen=True)
 class DanmakuItemData:
     text: str
-    color: str = '#FFFFFF'
-    kind: str = 'scroll'
-    uname: str = ''
+    color: str = "#FFFFFF"
+    kind: str = "scroll"
+    uname: str = ""
     created_at: float = field(default_factory=time.monotonic)
 
 
 @dataclass(frozen=True)
 class DanmakuFilterResult:
     filtered: bool = False
-    reason: str = ''
+    reason: str = ""
 
 
 class DanmakuDataFilter:
@@ -75,7 +75,7 @@ class DanmakuLayoutFilter:
 class EmptyTextFilter(DanmakuDataFilter):
     def filter(self, item: DanmakuItemData, renderer):
         if not item.text.strip():
-            return DanmakuFilterResult(True, 'empty_text')
+            return DanmakuFilterResult(True, "empty_text")
         return DanmakuFilterResult()
 
 
@@ -119,18 +119,20 @@ class DanmakuImageCache:
 
     @staticmethod
     def _build_key(text, color, style: DanmakuStyle):
-        raw = '|'.join([
-            text,
-            color,
-            style.font_family,
-            str(style.font_size),
-            str(style.bold),
-            str(style.stroke_width),
-            style.stroke_color,
-            str(style.shadow_enabled),
-            str(style.shadow_strength),
-        ])
-        return sha1(raw.encode('utf-8')).hexdigest()
+        raw = "|".join(
+            [
+                text,
+                color,
+                style.font_family,
+                str(style.font_size),
+                str(style.bold),
+                str(style.stroke_width),
+                style.stroke_color,
+                str(style.shadow_enabled),
+                str(style.shadow_strength),
+            ]
+        )
+        return sha1(raw.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _render_sprite(key, text, color, style: DanmakuStyle):
@@ -180,9 +182,9 @@ class DanmakuImageCache:
 
 
 class DanmakuRenderer:
-    ROLL_KIND = 'scroll'
-    TOP_KIND = 'top'
-    BOTTOM_KIND = 'bottom'
+    ROLL_KIND = "scroll"
+    TOP_KIND = "top"
+    BOTTOM_KIND = "bottom"
     _FIXED_DURATION = 5.0
     _MAX_FIXED_PER_KIND = 20
 
@@ -364,7 +366,7 @@ class DanmakuRenderer:
     def _active_count_by_kind(self, kind):
         return sum(1 for bullet in self._active if bullet.kind == kind)
 
-    def addDanmaku(self, text, color='#FFFFFF', kind='scroll', uname=''):
+    def addDanmaku(self, text, color="#FFFFFF", kind="scroll", uname=""):
         if not self._enabled or self._viewport_width <= 0 or self._viewport_height <= 0:
             return
 
@@ -373,7 +375,10 @@ class DanmakuRenderer:
             return
         if normalized_kind == self.BOTTOM_KIND and not self._bottom_enabled:
             return
-        if normalized_kind in {self.TOP_KIND, self.BOTTOM_KIND} and self._active_count_by_kind(normalized_kind) >= self._MAX_FIXED_PER_KIND:
+        if (
+            normalized_kind in {self.TOP_KIND, self.BOTTOM_KIND}
+            and self._active_count_by_kind(normalized_kind) >= self._MAX_FIXED_PER_KIND
+        ):
             return
 
         item = DanmakuItemData(text=str(text), color=str(color), kind=normalized_kind, uname=str(uname))
@@ -382,7 +387,9 @@ class DanmakuRenderer:
 
         sprite = self._image_cache.get_or_create(item.text, item.color, self._style)
         if normalized_kind == self.ROLL_KIND:
-            placement = self._roll_layout.allocate(item.created_at, sprite.width, sprite.layout_height, self._roll_duration)
+            placement = self._roll_layout.allocate(
+                item.created_at, sprite.width, sprite.layout_height, self._roll_duration
+            )
             if placement is None:
                 return
             expire_time = item.created_at + float(placement.duration)
@@ -402,17 +409,19 @@ class DanmakuRenderer:
         if self._run_layout_filters(item, placement).filtered:
             return
 
-        self._active.append(ActiveDanmaku(
-            sprite=sprite,
-            kind=normalized_kind,
-            y=y,
-            width=sprite.width,
-            height=sprite.layout_height,
-            start_time=item.created_at,
-            start_x=start_x,
-            speed=speed,
-            expire_time=expire_time,
-        ))
+        self._active.append(
+            ActiveDanmaku(
+                sprite=sprite,
+                kind=normalized_kind,
+                y=y,
+                width=sprite.width,
+                height=sprite.layout_height,
+                start_time=item.created_at,
+                start_x=start_x,
+                speed=speed,
+                expire_time=expire_time,
+            )
+        )
         self._request_update()
 
     def stop(self):

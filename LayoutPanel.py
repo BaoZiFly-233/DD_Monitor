@@ -1,6 +1,7 @@
 """
 选择布局方式的页面
 """
+
 from PySide6.QtWidgets import QLabel, QWidget, QGridLayout
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal
@@ -9,18 +10,20 @@ from LayoutConfig import layoutList
 
 class Label(QLabel):
     """序号标签。用于布局的编号"""
+
     def __init__(self, text):
         super(Label, self).__init__()
         self.setText(text)
-        self.setFont(QFont('微软雅黑', 13, QFont.Bold))
+        self.setFont(QFont("微软雅黑", 13, QFont.Bold))
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet('background-color:#4682B4')
+        self.setStyleSheet("background-color:#4682B4")
 
 
 class LayoutWidget(QLabel):
     """布局表示
     展示一种布局
     """
+
     clicked = Signal(int)
 
     def __init__(self, layout, number):
@@ -35,20 +38,21 @@ class LayoutWidget(QLabel):
         self.clicked.emit(self.number)
 
     def enterEvent(self, QEvent):
-        self.setStyleSheet('background-color:#AFEEEE')
+        self.setStyleSheet("background-color:#AFEEEE")
 
     def leaveEvent(self, QEvent):
-        self.setStyleSheet('background-color:#00000000')
+        self.setStyleSheet("background-color:#00000000")
 
 
 class LayoutSettingPanel(QWidget):
     """布局选择窗口"""
+
     layoutConfig = Signal(list)
 
     def __init__(self):
         super(LayoutSettingPanel, self).__init__()
         self.resize(1280, 720)
-        self.setWindowTitle('选择布局方式')
+        self.setWindowTitle("选择布局方式")
 
         # 排列各种布局方式
         mainLayout = QGridLayout(self)

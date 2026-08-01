@@ -2,6 +2,7 @@
 """全局日志
 Note: 仅在入口文件中导入一次
 """
+
 import os
 import datetime
 import logging
@@ -10,13 +11,14 @@ import threading
 
 
 def get_submod_log(submod_name):
-    return logging.getLogger('Main' + '.' + submod_name)
+    return logging.getLogger("Main" + "." + submod_name)
 
 
 class LoggerStream(object):
     """假 stream，将 stdout/stderr 流重定向到日志，避免win上无头模式运行时报错。
     ref: https://docs.python.org/3/library/sys.html#sys.__stdout__
     """
+
     _guard = threading.local()
 
     def __init__(self, name, level, fileno, fallback_stream=None):
@@ -37,12 +39,12 @@ class LoggerStream(object):
             return
 
         stream = self._fallback_stream
-        if stream is None or not hasattr(stream, 'write'):
+        if stream is None or not hasattr(stream, "write"):
             return
 
         try:
             stream.write(text)
-            if hasattr(stream, 'flush'):
+            if hasattr(stream, "flush"):
                 stream.flush()
         except Exception:
             pass
@@ -52,7 +54,7 @@ class LoggerStream(object):
             return 0
 
         text = str(lines)
-        if getattr(self._guard, 'active', False):
+        if getattr(self._guard, "active", False):
             self._fallback_write(text)
             return len(text)
 
@@ -75,7 +77,7 @@ class LoggerStream(object):
             except Exception:
                 pass
 
-        if self._fallback_stream is not None and hasattr(self._fallback_stream, 'flush'):
+        if self._fallback_stream is not None and hasattr(self._fallback_stream, "flush"):
             try:
                 self._fallback_stream.flush()
             except Exception:
@@ -83,12 +85,12 @@ class LoggerStream(object):
 
 
 def init_log(application_path):
-    log_path = os.path.join(application_path, r'logs/log-%s.txt' % (datetime.datetime.today().strftime('%Y-%m-%d')))
+    log_path = os.path.join(application_path, r"logs/log-%s.txt" % (datetime.datetime.today().strftime("%Y-%m-%d")))
     stdout_stream = sys.__stdout__ or sys.stdout
     stderr_stream = sys.__stderr__ or sys.stderr
 
-    handlers = [logging.FileHandler(log_path, 'w', 'utf-8')]
-    if stderr_stream and hasattr(stderr_stream, 'write'):
+    handlers = [logging.FileHandler(log_path, "w", "utf-8")]
+    if stderr_stream and hasattr(stderr_stream, "write"):
         handlers.append(logging.StreamHandler(stderr_stream))
 
     logging.basicConfig(
@@ -99,7 +101,5 @@ def init_log(application_path):
     )
     logging.raiseExceptions = False
 
-    sys.stdout = LoggerStream('STDOUT', logging.INFO, 1, fallback_stream=stdout_stream)
-    sys.stderr = LoggerStream('STDERR', logging.ERROR, 2, fallback_stream=stderr_stream)
-
-
+    sys.stdout = LoggerStream("STDOUT", logging.INFO, 1, fallback_stream=stdout_stream)
+    sys.stderr = LoggerStream("STDERR", logging.ERROR, 2, fallback_stream=stderr_stream)

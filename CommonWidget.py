@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""一些公用的组件
-"""
+"""一些公用的组件"""
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QSlider
 
 
 class Slider(QSlider):
     """通用的滚动条"""
+
     value = Signal(int)
 
     def __init__(self, value=100):

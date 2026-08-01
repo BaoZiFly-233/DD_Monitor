@@ -15,38 +15,35 @@ class checkUpdate(QThread):
 
     def run(self):
         token = False
-        infos = ''
+        infos = ""
         new_version = ()
         try:
-            html = http_utils.get(
-                r'https://github.com/BaoZiFly-233/DD_Monitor/releases',
-                timeout=5
-            )
+            html = http_utils.get(r"https://github.com/BaoZiFly-233/DD_Monitor/releases", timeout=5)
         except Exception:
             return
-        for line in html.text.split('\n'):
-            if 'DD监控室' in line and 'class="title"' in line:
+        for line in html.text.split("\n"):
+            if "DD监控室" in line and 'class="title"' in line:
                 link, version = line.split('">')
-                link = 'https://gitee.com/' + link.split('href="/')[1]
-                version_str = version.split('室')[1].split('<')[0].strip()
+                link = "https://gitee.com/" + link.split('href="/')[1]
+                version_str = version.split("室")[1].split("<")[0].strip()
                 # 提取版本号中的数字部分（如 "2.16应急版" -> "2.16"）
-                match = re.search(r'[\d.]+', version_str)
+                match = re.search(r"[\d.]+", version_str)
                 if not match:
                     return
                 new_version = parse_version(match.group())
                 if new_version > self.version:
                     token = True
-            if '<p>' in line:
-                l = line.split('>')
+            if "<p>" in line:
+                l = line.split(">")
                 for i in l:
-                    if ';' in i:
-                        i = i.split(';')[1]
-                    if '<' in i:
-                        i = i.split('<')[0]
+                    if ";" in i:
+                        i = i.split(";")[1]
+                    if "<" in i:
+                        i = i.split("<")[0]
                     i = i.strip()
                     if i:
-                        infos += i + '\n'
-            if 'committed-info' in line:
+                        infos += i + "\n"
+            if "committed-info" in line:
                 break
         if token:
             self.update.emit(link, new_version, infos)
@@ -57,26 +54,26 @@ class updateReminder(QWidget):
 
     def __init__(self):
         super(updateReminder, self).__init__()
-        self.link = ''
+        self.link = ""
         self.resize(600, 400)
-        self.setWindowTitle('检查版本')
+        self.setWindowTitle("检查版本")
         self.layout = QGridLayout()
         self.setLayout(self.layout)
-        label = QLabel('检测到新版本 是否前往下载？')
+        label = QLabel("检测到新版本 是否前往下载？")
         label.setAlignment(Qt.AlignCenter)
         self.layout.addWidget(label, 0, 0, 1, 3)
 
         self.updateInfo = QTextBrowser()
         self.layout.addWidget(self.updateInfo, 1, 0, 3, 3)
 
-        noMoreButton = QPushButton('不再提示')
+        noMoreButton = QPushButton("不再提示")
         noMoreButton.clicked.connect(self.noMoreSignal.emit)
         noMoreButton.clicked.connect(self.close)
         self.layout.addWidget(noMoreButton, 4, 0, 1, 1)
-        noButton = QPushButton('否')
+        noButton = QPushButton("否")
         noButton.clicked.connect(self.close)
         self.layout.addWidget(noButton, 4, 1, 1, 1)
-        yesButton = QPushButton('是')
+        yesButton = QPushButton("是")
         yesButton.clicked.connect(self.openURL)
         yesButton.clicked.connect(self.close)
         self.layout.addWidget(yesButton, 4, 2, 1, 1)

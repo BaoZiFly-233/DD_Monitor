@@ -241,12 +241,14 @@ class _BaseFixedLayout:
 
         for y in self._candidate_positions(height):
             if self._can_place(y, height):
-                self._tracks.append(FixedTrack(
-                    y=float(y),
-                    height=height,
-                    start_time=now,
-                    duration=float(duration),
-                ))
+                self._tracks.append(
+                    FixedTrack(
+                        y=float(y),
+                        height=height,
+                        start_time=now,
+                        duration=float(duration),
+                    )
+                )
                 x = max(0.0, (self._width - width) / 2.0)
                 return FixedPlacement(x=x, y=float(y), duration=float(duration))
         return None
@@ -254,14 +256,14 @@ class _BaseFixedLayout:
     def _candidate_positions(self, height):
         top = float(self._metrics.top_padding)
         bottom = float(self._metrics.top_padding + self.usable_height)
-        if self._anchor == 'bottom':
+        if self._anchor == "bottom":
             bottom = max(top, bottom - float(self._bottom_guard))
         if bottom - top < height:
             return []
 
         step = max(1.0, height + self._metrics.lane_gap)
         positions = []
-        if self._anchor == 'top':
+        if self._anchor == "top":
             current = top
             while current + height <= bottom:
                 positions.append(current)
@@ -290,9 +292,9 @@ class _BaseFixedLayout:
 
 class TopLayout(_BaseFixedLayout):
     def __init__(self):
-        super().__init__('top')
+        super().__init__("top")
 
 
 class BottomLayout(_BaseFixedLayout):
     def __init__(self):
-        super().__init__('bottom')
+        super().__init__("bottom")

@@ -71,7 +71,7 @@ class MpvGLWidget(QOpenGLWidget):
         if current_context is not None:
             surface_format = current_context.format()
             logging.info(
-                'MpvGLWidget OpenGL 上下文: isGLES=%s version=%s.%s profile=%s dpr=%.2f',
+                "MpvGLWidget OpenGL 上下文: isGLES=%s version=%s.%s profile=%s dpr=%.2f",
                 current_context.isOpenGLES(),
                 surface_format.majorVersion(),
                 surface_format.minorVersion(),
@@ -102,10 +102,10 @@ class MpvGLWidget(QOpenGLWidget):
         if self._render_context is not None and self._playback_active:
             self._render_context.render(
                 opengl_fbo={
-                    'w': pixel_width,
-                    'h': pixel_height,
-                    'fbo': int(self.defaultFramebufferObject()),
-                    'internal_format': 0,
+                    "w": pixel_width,
+                    "h": pixel_height,
+                    "fbo": int(self.defaultFramebufferObject()),
+                    "internal_format": 0,
                 },
                 flip_y=True,
             )
@@ -124,13 +124,14 @@ class MpvGLWidget(QOpenGLWidget):
         if current_context is None:
             return
         import mpv
+
         if self._proc_addr_cb is None:
             self._proc_addr_cb = mpv.MpvGlGetProcAddressFn(self._get_proc_address)
         try:
             self._render_context = mpv.MpvRenderContext(
                 self._mpv,
-                'opengl',
-                opengl_init_params={'get_proc_address': self._proc_addr_cb},
+                "opengl",
+                opengl_init_params={"get_proc_address": self._proc_addr_cb},
                 advanced_control=False,
             )
             self._render_context.update_cb = self._on_mpv_update
@@ -167,7 +168,7 @@ class MpvGLWidget(QOpenGLWidget):
         if self._update_scheduled:
             return
         self._update_scheduled = True
-        QMetaObject.invokeMethod(self, '_triggerUpdate', Qt.QueuedConnection)
+        QMetaObject.invokeMethod(self, "_triggerUpdate", Qt.QueuedConnection)
 
     @Slot()
     def _on_frame_swapped(self):
@@ -176,7 +177,7 @@ class MpvGLWidget(QOpenGLWidget):
         try:
             self._render_context.report_swap()
         except Exception:
-            logging.debug('MpvGLWidget report_swap 调用失败', exc_info=True)
+            logging.debug("MpvGLWidget report_swap 调用失败", exc_info=True)
 
     def _schedule_danmaku_updates(self):
         if self._danmaku_renderer is not None and self._danmaku_renderer.hasActiveDanmaku():

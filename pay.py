@@ -1,14 +1,16 @@
 """
 赞助页弹窗
 """
+
 import http_utils
-from PySide6.QtWidgets import * 	# QAction,QFileDialog
-from PySide6.QtGui import *		# QIcon,QPixmap
-from PySide6.QtCore import * 		# QSize
+from PySide6.QtWidgets import *  # QAction,QFileDialog
+from PySide6.QtGui import *  # QIcon,QPixmap
+from PySide6.QtCore import *  # QSize
 
 
 class DownloadImage(QThread):
     """下载图片 - 二维码（线程安全：QImage 传递，主线程转 QPixmap）"""
+
     img = Signal(QPixmap)
     _imgReady = Signal(QImage)
 
@@ -18,7 +20,7 @@ class DownloadImage(QThread):
 
     def run(self):
         try:
-            r = http_utils.get(r'https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png')
+            r = http_utils.get(r"https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png")
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self._imgReady.emit(qimage)
@@ -32,6 +34,7 @@ class DownloadImage(QThread):
 
 class thankToBoss(QThread):
     """获取感谢名单"""
+
     bossList = Signal(list)
 
     def __init__(self, parent=None):
@@ -39,35 +42,36 @@ class thankToBoss(QThread):
 
     def run(self):
         try:
-            response = http_utils.get(r'https://github.com/jiafangjun/DD_KaoRou2/blob/master/感谢石油王.csv')
+            response = http_utils.get(r"https://github.com/jiafangjun/DD_KaoRou2/blob/master/感谢石油王.csv")
             bossList = []
-            html = response.text.split('\n')
+            html = response.text.split("\n")
             for cnt, line in enumerate(html):
-                if 'RMB<' in line:
-                    boss = html[cnt - 1].split('>')[1].split('<')[0]
-                    rmb = line.split('>')[1].split('<')[0]
+                if "RMB<" in line:
+                    boss = html[cnt - 1].split(">")[1].split("<")[0]
+                    rmb = line.split(">")[1].split("<")[0]
                     bossList.append([boss, rmb])
             if bossList:
                 self.bossList.emit(bossList)
             else:
-                self.bossList.emit([['名单列表获取失败', '']])
+                self.bossList.emit([["名单列表获取失败", ""]])
         except Exception as e:
             print(str(e))
 
 
 class pay(QDialog):
     """投喂弹窗"""
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('赞助和支持')
+        self.setWindowTitle("赞助和支持")
         self.resize(564, 500)
         layout = QGridLayout()
         self.setLayout(layout)
-        txt = u'DD监控室由B站up：神君Channel 业余时间独立开发制作。\n\
+        txt = "DD监控室由B站up：神君Channel 业余时间独立开发制作。\n\
 \n本魔改版由 BaoZi_Fly 维护：https://space.bilibili.com/34094740\n\
 \n所有功能全部永久免费给广大DD使用\n\
 \n有独立经济来源的老板们如觉得监控室好用的话，不妨小小支持亿下\n\
-\n一元也是对我继续更新监控室的莫大鼓励。十分感谢！\n'
+\n一元也是对我继续更新监控室的莫大鼓励。十分感谢！\n"
         label = QLabel(txt)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         label.setAlignment(Qt.AlignCenter)
@@ -82,9 +86,9 @@ class pay(QDialog):
         self.bossTable.setColumnCount(2)
         for i in range(2):
             self.bossTable.setColumnWidth(i, 105)
-        self.bossTable.setHorizontalHeaderLabels(['石油王', '投喂了'])
-        self.bossTable.setItem(0, 0, QTableWidgetItem('石油王鸣谢名单'))
-        self.bossTable.setItem(0, 1, QTableWidgetItem('正在获取...'))
+        self.bossTable.setHorizontalHeaderLabels(["石油王", "投喂了"])
+        self.bossTable.setItem(0, 0, QTableWidgetItem("石油王鸣谢名单"))
+        self.bossTable.setItem(0, 1, QTableWidgetItem("正在获取..."))
         layout.addWidget(self.bossTable, 1, 1, 1, 1)
 
         self.getQR = DownloadImage()
@@ -111,7 +115,7 @@ class pay(QDialog):
                 bossNum = None
                 for cnt, i in enumerate(bossList):
                     try:
-                        money = float(str(i[1]).split(' ')[0])
+                        money = float(str(i[1]).split(" ")[0])
                     except (ValueError, IndexError):
                         money = 0.0
                     if money > sc:
@@ -129,4 +133,4 @@ class pay(QDialog):
                 self.bossTable.setItem(y + 3, 1, QTableWidgetItem(i[1]))
                 self.bossTable.item(y + 3, 0).setTextAlignment(Qt.AlignCenter)
                 self.bossTable.item(y + 3, 1).setTextAlignment(Qt.AlignCenter)
-            self.bossTable.setHorizontalHeaderLabels(['石油王', '投喂了'])
+            self.bossTable.setHorizontalHeaderLabels(["石油王", "投喂了"])
