@@ -121,6 +121,7 @@ class GetStreamURL(QThread):
         self.sessionData = sessionData if sessionData else ""
         self.credential = normalize_credential_data(sessdata=self.sessionData)
         self.recordToken = False
+        self._stream_candidates = []  # 切换 CDN 菜单的候选流列表，播放前为空
         self._preferredCdnHost = ""  # CDN 优选：记录上次稳定播放的 CDN
 
     def markCdnGood(self, url):
@@ -179,7 +180,12 @@ class GetStreamURL(QThread):
 
     def run(self):
         try:
+            if not self.recordToken:
+                return
             urls = self.getStreamUrl()
+            if not self.recordToken:
+                logging.info("停止请求已发出，丢弃获取到的流地址")
+                return
             self.streamUrl.emit(urls)
         except Exception as e:
             logging.error(str(e))
@@ -846,14 +852,15 @@ class VideoWidget(QFrame):
                         self._idleStreak = 0
                         return
                     self.retryTimes += 1
-                    if self.retryTimes > 4:  # 4×3s=12s 后重载
-                        self._idleStreak = 0
-                        self.mediaReload()
-                    if self.retryTimes > 8 and self.quality > 80:
+                    if self.retryTimes > 8 and self.quality > 80:  # 24s 后降画质重载
                         old_q = self.quality
                         self.quality = self._nextLowerQuality(self.quality)
                         logging.warning("%s 自适应画质: %s -> %s", self.name_str, old_q, self.quality)
                         self.retryTimes = 0
+                        self._idleStreak = 0
+                        self.mediaReload()
+                    elif self.retryTimes > 4:  # 4×3s=12s 后原画质重载
+                        # 用 elif 避免同一 tick 先原画质 reload 再降画质 reload 的重复请求
                         self._idleStreak = 0
                         self.mediaReload()
                 else:
@@ -1358,6 +1365,11 @@ class VideoWidget(QFrame):
 
     def setMedia(self, url):
         """接收直播流 - MPV 播放 URL 入口"""
+        # 停止后迟到的流地址直接丢弃：mediaStop 置 roomID="0" 且 recordToken=False，
+        # 但 getMediaURL 线程不响应中断（阻塞在 HTTP 请求中），完成后仍会 emit
+        if self.roomID == "0" or not self.getMediaURL.recordToken:
+            logging.info("%s 已停止，忽略迟到的流地址", self.name_str)
+            return
         stream_candidates = url if isinstance(url, (list, tuple)) else [url]
         self._stream_candidates = [
             stream.strip()

@@ -185,7 +185,12 @@ class WebSocketClientBase:
             logger.warning('room=%s client is stopped, cannot join()', self.room_id)
             return
 
-        await asyncio.shield(self._network_future)
+        # stop() 已 cancel 网络任务，此处 shield 必然抛 CancelledError ——
+        # 属正常停止路径，不是错误（上游新版已做同样处理）
+        try:
+            await asyncio.shield(self._network_future)
+        except asyncio.CancelledError:
+            pass
 
     async def close(self):
         """

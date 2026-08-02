@@ -1245,7 +1245,10 @@ class MainWindow(QMainWindow):
 
     def setCache(self, setting):
         maxCache, savePath = setting
-        intergerMaxCache = int(maxCache)
+        try:
+            intergerMaxCache = int(maxCache or "0")
+        except (TypeError, ValueError):  # 空输入/非法字符：按 0 处理并提示
+            intergerMaxCache = 0
         if intergerMaxCache <= 0:
             QMessageBox.warning(self, "大小错误", "缓存大小不能小于为0GB!", QMessageBox.Ok)
             return
@@ -1328,6 +1331,7 @@ class MainWindow(QMainWindow):
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
             videoWidget.mediaStop(deleteMedia=False)  # 不要清除播放窗记录
+            videoWidget.getMediaURL.wait(3000)  # 等待流获取线程退出，避免退出时析构崩溃
             videoWidget.close()
         self.saveDockLayout()
         self.configManager.save_now()
