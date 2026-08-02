@@ -14,39 +14,35 @@ class checkUpdate(QThread):
         self.version = version
 
     def run(self):
-        token = False
-        infos = ""
-        new_version = ()
+        """通过 GitHub API 检查最新版本
+
+        旧实现解析 GitHub releases 网页 HTML，存在三个失效点：
+        - release 标题实际是 "DDMonitor"（英文），"DD监控室" 条件永不命中，检查静默失效
+        - 解析出的相对链接拼到 gitee.com 域名，点"是"打开的地址与实际发布页不符
+        - 解析循环在 try 之外，异常直接抛出使更新检查无提示失败
+        改用 releases/latest API（JSON），链接/版本/更新说明一次拿全。
+        """
         try:
-            html = http_utils.get(r"https://github.com/BaoZiFly-233/DD_Monitor/releases", timeout=5)
+            resp = http_utils.get(
+                r"https://api.github.com/repos/BaoZiFly-233/DD_Monitor/releases/latest",
+                timeout=5,
+            )
+            data = resp.json()
+            if not data or not isinstance(data, dict):
+                return
+            tag = data.get("tag_name", "")
+            match = re.search(r"[\d.]+", tag)
+            if not match:
+                return
+            new_version = parse_version(match.group())
+            if new_version > self.version:
+                self.update.emit(
+                    data.get("html_url", ""),
+                    new_version,
+                    data.get("body", "") or "",
+                )
         except Exception:
             return
-        for line in html.text.split("\n"):
-            if "DD监控室" in line and 'class="title"' in line:
-                link, version = line.split('">')
-                link = "https://gitee.com/" + link.split('href="/')[1]
-                version_str = version.split("室")[1].split("<")[0].strip()
-                # 提取版本号中的数字部分（如 "2.16应急版" -> "2.16"）
-                match = re.search(r"[\d.]+", version_str)
-                if not match:
-                    return
-                new_version = parse_version(match.group())
-                if new_version > self.version:
-                    token = True
-            if "<p>" in line:
-                l = line.split(">")
-                for i in l:
-                    if ";" in i:
-                        i = i.split(";")[1]
-                    if "<" in i:
-                        i = i.split("<")[0]
-                    i = i.strip()
-                    if i:
-                        infos += i + "\n"
-            if "committed-info" in line:
-                break
-        if token:
-            self.update.emit(link, new_version, infos)
 
 
 class updateReminder(QWidget):

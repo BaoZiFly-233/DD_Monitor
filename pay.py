@@ -20,7 +20,10 @@ class DownloadImage(QThread):
 
     def run(self):
         try:
-            r = http_utils.get(r"https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png")
+            r = http_utils.get(
+                r"https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png",
+                timeout=5,
+            )
             qimage = QImage.fromData(r.content)
             if not qimage.isNull():
                 self._imgReady.emit(qimage)
@@ -42,7 +45,9 @@ class thankToBoss(QThread):
 
     def run(self):
         try:
-            response = http_utils.get(r"https://github.com/jiafangjun/DD_KaoRou2/blob/master/感谢石油王.csv")
+            response = http_utils.get(
+                r"https://github.com/jiafangjun/DD_KaoRou2/blob/master/感谢石油王.csv", timeout=5
+            )
             bossList = []
             html = response.text.split("\n")
             for cnt, line in enumerate(html):
@@ -97,7 +102,7 @@ class pay(QDialog):
 
         self.thankToBoss = thankToBoss()
         self.thankToBoss.bossList.connect(self.updateBossList)
-        # self.thankToBoss.start()
+        self.thankToBoss.start()  # 启动获取感谢名单（此前被注释，名单永远停在"正在获取..."）
 
     def updateQR(self, img):
         self.QR.setPixmap(img)
@@ -106,6 +111,9 @@ class pay(QDialog):
         self.bossTable.clear()
         self.bossTable.setColumnCount(2)
         self.bossTable.setRowCount(len(bossList))
+        # 表头必须在 clear() 之后重设，且不依赖名单长度
+        # （原实现只在 len>=3 分支重设表头，名单不足 3 人时表头被清空）
+        self.bossTable.setHorizontalHeaderLabels(["石油王", "投喂了"])
         if len(bossList) >= 3:
             biggestBossList = []
             for _ in range(3):
@@ -133,4 +141,12 @@ class pay(QDialog):
                 self.bossTable.setItem(y + 3, 1, QTableWidgetItem(i[1]))
                 self.bossTable.item(y + 3, 0).setTextAlignment(Qt.AlignCenter)
                 self.bossTable.item(y + 3, 1).setTextAlignment(Qt.AlignCenter)
-            self.bossTable.setHorizontalHeaderLabels(["石油王", "投喂了"])
+
+    def closeEvent(self, event):
+        """关闭赞助窗时等待后台下载线程退出，避免运行中的 QThread 随对话框析构崩溃"""
+        for thread in (getattr(self, "getQR", None), getattr(self, "thankToBoss", None)):
+            if thread is not None and thread.isRunning():
+                # 线程内请求已限制 timeout=5，6s 等待必然覆盖；
+                # 正常网络下 1-2s 即可完成，不会阻塞关闭
+                thread.wait(6000)
+        super().closeEvent(event)
