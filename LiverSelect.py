@@ -726,6 +726,7 @@ class DownloadVTBList(QThread):
         super(DownloadVTBList, self).__init__(parent)
 
     def run(self):
+        vtbList = []
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36"
@@ -733,19 +734,20 @@ class DownloadVTBList(QThread):
             r = http_utils.get(
                 r"https://raw.githubusercontent.com/BaoZiFly-233/DD_Monitor/master/utils/vtb.csv", headers=headers
             )
-            # r.encoding = 'utf8'
-            vtbList = []
-            html = r.text.split("\n")
-            for cnt, line in enumerate(html):
-                if "blob-num js-line-number" in line:
-                    vtbID = html[cnt + 1].split(">")[1].split("<")[0]
-                    roomID = html[cnt + 2].split(">")[1].split("<")[0]
-                    haco = html[cnt + 3].split(">")[1].split("<")[0]
-                    vtbList.append("%s,%s,%s\n" % (vtbID, roomID, haco))
-            if vtbList:
-                self.vtbList.emit(vtbList)
+            # raw URL 返回纯 CSV 文本（每行: 主播名,房号,所属），
+            # 旧解析按 blob 页面 HTML 行号标记 split(">")，对 raw 内容永不命中 -> 名单恒空
+            for line in r.text.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                if len(parts) >= 3 and parts[1].isdigit():
+                    vtbList.append("%s,%s,%s\n" % (parts[0], parts[1], parts[2]))
         except Exception:
             logging.exception("vtbs 列表获取失败")
+        # 无论成功失败都发射信号：空列表让 UI 走"更新失败"并恢复按钮，
+        # 避免信号永不发射导致"更新中..."按钮永久卡死且 clicked 断开
+        self.vtbList.emit(vtbList)
 
 
 class HotLiverTable(QTableWidget):
@@ -956,6 +958,8 @@ class AddLiverRoomWidget(QWidget):
         if self.getFollows.isRunning():
             self.getFollows.quit()
             self.getFollows.wait(2000)
+        if getattr(self, "downloadVTBList", None) and self.downloadVTBList.isRunning():
+            self.downloadVTBList.wait(2000)  # 等待 VTB 名单下载线程退出，避免析构崩溃
 
     def collectHotLiverChunk(self, page, hotLiverList):
         self.hotLiverDict[page] = hotLiverList
@@ -1023,6 +1027,9 @@ class AddLiverRoomWidget(QWidget):
 
     def collectVTBList(self, vtbList):
         try:
+            if not vtbList:
+                QMessageBox.information(self, "更新VUP名单", "更新失败 请检查网络", QMessageBox.Ok)
+                return
             with open(os.path.join(self.application_path, "utils/vtb.csv"), "w", encoding="utf-8") as vtbs:
                 for line in vtbList:
                     vtbs.write(line)
@@ -1042,8 +1049,10 @@ class AddLiverRoomWidget(QWidget):
         except Exception:
             logging.exception("vtb.csv 写入失败")
             QMessageBox.information(self, "更新VUP名单", "更新失败 请检查网络", QMessageBox.Ok)
-        self.refreshButton.setText("更新名单")
-        self.refreshButton.clicked.connect(self.refreshHacoList)
+        finally:
+            # 恢复按钮状态与连接（无论成功/失败/空名单）
+            self.refreshButton.setText("更新名单")
+            self.refreshButton.clicked.connect(self.refreshHacoList)
 
     def sendSelectedRoom(self):
         self.closeEvent(None)

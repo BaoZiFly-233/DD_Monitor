@@ -928,8 +928,11 @@ class VideoWidget(QFrame):
             self.moveTimer.stop()
             return
         videoPos = self.mapToGlobal(self.videoFrame.pos())
-        if self.textBrowser.pos() != videoPos:
-            self.textBrowser.move(videoPos)
+        # 保留用户拖动过的偏移：moveEvent 用 videoPos + textPosDelta 跟随主窗口，
+        # 此处若直接 move(videoPos) 会把弹幕机吸回视频左上角，与 moveEvent 矛盾
+        target = videoPos + self.textPosDelta
+        if self.textBrowser.pos() != target:
+            self.textBrowser.move(target)
         else:
             self.moveTimer.stop()
 

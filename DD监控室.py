@@ -672,6 +672,10 @@ class MainWindow(QMainWindow):
 
     def exchangeMedia(self, info):  # 交换播放窗口的函数
         fromID, fromRoomID, toID, toRoomID = info  # 交换数据
+        # 防御：悬浮窗(id=16..31)的拖放交换不涉及主窗口列表，直接忽略
+        if not (0 <= fromID < MAX_WINDOWS) or not (0 <= toID < MAX_WINDOWS):
+            logging.warning("exchangeMedia 忽略越界 id: from=%s to=%s", fromID, toID)
+            return
         # 待交换的两个控件
         fromVideo, toVideo = self.videoWidgetList[fromID], self.videoWidgetList[toID]
         fromVideo.id, toVideo.id = toID, fromID  # 交换id
@@ -791,16 +795,22 @@ class MainWindow(QMainWindow):
 
     def setTranslator(self, info):
         id, token = info  # 窗口 同传显示布尔值
+        if not (0 <= id < MAX_WINDOWS):  # 防御：悬浮窗(id=16..31)设置不写入主窗口 config
+            return
         self.config["translator"][id] = token
         self.configManager.save()
 
     def setQuality(self, info):
         id, quality = info  # 窗口 画质
+        if not (0 <= id < MAX_WINDOWS):
+            return
         self.config["quality"][id] = quality
         self.configManager.save()
 
     def setAudioChannel(self, info):
         id, audioChannel = info  # 窗口 音效
+        if not (0 <= id < MAX_WINDOWS):
+            return
         self.config["audioChannel"][id] = audioChannel
         self.configManager.save()
 
@@ -821,11 +831,15 @@ class MainWindow(QMainWindow):
 
     def mutedChanged(self, mutedInfo):
         id, muted = mutedInfo
+        if not (0 <= id < MAX_WINDOWS):  # 防御：悬浮窗音量操作不写入主窗口 config
+            return
         token = 2 if muted else 1
         self.config["muted"][id] = token
 
     def volumeChanged(self, volumeInfo):
         id, value = volumeInfo
+        if not (0 <= id < MAX_WINDOWS):
+            return
         self.config["volume"][id] = value
 
     def globalMediaPlay(self):
