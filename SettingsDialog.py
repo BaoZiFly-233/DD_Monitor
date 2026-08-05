@@ -19,10 +19,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QFileDialog,
     QGroupBox,
-    QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal
 from CommonWidget import Slider
+from config_manager import MAX_WINDOWS
 
 
 class SettingsDialog(QDialog):
@@ -290,13 +289,13 @@ class SettingsDialog(QDialog):
         # 播放
         quality_map = [10000, 400, 250, 80, -1]
         quality = quality_map[self.qualityCombo.currentIndex()]
-        cfg["quality"] = [quality] * 16
+        cfg["quality"] = [quality] * MAX_WINDOWS
         cfg["hardwareDecode"] = self.decodeCombo.currentIndex() == 0
-        cfg["audioChannel"] = [0 if self.audioCombo.currentIndex() == 0 else 5] * 16
+        cfg["audioChannel"] = [0 if self.audioCombo.currentIndex() == 0 else 5] * MAX_WINDOWS
         cfg["globalVolume"] = self.volumeSlider.value()
 
         # 弹幕窗
-        for i in range(16):
+        for i in range(MAX_WINDOWS):
             danmu = cfg["danmu"][i]
             danmu[1] = self.browserOpacity.value()
             danmu[2] = self.browserHori.currentIndex()

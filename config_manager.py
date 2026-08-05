@@ -14,7 +14,8 @@ from PySide6.QtCore import QObject, QTimer
 # 常量
 MAX_WINDOWS = 16
 WINDOW_CARD_WIDTH = 169
-from danmu import DISPLAY_RATIOS  # 弹幕显示比例（定义在 danmu.py 中）
+# 弹幕显示比例（定义在 danmu.py 中，此处重导出以便旧代码 from config_manager import DISPLAY_RATIOS）
+from danmu import DISPLAY_RATIOS  # noqa: E402,F401
 
 # 弹幕配置默认值 (兼容旧 list 格式)
 DEFAULT_DANMU_CONFIG = [True, 50, 1, 7, 0, "【 [ {", 10, 0, True]
@@ -185,6 +186,7 @@ class ConfigManager(QObject):
     def save(self, immediate=False):
         """触发保存（默认去抖动 500ms）。immediate=True 立即写入。"""
         if immediate:
+            self._dirty = True  # 确保立即保存即使此前无修改标记也写入
             self._flush()
             return
         if not self._dirty:

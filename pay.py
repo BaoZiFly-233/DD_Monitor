@@ -2,37 +2,19 @@
 赞助页弹窗
 """
 
+import logging
+
 import http_utils
-from PySide6.QtWidgets import *  # QAction,QFileDialog
-from PySide6.QtGui import *  # QIcon,QPixmap
-from PySide6.QtCore import *  # QSize
-
-
-class DownloadImage(QThread):
-    """下载图片 - 二维码（线程安全：QImage 传递，主线程转 QPixmap）"""
-
-    img = Signal(QPixmap)
-    _imgReady = Signal(QImage)
-
-    def __init__(self):
-        super(DownloadImage, self).__init__()
-        self._imgReady.connect(self._onImageReady)
-
-    def run(self):
-        try:
-            r = http_utils.get(
-                r"https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png",
-                timeout=5,
-            )
-            qimage = QImage.fromData(r.content)
-            if not qimage.isNull():
-                self._imgReady.emit(qimage)
-        except Exception as e:
-            print(str(e))
-
-    def _onImageReady(self, qimage):
-        """主线程回调"""
-        self.img.emit(QPixmap.fromImage(qimage))
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QGridLayout,
+    QLabel,
+    QTableWidget,
+    QTableWidgetItem,
+)
+from PySide6.QtCore import Qt, QThread, Signal
+from CommonWidget import DownloadImage  # 公共图片下载线程
 
 
 class thankToBoss(QThread):
@@ -60,7 +42,7 @@ class thankToBoss(QThread):
             else:
                 self.bossList.emit([["名单列表获取失败", ""]])
         except Exception as e:
-            print(str(e))
+            logging.error(str(e))
 
 
 class pay(QDialog):
@@ -97,7 +79,8 @@ class pay(QDialog):
         layout.addWidget(self.bossTable, 1, 1, 1, 1)
 
         self.getQR = DownloadImage()
-        self.getQR.img.connect(self.updateQR)
+        self.getQR.setUrl(r"https://i0.hdslb.com/bfs/album/a4d2644425634cb8568570b77f4ba45f2b84fe67.png")
+        self.getQR.img_origin.connect(self.updateQR)  # 用原图展示，避免缩放失真
         self.getQR.start()
 
         self.thankToBoss = thankToBoss()

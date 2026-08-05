@@ -31,7 +31,6 @@ if sys.platform == "win32":
 
     ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)
 
-import json
 import shutil
 import logging
 import platform
@@ -56,7 +55,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import (
     QAction,
-    QCloseEvent,
     QCursor,
     QDesktopServices,
     QFont,
@@ -64,14 +62,10 @@ from PySide6.QtGui import (
     QHideEvent,
     QIcon,
     QIntValidator,
-    QKeyEvent,
-    QMouseEvent,
-    QMoveEvent,
     QPixmap,
-    QResizeEvent,
     QShowEvent,
 )
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QByteArray, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
 from LayoutPanel import LayoutSettingPanel
 from VideoWidget_mpv import PushButton, Slider, VideoWidget, load_mpv_module
 from LiverSelect import LiverPanel
@@ -132,7 +126,7 @@ class ScrollArea(QScrollArea):
 
     def __init__(self):
         super(ScrollArea, self).__init__()
-        self.multiple = self.width() // 169
+        self.multiple = self.width() // WINDOW_CARD_WIDTH
         self.horizontalScrollBar().setVisible(False)
 
     def sizeHint(self):
@@ -159,7 +153,7 @@ class ScrollArea(QScrollArea):
             self.verticalScrollBar().setValue(value - 80)
 
     def resizeEvent(self, QResizeEvent):
-        multiple = self.width() // 169
+        multiple = self.width() // WINDOW_CARD_WIDTH
         if multiple and multiple != self.multiple:  # 按卡片长度的倍数调整且不为0
             self.multiple = multiple
             self.multipleTimes.emit(multiple)
@@ -394,7 +388,7 @@ class MainWindow(QMainWindow):
             self._connectVideoWidget(self.videoWidgetList[i])
             # 不在循环内调 processEvents — 见 login.py thread.wait 注释
             logging.info(f"播放器设置完毕 {i + 1} / 16")
-        app.processEvents()
+        QApplication.instance().processEvents()  # 刷新启动画面进度（勿用模块级 app 变量）
         # 延迟创建 OpenGL 上下文，避免 16 个同时初始化导致栈溢出
         QTimer.singleShot(0, self.setPlayer)
 
@@ -435,7 +429,7 @@ class MainWindow(QMainWindow):
         # 全局音量滑条
         self.slider = Slider()
         self.slider.setValue(self.config["globalVolume"])
-        self.slider.value.connect(self.globalSetVolume)
+        self.slider.sliderValue.connect(self.globalSetVolume)
         self.controlBarLayout.addWidget(self.slider, 1, 1, 1, 3)
         progressText.setText("设置播放器控制...")
 
@@ -553,6 +547,11 @@ class MainWindow(QMainWindow):
         self.mouseTrackTimer = QTimer(self)
         self.mouseTrackTimer.timeout.connect(self.checkMousePos)
         self.mouseTrackTimer.start(200)  # 0.2s检测一次（降低开销）
+        # moveEvent 防抖：停止移动后 200ms 再更新弹幕基准视口
+        self._viewport_debounce = QTimer(self)
+        self._viewport_debounce.setSingleShot(True)
+        self._viewport_debounce.setInterval(200)
+        self._viewport_debounce.timeout.connect(self._onViewportDebounced)
         progressText.setText("设置UI...")
         self.checkDanmmuProvider = CheckDanmmuProvider()
         self.checkDanmmuProvider.start()
@@ -697,8 +696,8 @@ class MainWindow(QMainWindow):
 
             fromVideo.textSetting, toVideo.textSetting = toVideo.textSetting, fromVideo.textSetting  # 交换弹幕设置
             for videoWidget in [fromVideo, toVideo]:
-                videoWidget.horiPercent = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][videoWidget.textSetting[2]]
-                videoWidget.vertPercent = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][videoWidget.textSetting[3]]
+                videoWidget.horiPercent = DISPLAY_RATIOS[videoWidget.textSetting[2]]
+                videoWidget.vertPercent = DISPLAY_RATIOS[videoWidget.textSetting[3]]
                 videoWidget.filters = videoWidget.textSetting[5].split(" ")
                 videoWidget.applyDanmuSettings()
 
@@ -766,14 +765,14 @@ class MainWindow(QMainWindow):
         # 连接信号
         browser = panel.browserOptionWidget
         rolling = panel.rollingOptionWidget
-        browser.opacitySlider.value.connect(self.setGlobalDanmuOpacity)
+        browser.opacitySlider.sliderValue.connect(self.setGlobalDanmuOpacity)
         browser.horizontalCombobox.currentIndexChanged.connect(self.setGlobalHorizontalPercent)
         browser.verticalCombobox.currentIndexChanged.connect(self.setGlobalVerticalPercent)
         browser.translateCombobox.currentIndexChanged.connect(self.setGlobalTranslateBrowser)
         browser.showEnterRoom.currentIndexChanged.connect(self.setGlobalShowEnterRoom)
         browser.translateFitler.textChanged.connect(self.setGlobalTranslateFilter)
         browser.fontSizeCombox.currentIndexChanged.connect(self.setGlobalFontSize)
-        rolling.opacitySlider.value.connect(self.setGlobalRollingDanmuOpacity)
+        rolling.opacitySlider.sliderValue.connect(self.setGlobalRollingDanmuOpacity)
         rolling.displayAreaCombobox.currentIndexChanged.connect(self.setGlobalRollingDanmuDisplayArea)
         rolling.fontSizeCombox.currentIndexChanged.connect(self.setGlobalRollingDanmuFontSize)
         rolling.fontFamilyCombobox.currentTextChanged.connect(self.setGlobalRollingDanmuFontFamily)
@@ -992,16 +991,18 @@ class MainWindow(QMainWindow):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.set_audio_channel(audioChannel)
         self.config["audioChannel"] = [audioChannel] * 16
-        # self.configManager.save()
+        self.configManager.save()
 
     def setDecode(self, hardwareDecodeToken):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.hardwareDecode = hardwareDecodeToken
         self.globalMediaReload()
         self.config["hardwareDecode"] = hardwareDecodeToken
+        self.configManager.save()
 
     def setStartLive(self, token):
         self.config["showStartLive"] = token
+        self.configManager.save()
 
     def openControlPanel(self):
         if self.controlDock.isHidden() and self.cardDock.isHidden():
@@ -1283,7 +1284,9 @@ class MainWindow(QMainWindow):
             self._pay = pay()
         self._pay.hide()
         self._pay.show()
-        self._pay.thankToBoss.start()
+        # 线程未运行才启动，避免重复 start 警告
+        if not self._pay.thankToBoss.isRunning():
+            self._pay.thankToBoss.start()
 
     def checkMousePos(self):
         newMousePos = QCursor.pos()
@@ -1296,23 +1299,25 @@ class MainWindow(QMainWindow):
         elif self.hideMouseCnt == 0:
             self.hideMouseCnt = -1  # 标记已隐藏，避免重复操作
             self.setCursor(Qt.BlankCursor)  # 计数归零隐藏鼠标
-            for videoWidget in self.videoWidgetList:
-                videoWidget.topLabel.hide()  # 隐藏播放窗口的控制条
-                videoWidget.frame.hide()
+            # 一次性遍历（含悬浮窗），隐藏所有控制条
             for videoWidget in self._iterVideoWidgets(include_popups=True):
-                if not videoWidget.top:
-                    continue
-                videoWidget.topLabel.hide()  # 隐藏悬浮窗口的控制条
+                videoWidget.topLabel.hide()  # 隐藏播放窗口的控制条
                 videoWidget.frame.hide()
 
     def moveEvent(self, event):  # 捕获主窗口moveEvent来实时同步弹幕机位置
-        self._applyDanmakuBaseViewport()
+        # 防抖：moveEvent 高频触发，_applyDanmakuBaseViewport 会遍历所有窗口并
+        # 触发 applyDanmuSettings（重操作），合并为停止移动后 200ms 执行一次
+        if not self._viewport_debounce.isActive():
+            self._viewport_debounce.start()
         for videoWidget in self.videoWidgetList:
             if videoWidget.textBrowser is None:
                 continue
             videoPos = videoWidget.mapToGlobal(videoWidget.videoFrame.pos())  # videoFrame的坐标要转成globalPos
             videoWidget.textBrowser.move(videoPos + videoWidget.textPosDelta)
             videoWidget.textPosDelta = videoWidget.textBrowser.pos() - videoPos
+
+    def _onViewportDebounced(self):
+        self._applyDanmakuBaseViewport()
 
     def hideEvent(self, e: QHideEvent) -> None:
         """主窗口隐藏：关闭、最小化
@@ -1341,11 +1346,18 @@ class MainWindow(QMainWindow):
         self.liverPanel.collectLiverInfo.stop()
         self.liverPanel.collectLiverInfo.wait(5000)
         self.loginDialog.close()
+        # 先停止所有窗口的取流线程（发停止信号），再并行等待退出，
+        # 避免串行 wait(3000) × N 窗口导致最长 48s 的退出延迟
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
             videoWidget.mediaStop(deleteMedia=False)  # 不要清除播放窗记录
-            videoWidget.getMediaURL.wait(3000)  # 等待流获取线程退出，避免退出时析构崩溃
+        _wait_threads = [vw.getMediaURL for vw in self._iterVideoWidgets(include_popups=True) if vw.getMediaURL.isRunning()]
+        if _wait_threads:
+            _waiter = threading.Thread(target=lambda: [t.wait(3000) for t in _wait_threads], daemon=True)
+            _waiter.start()
+            _waiter.join(4000)
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.close()
         self.saveDockLayout()
         self.configManager.save_now()
@@ -1516,15 +1528,17 @@ class MainWindow(QMainWindow):
 
     def setNoMore(self):
         self.config["checkUpdate"] = False
+        self.configManager.save()  # 持久化"不再提示"，否则重启后失效
 
     def updateChecker(self):
         from checkUpdate import updateReminder, checkUpdate
 
         self.updateReminder = updateReminder()
         self.updateReminder.noMoreSignal.connect(self.setNoMore)
-        self.checkUpdate = checkUpdate(self.versionNumber)
-        self.checkUpdate.update.connect(self.updateReminder._show)
-        self.checkUpdate.start()
+        # 属性名避开类名 checkUpdate，防止遮蔽模块符号
+        self._updateCheckerThread = checkUpdate(self.versionNumber)
+        self._updateCheckerThread.update.connect(self.updateReminder._show)
+        self._updateCheckerThread.start()
 
 
 # 程序入口点

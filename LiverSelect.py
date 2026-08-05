@@ -6,10 +6,38 @@ DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 import json, time, logging, os, threading
 from bilibili_api import live_area, user, sync
 from bili_credential import build_credential, normalize_credential_data
-from PySide6.QtWidgets import *  # QAction,QFileDialog
-from PySide6.QtGui import *  # QIcon,QPixmap
-from PySide6.QtCore import *  # QSize
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QToolTip,
+    QWidget,
+)
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDesktopServices,
+    QDrag,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
+from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, QUrl, Signal
 import http_utils
+from CommonWidget import DownloadImage  # 公共图片下载线程
 
 
 header = http_utils.DEFAULT_HEADERS
@@ -94,7 +122,9 @@ class CircleImage(QWidget):
             painter.drawRoundedRect(self.rect(), self.width() / 2, self.height() / 2)
 
 
-class PushButton(QPushButton):
+class TextButton(QPushButton):
+    """文字按钮（带选中态 pushToken 样式）"""
+
     def __init__(self, name, pushToken=False):
         super().__init__()
         self.setText(name)
@@ -172,7 +202,7 @@ class RecordThread(QThread):
             self.downloadTime = 0
             self.cacheVideo = open(self.savePath, "wb")
             try:
-                for chunk in download.iter_content(chunk_size=512):
+                for chunk in download.iter_content(chunk_size=1024 * 1024):  # 1MB 分块，减少磁盘 IO 次数
                     with self._lock:
                         if not self.recordToken:
                             break
@@ -184,47 +214,6 @@ class RecordThread(QThread):
                 self.cacheVideo.close()
         except Exception:
             logging.exception("下载视频到缓存失败")
-
-
-class DownloadImage(QThread):
-    """下载图片（线程安全：使用 QImage 传递，主线程转 QPixmap）"""
-
-    img = Signal(QPixmap)
-    img_origin = Signal(QPixmap)
-    _imgReady = Signal(QImage, int, int, bool)  # image, w, h, hasOrigin
-
-    def __init__(self, scaleW, scaleH, keyFrame=False):
-        super(DownloadImage, self).__init__()
-        self.W = scaleW
-        self.H = scaleH
-        self.keyFrame = keyFrame
-        self.url = ""
-        self._imgReady.connect(self._onImageReady)
-
-    def setUrl(self, url):
-        self.url = str(url or "").strip()
-
-    def run(self):
-        if not self.url:
-            return
-        try:
-            if self.W == 60:
-                r = http_utils.get(self.url + "@100w_100h.jpg", headers=header)
-            else:
-                r = http_utils.get(self.url, headers=header)
-            # QImage 是线程安全的，QPixmap 不是
-            qimage = QImage.fromData(r.content)
-            if not qimage.isNull():
-                self._imgReady.emit(qimage, self.W, self.H, self.keyFrame)
-        except Exception as e:
-            logging.error(str(e))
-
-    def _onImageReady(self, qimage, w, h, hasOrigin):
-        """主线程回调：将 QImage 转换为 QPixmap"""
-        pixmap = QPixmap.fromImage(qimage)
-        self.img.emit(pixmap.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
-        if hasOrigin:
-            self.img_origin.emit(pixmap)
 
 
 class CoverLabel(QLabel):
@@ -805,19 +794,19 @@ class AddLiverRoomWidget(QWidget):
         hotLiverLayout = QGridLayout(hotLiverPage)
         hotLiverLayout.setContentsMargins(1, 1, 1, 1)
 
-        self.virtual = PushButton("虚拟主播", True)
+        self.virtual = TextButton("虚拟主播", True)
         self.virtual.clicked.connect(lambda: self.switchHotLiver(0))
         hotLiverLayout.addWidget(self.virtual, 0, 0, 1, 1)
-        self.onlineGame = PushButton("网游")
+        self.onlineGame = TextButton("网游")
         self.onlineGame.clicked.connect(lambda: self.switchHotLiver(1))
         hotLiverLayout.addWidget(self.onlineGame, 0, 1, 1, 1)
-        self.mobileGame = PushButton("手游")
+        self.mobileGame = TextButton("手游")
         self.mobileGame.clicked.connect(lambda: self.switchHotLiver(2))
         hotLiverLayout.addWidget(self.mobileGame, 0, 2, 1, 1)
-        self.consoleGame = PushButton("单机")
+        self.consoleGame = TextButton("单机")
         self.consoleGame.clicked.connect(lambda: self.switchHotLiver(3))
         hotLiverLayout.addWidget(self.consoleGame, 0, 3, 1, 1)
-        self.entertainment = PushButton("娱乐")
+        self.entertainment = TextButton("娱乐")
         self.entertainment.clicked.connect(lambda: self.switchHotLiver(4))
         hotLiverLayout.addWidget(self.entertainment, 0, 4, 1, 1)
         self.buttonList = [self.virtual, self.onlineGame, self.mobileGame, self.consoleGame, self.entertainment]
@@ -883,10 +872,10 @@ class AddLiverRoomWidget(QWidget):
         hacoPage = QWidget()  # 添加内置的vtb列表
         hacoLayout = QGridLayout(hacoPage)
         hacoLayout.setContentsMargins(1, 1, 1, 1)
-        self.refreshButton = PushButton("更新名单")
+        self.refreshButton = TextButton("更新名单")
         self.refreshButton.clicked.connect(self.refreshHacoList)
         hacoLayout.addWidget(self.refreshButton, 0, 0, 1, 1)
-        self.vtbSearchButton = PushButton("查询VUP")
+        self.vtbSearchButton = TextButton("查询VUP")
         self.vtbSearchButton.clicked.connect(self.vtbSearch)
         hacoLayout.addWidget(self.vtbSearchButton, 0, 1, 1, 1)
         self.hacoTable = QTableWidget()
@@ -1121,9 +1110,14 @@ class AddLiverRoomWidget(QWidget):
             self._fillFollowTable()
 
     def _fillFollowTable(self):
+        """填充关注表格。
+
+        setRowCount 与 setRowHeight 均按实际数据行数（最少 30 行兜底），
+        避免旧实现固定 500 行导致 chunk 分批到达时反复全量重建（性能优化）。
+        """
         sorted_info = sorted(self.followRoomInfo, key=lambda x: x[3] if len(x) > 3 else 0, reverse=True)
         self.followLiverList = []
-        row_count = max(len(sorted_info), 500)
+        row_count = max(len(sorted_info), 30)
         self.followsTable.clearContents()
         self.followsTable.setColumnCount(3)
         self.followsTable.setRowCount(row_count)
@@ -1208,6 +1202,11 @@ class CollectLiverInfo(QThread):
             try:
                 self._wake_event.clear()
                 self._refresh_requested = False
+                # 房间列表为空时跳过网络请求，只等待（避免每 60s 空请求浪费流量）
+                if not self.roomIDList:
+                    if self._running and not self._refresh_requested:
+                        self._wake_event.wait(timeout=60.0)
+                    continue
                 liverInfo = []
                 data = json.dumps({"ids": self.roomIDList})  # 根据直播间房号批量获取直播间信息
                 r = http_utils.post(r"https://api.live.bilibili.com/room/v2/Room/get_by_ids", data=data, headers=header)
@@ -1550,7 +1549,6 @@ class LiverPanel(QWidget):
         self.refreshCount += 1  # 刷新计数+1
         roomIDToRefresh = []
         roomIDStartLive = []
-        firstRefresh = False
         for index, info in enumerate(liverInfo):
             if info[0]:  # uid有效
                 for cover in self.coverList:
@@ -1570,7 +1568,6 @@ class LiverPanel(QWidget):
                         cover.updateLabel(info)  # 更新数据
                 if info[1] not in self.oldLiveStatus:  # 软件启动后第一次更新添加
                     self.oldLiveStatus[info[1]] = info[4]  # 房号: 直播状态
-                    firstRefresh = True  # 第一次刷新
                 elif self.oldLiveStatus[info[1]] != info[4]:  # 状态发生变化
                     if info[4] == 1:
                         roomIDStartLive.append(info[2])  # 添加开播主播名字
@@ -1582,6 +1579,9 @@ class LiverPanel(QWidget):
                         cover.updateLabel(info)
         if roomIDStartLive:
             self.startLiveList.emit(roomIDStartLive)
+        if roomIDToRefresh:
+            # 开播/下播状态变化，通知主界面刷新对应播放器
+            self.refreshIDList.emit(roomIDToRefresh)
         self.refreshPanel()
 
     def addCoverToPlayer(self, info):

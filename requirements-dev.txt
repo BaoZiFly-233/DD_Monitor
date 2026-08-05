@@ -1,0 +1,5 @@
+# DD监控室 开发/打包依赖（可选）
+# 仅开发、打包需要，运行不需要：
+#   pip install -r requirements-dev.txt
+pyinstaller>=6.0.0
+ruff>=0.4.0

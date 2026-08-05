@@ -89,11 +89,11 @@ class DanmakuImageCache:
     def __init__(self, max_items=128):
         self._cache = OrderedDict()
         self._max_items = max(32, int(max_items))
-        self._cache = OrderedDict()
 
     @classmethod
     def instance(cls):
-        if cls._instance is None:
+        """全局共享实例（按需创建）"""
+        if not hasattr(cls, "_instance") or cls._instance is None:
             cls._instance = cls()
         return cls._instance
 

@@ -4,13 +4,12 @@ DD监控室视频播放窗口 - MPV 内核版本
 降低 CPU 和内存占用
 """
 
-import json
 import os
 import sys
 import time
-from PySide6.QtWidgets import *
-from PySide6.QtGui import *
-from PySide6.QtCore import *
+from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QStyle, QWidget
+from PySide6.QtGui import QDesktopServices, QDrag, QFont, QCursor
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
 from bilibili_api import live, sync
 from bili_credential import build_credential, normalize_credential_data
 from CommonWidget import Slider
@@ -137,6 +136,8 @@ class GetStreamURL(QThread):
         self.quality = quality
         self.sessionData = sessionData if sessionData else ""
         self.credential = normalize_credential_data(credential, sessdata=self.sessionData)
+        # 每次准备获取流时放行发射（mediaStop 会置 False 阻止迟到流）
+        self.recordToken = True
 
     def getStreamUrl(self):
         onlyAudio = self.quality < 0
@@ -182,6 +183,8 @@ class GetStreamURL(QThread):
         try:
             if not self.recordToken:
                 return
+            # 快照本次请求的房间号，setMedia 据此校验结果是否过期（防止旧房间流串台）
+            self._fetch_room_id = str(self.roomID)
             urls = self.getStreamUrl()
             if not self.recordToken:
                 logging.info("停止请求已发出，丢弃获取到的流地址")
@@ -287,8 +290,8 @@ class VideoWidget(QFrame):
         cacheFolder,
         top=False,
         title="",
-        resize=[],
-        textSetting=[True, 20, 2, 6, 0, "【 [ {", 10, 0, True],
+        resize=None,
+        textSetting=None,
         maxCacheSize=2048000,
         saveCachePath="",
         startWithDanmu=True,
@@ -299,6 +302,10 @@ class VideoWidget(QFrame):
         danmakuBaseViewport=None,
     ):
         super(VideoWidget, self).__init__()
+        if resize is None:
+            resize = []
+        if textSetting is None:
+            textSetting = [True, 20, 2, 6, 0, "【 [ {", 10, 0, True]
         self.setAcceptDrops(True)
         self.installEventFilter(self)
         self.id = id
@@ -331,6 +338,8 @@ class VideoWidget(QFrame):
         self._idleStreak = 0  # 连续 idle 计数，防网络波动误判
         self._mpv = None  # 延迟初始化
         self._stream_url = ""
+        self._stream_candidates = []  # 候选流列表（setMedia 时填充）
+        self._stream_candidate_index = -1
 
         # 容器设置
         self.setFrameShape(QFrame.Box)
@@ -431,20 +440,21 @@ class VideoWidget(QFrame):
         self.timestampLabel.setText("0:00:00")
         frameLayout.addWidget(self.timestampLabel)
         self.play = PushButton(self.style().standardIcon(QStyle.SP_MediaPause))
-        self.play.clicked.connect(self.mediaPlay)
+        # clicked 信号带 checked 参数，用 lambda 显式忽略，避免误传 force
+        self.play.clicked.connect(lambda: self.mediaPlay())
         frameLayout.addWidget(self.play)
         self.reload = PushButton(self.style().standardIcon(QStyle.SP_BrowserReload))
-        self.reload.clicked.connect(self.mediaReload)
+        self.reload.clicked.connect(lambda: self.mediaReload())
         frameLayout.addWidget(self.reload)
         self.volumeButton = PushButton(self.style().standardIcon(QStyle.SP_MediaVolume))
-        self.volumeButton.clicked.connect(self.mediaMute)
+        self.volumeButton.clicked.connect(lambda: self.mediaMute())
         frameLayout.addWidget(self.volumeButton)
         self.slider = Slider()
         self.slider.setStyleSheet("background-color:#00000000")
-        self.slider.value.connect(self.setVolume)
+        self.slider.sliderValue.connect(self.setVolume)
         frameLayout.addWidget(self.slider)
         self.danmuButton = PushButton(text="弹")
-        self.danmuButton.clicked.connect(self.cycleDanmuDisplayMode)
+        self.danmuButton.clicked.connect(lambda: self.cycleDanmuDisplayMode())
         frameLayout.addWidget(self.danmuButton)
         self.danmuDensityLabel = QLabel("")
         self.danmuDensityLabel.setFixedWidth(32)
@@ -452,7 +462,7 @@ class VideoWidget(QFrame):
         self.danmuDensityLabel.setStyleSheet("color:#aaa;font-size:10px;background:transparent")
         frameLayout.addWidget(self.danmuDensityLabel)
         self.stop = PushButton(self.style().standardIcon(QStyle.SP_DialogCancelButton))
-        self.stop.clicked.connect(self._mediaStop)
+        self.stop.clicked.connect(lambda: self._mediaStop())
         frameLayout.addWidget(self.stop)
         for control_button in (self.play, self.reload, self.volumeButton, self.danmuButton, self.stop):
             control_button.pressed.connect(self._onControlInteracted)
@@ -463,9 +473,14 @@ class VideoWidget(QFrame):
         self.getMediaURL.credential = self.credential
         self.getMediaURL.streamUrl.connect(self.setMedia)
         self.getMediaURL.downloadError.connect(self.mediaReload)
+        self.getMediaURL.finished.connect(self._onStreamFetchFinished)
+        # 线程运行中收到新房间请求时置位，线程结束由 finished 回调补发
+        self._streamFetchPending = False
 
         self.fetchRoomInfo = FetchRoomInfo()
         self.fetchRoomInfo.roomInfo.connect(self._onRoomInfo)
+        self.fetchRoomInfo.finished.connect(self._onRoomInfoFetchFinished)
+        self._roomInfoPending = False
 
         self.danmu = remoteThread(self.roomID, self.sessionData)
         self._danmuPendingRestart = False
@@ -493,6 +508,13 @@ class VideoWidget(QFrame):
         self._danmuDensityTimer.timeout.connect(self._updateDanmuDensity)
         self._danmuDensityTimer.setInterval(1000)
 
+        # resize 防抖：拖动窗口时 resizeEvent 高频触发，应用弹幕设置很重，
+        # 合并为停止拖动后 100ms 一次性应用，避免拖动卡顿
+        self._resize_debounce = QTimer(self)
+        self._resize_debounce.setSingleShot(True)
+        self._resize_debounce.setInterval(100)
+        self._resize_debounce.timeout.connect(self._onResizeDebounced)
+
     def ensureTextBrowser(self):
         if self.textBrowser is not None:
             return self.textBrowser
@@ -510,7 +532,7 @@ class VideoWidget(QFrame):
         option_widget.fontSizeCombox.setCurrentIndex(self.textSetting[6])
         option_widget.showEnterRoom.setCurrentIndex(self.textSetting[7])
 
-        option_widget.opacitySlider.value.connect(self.setDanmuOpacity)
+        option_widget.opacitySlider.sliderValue.connect(self.setDanmuOpacity)
         option_widget.horizontalCombobox.currentIndexChanged.connect(self.setHorizontalPercent)
         option_widget.verticalCombobox.currentIndexChanged.connect(self.setVerticalPercent)
         option_widget.translateCombobox.currentIndexChanged.connect(self.setTranslateBrowser)
@@ -626,7 +648,7 @@ class VideoWidget(QFrame):
     def _rollingDisplayRatio(self):
         index = int(self.rollingSetting.get("display_area", self.textSetting[3]))
         index = max(0, min(index, 9))
-        return [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][index]
+        return DISPLAY_RATIOS[index]
 
     def _currentDanmuDisplayMode(self):
         browser_enabled = self.isBrowserDanmuEnabled()
@@ -826,8 +848,9 @@ class VideoWidget(QFrame):
         if self._mpv:
             try:
                 self._mpv.volume = int(value)
+                return True
             except Exception as e:
-                logging.debug("%s get_mute 失败: %s", self.name_str, e)
+                logging.debug("%s set_volume 失败: %s", self.name_str, e)
                 return False
         return False
 
@@ -871,7 +894,6 @@ class VideoWidget(QFrame):
                 self.retryTimes += 1
                 if self.retryTimes > 4:
                     self.mediaReload()
-        return False
 
     @staticmethod
     def _nextLowerQuality(current):
@@ -945,13 +967,13 @@ class VideoWidget(QFrame):
 
     def setHorizontalPercent(self, index):
         self.textSetting[2] = index
-        self.horiPercent = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][index]
+        self.horiPercent = DISPLAY_RATIOS[index]
         self.applyDanmuSettings()
         self.setDanmu.emit()
 
     def setVerticalPercent(self, index):
         self.textSetting[3] = index
-        self.vertPercent = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0][index]
+        self.vertPercent = DISPLAY_RATIOS[index]
         self.applyDanmuSettings()
         self.setDanmu.emit()
 
@@ -981,11 +1003,21 @@ class VideoWidget(QFrame):
             self.play.hide() if self.width() < 300 else self.play.show()
             self.danmuButton.show()
             self.slider.hide() if self.width() < 200 else self.slider.show()
-            self.applyDanmuSettings()
+            # 轻量操作即时执行；重操作合并到防抖回调
             if self.textBrowser is not None:
                 self.moveTextBrowser()
                 if not self.moveTimer.isActive():
                     self.moveTimer.start()
+            if not self._resize_debounce.isActive():
+                self._resize_debounce.start()
+        except Exception:
+            pass
+
+    def _onResizeDebounced(self):
+        """resize 停止后应用弹幕设置（防抖）"""
+        try:
+            self.applyDanmuSettings()
+            self.videoFrame.update()
         except Exception:
             pass
 
@@ -1088,7 +1120,7 @@ class VideoWidget(QFrame):
         QDragEnterEvent.accept()
 
     def dropEvent(self, QDropEvent):
-        if QDropEvent.mimeData().hasText:
+        if QDropEvent.mimeData().hasText():
             text = QDropEvent.mimeData().text()
             if "roomID" in text:
                 self.stopDanmuMessage()
@@ -1373,6 +1405,17 @@ class VideoWidget(QFrame):
         if self.roomID == "0" or not self.getMediaURL.recordToken:
             logging.info("%s 已停止，忽略迟到的流地址", self.name_str)
             return
+        # 竞态防护：取流线程在旧房间的请求未完成时被复用于新房间，
+        # 其 roomID 已由 setConfig 更新，这里校验结果与当前房间一致，避免串台
+        if str(getattr(self.getMediaURL, "_fetch_room_id", "")) != str(self.roomID):
+            logging.warning(
+                "%s 收到过期流地址 (req=%s cur=%s)，丢弃并重新取流",
+                self.name_str,
+                getattr(self.getMediaURL, "_fetch_room_id", ""),
+                self.roomID,
+            )
+            self._restartStreamFetch()
+            return
         stream_candidates = url if isinstance(url, (list, tuple)) else [url]
         self._stream_candidates = [
             stream.strip()
@@ -1451,7 +1494,18 @@ class VideoWidget(QFrame):
             self._updateTitleLabels()
         else:
             self.fetchRoomInfo.setConfig(self.roomID, self.sessionData)
-            if not self.fetchRoomInfo.isRunning():
+            if self.fetchRoomInfo.isRunning():
+                # 线程还在跑旧房间，标记待处理，结束后由 finished 回调补发
+                self._roomInfoPending = True
+            else:
+                self.fetchRoomInfo.start()
+
+    def _onRoomInfoFetchFinished(self):
+        """房间信息线程结束 — 若期间切换过房间，补发一次新房间的请求"""
+        if self._roomInfoPending:
+            self._roomInfoPending = False
+            if self.roomID != "0":
+                self.fetchRoomInfo.setConfig(self.roomID, self.sessionData)
                 self.fetchRoomInfo.start()
 
     def _onRoomInfo(self, result):
@@ -1475,15 +1529,33 @@ class VideoWidget(QFrame):
         self._updateTitleLabels()
         # 直播中则自动开始播放
         if self.liveStatus == 1 and self.roomID != "0":
-            self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData, self.credential)
-            if not self.getMediaURL.isRunning():
-                self.getMediaURL.start()
+            self._startStreamFetch()
         else:
             self.videoFrame.setPlaybackActive(False)
             self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
             self.checkPlaying.stop()
             self.refreshTimeStampTimer.stop()
             self.timestampLabel.setText("0:00:00")
+
+    def _startStreamFetch(self):
+        """启动取流线程；若线程正在运行则标记待处理，结束后补发"""
+        self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData, self.credential)
+        if self.getMediaURL.isRunning():
+            self._streamFetchPending = True
+        else:
+            self.getMediaURL.start()
+
+    def _onStreamFetchFinished(self):
+        """取流线程结束 — 若期间切换过房间/画质，补发一次新请求"""
+        if self._streamFetchPending:
+            self._streamFetchPending = False
+            if self.liveStatus == 1 and self.roomID != "0":
+                self._startStreamFetch()
+
+    def _restartStreamFetch(self):
+        """收到过期流地址时重新发起取流"""
+        if self.liveStatus == 1 and self.roomID != "0":
+            self._startStreamFetch()
 
     def _updateTitleLabels(self):
         """更新标题和标签文字"""

@@ -370,7 +370,15 @@ class LoginDialog(QDialog):
         self._pollTimer.stop()
         # 等待所有后台线程退出后再关闭窗口
         # （线程在 running 状态下被析构会触发 STATUS_STACK_BUFFER_OVERRUN 原生崩溃）
-        for thread in (self._fetchUserInfo, self._fetchQRCodeThread, self._pollLoginThread):
-            if thread.isRunning():
-                thread.wait(6000)
+        # 并行等待三个线程，避免串行 wait 造成最长 18s 的关闭延迟
+        _threads = [t for t in (self._fetchUserInfo, self._fetchQRCodeThread, self._pollLoginThread) if t.isRunning()]
+        if _threads:
+            import threading
+
+            _waiter = threading.Thread(
+                target=lambda: [t.wait(6000) for t in _threads],
+                daemon=True,
+            )
+            _waiter.start()
+            _waiter.join(7000)
         super().closeEvent(event)

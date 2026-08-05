@@ -11,11 +11,10 @@ from PySide6.QtWidgets import (
     QTextBrowser,
     QGridLayout,
     QStyle,
-    QCheckBox,
     QSlider,
     QTabWidget,
 )
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal, QPoint
 from CommonWidget import Slider
 
@@ -139,8 +138,11 @@ class ToolButton(QToolButton):
 class TextOption(QWidget):
     """弹幕机选项 - 弹出式窗口"""
 
-    def __init__(self, setting=[50, 1, 7, 0, "【 [ {", 10, 0]):
+    def __init__(self, setting=None):
         super(TextOption, self).__init__()
+        if setting is None:
+            setting = [50, 1, 7, 0, "【 [ {", 10, 0]
+        setting = list(setting)  # 防御：避免外部修改影响默认值
         self.resize(300, 300)
         self.setWindowTitle("弹幕窗设置")
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
@@ -227,6 +229,8 @@ class TextBrowser(QWidget):
         self.textBrowser = QTextBrowser()
         self.textBrowser.setFont(QFont("Microsoft JhengHei", 14, QFont.Bold))
         self.textBrowser.setStyleSheet("border-width:1")
+        # 限制文档最大行数，防止长时间运行内存无限增长（内存泄漏）
+        self.textBrowser.document().setMaximumBlockCount(500)
         # textCursor = self.textBrowser.textCursor()
         # textBlockFormat = QTextBlockFormat()
         # textBlockFormat.setLineHeight(17, QTextBlockFormat.FixedHeight)  # 弹幕框行距
@@ -238,12 +242,14 @@ class TextBrowser(QWidget):
         self.transBrowser = QTextBrowser()
         self.transBrowser.setFont(QFont("Microsoft JhengHei", 14, QFont.Bold))
         self.transBrowser.setStyleSheet("border-width:1")
+        self.transBrowser.document().setMaximumBlockCount(500)
         layout.addWidget(self.transBrowser, 2, 0, 1, 10)
 
         # 信息区域
         self.msgsBrowser = QTextBrowser()
         self.msgsBrowser.setFont(QFont("Microsoft JhengHei", 14, QFont.Bold))
         self.msgsBrowser.setStyleSheet("border-width:1")
+        self.msgsBrowser.document().setMaximumBlockCount(500)
         # self.msgsBrowser.setMaximumHeight(100)
         layout.addWidget(self.msgsBrowser, 3, 0, 1, 10)
 
