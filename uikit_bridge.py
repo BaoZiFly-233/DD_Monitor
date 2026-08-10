@@ -1,39 +1,38 @@
 # -*- coding: utf-8 -*-
-"""InstructionX_UIKit 集成桥 — 主题挂载工具
+"""qfluentwidgets_pro 集成桥 — 主题与取色工具
 
-主界面全局样式已切换为 UIKit 暗色主题（DD监控室.py 中
-``app.setStyleSheet(build_global_qss())``，替代原 qdark.qss）。mpv 播放器、
-弹幕机、布局面板等自绘 / 带实例级内联样式的控件不依赖全局 QSS，观感不变。
-本模块提供：
+组件库为 qfluentwidgets_pro（PySide6-Fluent-Widgets-Pro，Fluent Design，
+含原版 Pro 组件复现）。业务代码直接使用 qfluentwidgets 组件；本模块仅
+提供主题与自绘控件取色工具：
 
-- init_uikit(): 把 UIKit 令牌状态同步为暗色，供 build_global_qss 与
-  UIKit 自绘组件取色。
-- build_global_qss(): 生成并缓存 UIKit 全量 QSS（全局应用）。
-- apply_scoped_theme(widget): 把同一份 UIKit QSS 挂到指定控件子树
-  （widget 级样式优先于 app 级），用于需要强调 UIKit 观感的弹窗子树。
-- set_theme(dark): 切换明暗主题（始终同步 UIKit 令牌模式，再刷新全部 QSS）。
-- set_accent(name): 切换配色方案（覆盖 ``color.primary`` 令牌族）。
-- current_color / is_dark / theme_changed: 供自绘控件取当前主题令牌。
-- confirm / info: UIKit 风格非阻塞确认框 / 信息框。
-
-配色：UIKit 令牌系统支持运行时覆盖主色令牌族，本桥将 ``set_accent``
-作为明暗之外的第三维参与 QSS 缓存键与 ``current_color`` 取色，
-从而让全局 QSS、scoped 弹窗与自绘控件配色一致。
+- init_uikit(): 设置 Fluent 明暗主题（setTheme）。
+- set_theme(dark) / set_accent(name): Fluent 明暗 / 主题色切换。
+- current_color / is_dark / theme_changed: 自绘控件取色（令牌表本地化，
+  primary 族与 themeColor() 保持一致）。
+- confirm / info: Fluent MessageBox 非阻塞确认框 / 信息框。
 """
 
-from weakref import WeakSet
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
-from InstructionX_UIKit.theme import ThemeManager, build_qss
-from InstructionX_UIKit.tokens import DARK, LIGHT
+
+from qfluentwidgets_pro import (
+    MessageBox,
+    RoundMenu,
+    Theme,
+    isDarkTheme,
+    setTheme,
+    setThemeColor,
+    themeColor,
+)
+from qfluentwidgets_pro.common.config import qconfig
 
 __all__ = [
     "init_uikit",
-    "build_global_qss",
-    "apply_scoped_theme",
     "set_theme",
     "set_accent",
+    "set_menu_animation",
     "current_color",
     "theme_changed",
     "is_dark",
@@ -42,14 +41,61 @@ __all__ = [
     "ACCENT_NAMES",
 ]
 
-_tm = ThemeManager.instance()
 _current_dark = True
 _current_accent = "blue"
-_qss_cache: dict = {}
-_scoped_widgets: "WeakSet" = WeakSet()
 
-#: 配色方案：覆盖背景 + 边框 + 主色令牌族（亮 / 暗各一套）。
-#: "blue" 为 UIKit 默认值，无覆盖；其余方案给整套界面一个明确的色调差异。
+#: 基础令牌表（自 InstructionX_UIKit tokens 迁移，供自绘控件取色）
+_DARK = {
+    "color.bg.base": "#15181E",
+    "color.bg.subtle": "#1B1F27",
+    "color.bg.muted": "#232936",
+    "color.bg.elevated": "#1F242E",
+    "color.border": "#2C333F",
+    "color.border.strong": "#3D4654",
+    "color.text.primary": "#E7EAF0",
+    "color.text.secondary": "#A6AEBB",
+    "color.text.tertiary": "#6E7684",
+    "color.text.disabled": "#4A515C",
+    "color.primary": "#7C98C4",
+    "color.primary.hover": "#93AAD1",
+    "color.primary.pressed": "#A9BDDD",
+    "color.primary.subtle": "#26324A",
+    "color.on.primary": "#15181E",
+    "color.success": "#6BA98A",
+    "color.success.subtle": "#22362D",
+    "color.warning": "#D2A668",
+    "color.warning.subtle": "#3A3226",
+    "color.danger": "#CD7A7A",
+    "color.danger.subtle": "#3E2A2A",
+    "color.overlay": "rgba(0,0,0,0.55)",
+}
+_LIGHT = {
+    "color.bg.base": "#FFFFFF",
+    "color.bg.subtle": "#F6F7F9",
+    "color.bg.muted": "#EFF1F5",
+    "color.bg.elevated": "#FFFFFF",
+    "color.border": "#E3E6EB",
+    "color.border.strong": "#C9CFD8",
+    "color.text.primary": "#1C2330",
+    "color.text.secondary": "#59636F",
+    "color.text.tertiary": "#98A0AC",
+    "color.text.disabled": "#C2C8D0",
+    "color.primary": "#3F5E8C",
+    "color.primary.hover": "#35507A",
+    "color.primary.pressed": "#2B4266",
+    "color.primary.subtle": "#EBEFF5",
+    "color.on.primary": "#FFFFFF",
+    "color.success": "#3E7E5F",
+    "color.success.subtle": "#E9F2EC",
+    "color.warning": "#C08A3E",
+    "color.warning.subtle": "#F7F0E3",
+    "color.danger": "#B25050",
+    "color.danger.subtle": "#F7EBEB",
+    "color.overlay": "rgba(28,35,48,0.45)",
+}
+
+#: 配色方案：覆盖背景 + 主色令牌族（亮 / 暗各一套）。
+#: "blue" 为 Fluent 默认蓝（qfluentwidgets themeColor 默认值），无覆盖。
 _ACCENT_PRESETS = {
     "blue": {},
     "teal": {
@@ -169,6 +215,9 @@ _ACCENT_PRESETS = {
 #: 配色方案名（设置面板下拉框用）
 ACCENT_NAMES = tuple(_ACCENT_PRESETS)
 
+#: Fluent 默认主题蓝（"blue" 配色）
+_DEFAULT_BLUE = {"dark": "#7C98C4", "light": "#3F5E8C"}
+
 
 class _ThemeSignals(QObject):
     """主题切换广播：自绘控件（视频控制条、布局面板等）监听后刷新颜色。"""
@@ -177,11 +226,12 @@ class _ThemeSignals(QObject):
 
 
 _theme_signals = _ThemeSignals()
+_qconfig_hooked = False
 
 
 def _tokens(dark: bool, accent: str) -> dict:
-    """当前模式 + 当前配色的令牌视图（QSS 与 current_color 的唯一取色来源）。"""
-    tokens = dict(DARK if dark else LIGHT)
+    """当前模式 + 当前配色的令牌视图（current_color 的唯一取色来源）。"""
+    tokens = dict(_DARK if dark else _LIGHT)
     tokens.update(_ACCENT_PRESETS[accent].get("dark" if dark else "light", {}))
     return tokens
 
@@ -189,107 +239,220 @@ def _tokens(dark: bool, accent: str) -> dict:
 def current_color(token: str) -> str:
     """返回当前主题的语义色（如 "primary"、"bg.base" → "#RRGGBB"）。"""
     key = token if token.startswith("color.") else f"color.{token}"
+    if key == "color.primary":
+        return themeColor().name()
     return _tokens(_current_dark, _current_accent).get(key, "#000000")
 
 
 def is_dark() -> bool:
     """当前是否暗色主题（供自绘控件在构造时取一次）。"""
-    return _current_dark
+    return isDarkTheme()
 
 
 def theme_changed() -> Signal:
     """主题切换信号（bool 参数：True=暗色）。自绘控件连接后刷新硬编码颜色。"""
     return _theme_signals.theme_changed
 
-#: 追加的全局 QSS 补丁：修复 Qt 6 下 QSlider 本体被 QWidget 背景规则
-#: 涂成近黑（handle 上下露出两条深色边），滑条轨道色由
-#: QSlider::groove/sub-page/add-page 单独控制。
-_QSS_PATCH = """
-QSlider { background-color: transparent; }
-QSlider::groove:horizontal, QSlider::groove:vertical { margin: 0; }
+
+def _apply_accent_color() -> None:
+    """把当前配色的主色写入 qfluentwidgets 主题色（themeColor）。"""
+    preset = _ACCENT_PRESETS[_current_accent]
+    mode = "dark" if _current_dark else "light"
+    color = preset.get(mode, {}).get("color.primary") or _DEFAULT_BLUE[mode]
+    setThemeColor(QColor(color))
+
+
+# ---------------------------------------------------------------------------
+# 原生控件 Fluent 化 QSS（app 级）
+#
+# qfluentwidgets 只把 QSS 挂到自己的组件实例上（app 级 QSS 为空），因此
+# 原生控件（QScrollBar/QGroupBox/QTextBrowser 等无对应组件的控件）保持
+# 系统观感。这里在 app 级挂一套 Fluent 风格 QSS；组件实例 QSS 优先级
+# 更高，互不冲突。
+# ---------------------------------------------------------------------------
+
+
+def _build_native_qss() -> str:
+    """生成原生控件 QSS（令牌色，随主题/配色重建）。
+
+    应用里的 QComboBox/QLineEdit/QCheckBox/QTabWidget/QTableWidget/
+    QScrollArea 已全部替换为 qfluentwidgets 组件（组件级 QSS 渲染），
+    这里只覆盖无对应组件的少量原生控件。
+    """
+    tokens = _tokens(_current_dark, _current_accent)
+    c = lambda k: tokens[f"color.{k}"]  # noqa: E731
+
+    return f"""
+/* ===== 菜单栏（顶栏 Fluent 观感；下拉菜单已用 RoundMenu 自绘） ===== */
+QMenuBar {{
+    background-color: {c("bg.base")}; color: {c("text.primary")};
+    border-bottom: 1px solid {c("border")};
+}}
+QMenuBar::item {{
+    background: transparent; padding: 5px 10px; border-radius: 4px;
+}}
+QMenuBar::item:selected {{ background-color: {c("bg.muted")}; }}
+QMenuBar::item:pressed {{ background-color: {c("primary.subtle")}; }}
+
+/* ===== 滚动条（Fluent 细圆条；剩余原生滚动区域：弹幕机/更新说明等） ===== */
+QScrollBar:vertical {{
+    background: transparent; width: 8px; margin: 2px 2px 2px 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {c("border.strong")}; border-radius: 4px; min-height: 30px;
+}}
+QScrollBar::handle:vertical:hover {{ background: {c("text.tertiary")}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+QScrollBar:horizontal {{
+    background: transparent; height: 8px; margin: 0 2px 2px 2px;
+}}
+QScrollBar::handle:horizontal {{
+    background: {c("border.strong")}; border-radius: 4px; min-width: 30px;
+}}
+QScrollBar::handle:horizontal:hover {{ background: {c("text.tertiary")}; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
+
+/* ===== 分组框 ===== */
+QGroupBox {{
+    border: 1px solid {c("border")}; border-radius: 8px; margin-top: 10px;
+    padding-top: 6px; background: transparent; color: {c("text.primary")};
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {c("text.primary")};
+}}
+
+/* ===== 进度条（启动闪屏） ===== */
+QProgressBar {{
+    background-color: {c("bg.muted")}; border: none; border-radius: 4px;
+    text-align: center; color: transparent; min-height: 8px;
+}}
+QProgressBar::chunk {{ background-color: {c("primary")}; border-radius: 4px; }}
+
+/* ===== 文本浏览 ===== */
+QTextBrowser, QTextEdit {{
+    background-color: {c("bg.base")}; color: {c("text.primary")};
+    border: 1px solid {c("border")}; border-radius: 6px;
+    selection-background-color: {c("primary")}; selection-color: {c("on.primary")};
+}}
 """
 
 
+def _apply_native_qss() -> None:
+    """把原生控件 Fluent QSS 挂到 app 级（qfluentwidgets 组件实例 QSS 优先）。"""
+    app = QApplication.instance()
+    if app is not None:
+        app.setStyleSheet(_build_native_qss())
+
+
+def _apply_palette() -> None:
+    """把主题令牌写入 QPalette，让原生控件（QDialog/QTabWidget/QGroupBox/
+    QComboBox 等）背景文字随明暗主题，与 Fluent 组件一致。
+
+    qfluentwidgets 只美化自身组件、不设置 palette；不补 palette 时原生
+    控件在暗色主题下仍是系统亮色，界面撕裂。QMenu 等窗口底色同样取自
+    palette，主题色下自然融合（菜单为直角无圆角干预，无白角问题）。
+    """
+    app = QApplication.instance()
+    if app is None:
+        return
+    tokens = _tokens(_current_dark, _current_accent)
+    c = lambda k: QColor(tokens[f"color.{k}"])  # noqa: E731
+    p = QPalette()
+    p.setColor(QPalette.Window, c("bg.base"))
+    p.setColor(QPalette.WindowText, c("text.primary"))
+    p.setColor(QPalette.Base, c("bg.elevated"))
+    p.setColor(QPalette.AlternateBase, c("bg.subtle"))
+    p.setColor(QPalette.Text, c("text.primary"))
+    p.setColor(QPalette.PlaceholderText, c("text.tertiary"))
+    p.setColor(QPalette.Button, c("bg.muted"))
+    p.setColor(QPalette.ButtonText, c("text.primary"))
+    p.setColor(QPalette.BrightText, c("on.primary"))
+    p.setColor(QPalette.Highlight, c("primary"))
+    p.setColor(QPalette.HighlightedText, c("on.primary"))
+    p.setColor(QPalette.Link, c("primary"))
+    p.setColor(QPalette.LinkVisited, c("primary.hover"))
+    p.setColor(QPalette.ToolTipBase, c("bg.elevated"))
+    p.setColor(QPalette.ToolTipText, c("text.primary"))
+    p.setColor(QPalette.Light, c("bg.base"))
+    p.setColor(QPalette.Midlight, c("bg.subtle"))
+    p.setColor(QPalette.Mid, c("border.strong"))
+    p.setColor(QPalette.Dark, c("border"))
+    p.setColor(QPalette.Shadow, c("border"))
+    disabled = c("text.disabled")
+    p.setColor(QPalette.Disabled, QPalette.Text, disabled)
+    p.setColor(QPalette.Disabled, QPalette.WindowText, disabled)
+    p.setColor(QPalette.Disabled, QPalette.ButtonText, disabled)
+    app.setPalette(p)
+
+
 def init_uikit(dark: bool = True) -> None:
-    """同步 UIKit 令牌为暗色（默认）或亮色。"""
-    global _current_dark
+    """设置 Fluent 明暗主题（默认暗色），同步调色板 + 原生控件 QSS。"""
+    global _current_dark, _qconfig_hooked
     _current_dark = bool(dark)
-    _tm.set_mode("dark" if dark else "light")
-
-
-def _cached_qss(dark: bool, accent: str) -> str:
-    """按（明暗, 配色）分别生成并缓存 UIKit 全量 QSS（幂等）。"""
-    key = (dark, accent)
-    if key not in _qss_cache:
-        _qss_cache[key] = build_qss(_tokens(dark, accent)) + _QSS_PATCH
-    return _qss_cache[key]
+    setTheme(Theme.DARK if dark else Theme.LIGHT)
+    _apply_accent_color()
+    _apply_palette()
+    _apply_native_qss()
+    if not _qconfig_hooked:
+        _qconfig_hooked = True
+        qconfig.themeChanged.connect(lambda t: _theme_signals.theme_changed.emit(t == Theme.DARK))
 
 
 def build_global_qss() -> str:
-    """返回当前主题（明暗 + 配色）对应的 UIKit 全量 QSS。"""
-    return _cached_qss(_current_dark, _current_accent)
+    """qfluentwidgets 由 setTheme 自动管理全局 QSS，无需手动挂载。"""
+    return ""
 
 
-def _apply_current() -> None:
-    """把当前（明暗 + 配色）主题应用到 app 级 QSS、scoped 弹窗并广播。"""
-    qss = _cached_qss(_current_dark, _current_accent)
-    app = QApplication.instance()
-    if app is not None:
-        app.setStyleSheet(qss)
-    for widget in list(_scoped_widgets):
-        if widget is not None:
-            widget.setStyleSheet(qss)
-    _theme_signals.theme_changed.emit(_current_dark)
+def apply_scoped_theme(widget) -> None:
+    """qfluentwidgets 全局样式覆盖全部弹窗子树，保留为空操作。"""
 
 
 def set_theme(dark: bool) -> None:
-    """切换全局明暗主题。
-
-    先始终同步 UIKit 令牌模式，再应用缓存 QSS——即使 QSS 缓存命中也必须
-    同步，否则切回深色后 ``current_color()`` 仍返回浅色令牌（自绘控件取色
-    错误，视频控制条无法变回深色）。
-    """
-    dark = bool(dark)
-    init_uikit(dark)
-    _apply_current()
+    """切换全局明暗主题（Fluent setTheme + 调色板 + 原生控件 QSS）。"""
+    global _current_dark
+    _current_dark = bool(dark)
+    setTheme(Theme.DARK if dark else Theme.LIGHT)
+    _apply_accent_color()
+    _apply_palette()
+    _apply_native_qss()
 
 
 def set_accent(name: str) -> None:
-    """切换配色方案（覆盖 ``color.primary`` 令牌族，立即生效并持久化由调用方负责）。"""
+    """切换配色方案（覆盖主题主色，立即生效并持久化由调用方负责）。"""
     global _current_accent
     if name not in _ACCENT_PRESETS:
         raise ValueError(f"未知配色: {name!r}，可用: {ACCENT_NAMES}")
     _current_accent = name
-    _apply_current()
+    _apply_accent_color()
+    _apply_native_qss()
 
 
-def apply_scoped_theme(widget) -> None:
-    """把当前主题的 UIKit QSS 挂到 widget 及其全部子控件。
+def set_menu_animation(enabled: bool) -> None:
+    """开关菜单弹出动画（设置面板"菜单动画"选项）。
 
-    在弹窗 __init__ 布局完成后调用一次即可；widget 级样式优先于 app 级，
-    保证该弹窗子树内以 UIKit 观感为准。挂载过的弹窗会跟随全局主题切换。
+    默认开启；低配机掉帧/不习惯动画的用户可在设置中关闭。
     """
-    widget.setStyleSheet(_cached_qss(_current_dark, _current_accent))
-    _scoped_widgets.add(widget)
+    RoundMenu.animationEnabled = bool(enabled)
 
 
 def confirm(parent, title, text, on_result=None, ok_text="确定", cancel_text="取消"):
-    """弹出 UIKit 风格确认框（非阻塞，回调式）。
+    """弹出 Fluent 风格确认框（非阻塞，回调式）。
 
-    ``on_result(ok: bool)`` 在用户选择后回调，等价于 QMessageBox 的
-    ``reply == QMessageBox.Yes`` 分支。
+    ``on_result(ok: bool)`` 在用户选择后回调。
     """
-    from InstructionX_UIKit.components import Dialog
-
-    dlg = Dialog.confirm(parent, title, text, on_result, ok_text, cancel_text)
-    apply_scoped_theme(dlg)
-    return dlg
+    mb = MessageBox(title, text, parent)
+    mb.yesSignal.connect(lambda: on_result(True) if on_result else None)
+    mb.cancelSignal.connect(lambda: on_result(False) if on_result else None)
+    mb.show()
+    return mb
 
 
 def info(parent, title, text, on_close=None, ok_text="知道了"):
-    """弹出 UIKit 风格信息框（非阻塞，仅确认按钮）。"""
-    from InstructionX_UIKit.components import Dialog
-
-    dlg = Dialog.info(parent, title, text, on_close, ok_text)
-    apply_scoped_theme(dlg)
-    return dlg
+    """弹出 Fluent 风格信息框（非阻塞，仅确认按钮）。"""
+    mb = MessageBox(title, text, parent)
+    mb.hideCancelButton()
+    mb.yesSignal.connect(lambda: on_close() if on_close else None)
+    mb.show()
+    return mb

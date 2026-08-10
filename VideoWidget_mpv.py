@@ -7,7 +7,7 @@ DD监控室视频播放窗口 - MPV 内核版本
 import os
 import sys
 import time
-from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QStyle, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QStyle, QWidget
 from PySide6.QtGui import QDesktopServices, QDrag, QFont, QCursor
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
 from bilibili_api import live, sync
@@ -19,6 +19,7 @@ from danmaku_settings import DanmakuSettings
 from danmu import TextBrowser
 from danmaku_renderer import DanmakuRenderer
 from mpv_gl_widget import MpvGLWidget
+from qfluentwidgets_pro import RoundMenu
 from uikit_bridge import current_color, theme_changed
 import logging
 import warnings
@@ -1157,96 +1158,78 @@ class VideoWidget(QFrame):
                     self.exchangeMedia.emit([fromID, fromRoomID, self.id, self.roomID])
 
     def rightMouseClicked(self, event):
-        menu = QMenu()
+        # RoundMenu.exec 非阻塞，菜单项通过 triggered 信号处理
+        menu = RoundMenu()
         openBrowser = menu.addAction("打开直播间")
+        openBrowser.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(r"https://live.bilibili.com/%s" % self.roomID))
+            if self.roomID != "0"
+            else None
+        )
         chooseQuality = menu.addMenu("选择画质 ►")
-        originQuality = chooseQuality.addAction("原画")
-        if self.quality == 10000:
-            originQuality.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-        bluerayQuality = chooseQuality.addAction("蓝光")
-        if self.quality == 400:
-            bluerayQuality.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-        highQuality = chooseQuality.addAction("超清")
-        if self.quality == 250:
-            highQuality.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-        lowQuality = chooseQuality.addAction("流畅")
-        if self.quality == 80:
-            lowQuality.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-        onlyAudio = chooseQuality.addAction("仅播声音")
-        if self.quality == -1:
-            onlyAudio.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+        quality_items = {"原画": 10000, "蓝光": 400, "超清": 250, "流畅": 80, "仅播声音": -1}
+        for text, q in quality_items.items():
+            act = chooseQuality.addAction(text)
+            if self.quality == q:
+                act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+            act.triggered.connect(lambda checked=False, q=q: self._menuSetQuality(q))
         chooseAmplify = menu.addMenu("音量增大 ►")
-        ampActions = {}
         for amp_val in [0.5, 1.0, 1.5, 2.0, 3.0, 4.0]:
             action = chooseAmplify.addAction("x %.1f" % amp_val)
             if self.volumeAmplify == amp_val:
                 action.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-            ampActions[action] = amp_val
+            action.triggered.connect(lambda checked=False, a=amp_val: self._menuSetAmplify(a))
 
         switchCdn = menu.addAction("切换 CDN 节点")
+        switchCdn.triggered.connect(self._menuSwitchCdn)
 
         if not self.top:
             popWindow = menu.addAction("悬浮窗播放")
+            popWindow.triggered.connect(self._menuPopWindow)
         else:
             opacityMenu = menu.addMenu("调节透明度 ►")
-            opacityActions = {}
             for pct in [100, 80, 60, 40, 20]:
                 act = opacityMenu.addAction(f"{pct}%")
                 if self.opacity == pct:
                     act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-                opacityActions[act] = pct
-            fullScreen = menu.addAction("退出全屏") if self.isFullScreen() else menu.addAction("全屏")
+                act.triggered.connect(lambda checked=False, p=pct: self._menuSetOpacity(p))
+            fullScreen = menu.addAction("退出全屏" if self.isFullScreen() else "全屏")
+            fullScreen.triggered.connect(self._menuToggleFullScreen)
             exit = menu.addAction("退出")
+            exit.triggered.connect(self._menuExitPopWindow)
 
-        action = menu.exec(self.mapToGlobal(event.pos()))
-        if action == openBrowser:
-            if self.roomID != "0":
-                QDesktopServices.openUrl(QUrl(r"https://live.bilibili.com/%s" % self.roomID))
-        elif action == originQuality:
-            self.changeQuality.emit([self.id, 10000])
-            self.quality = 10000
-            self.mediaReload()
-        elif action == bluerayQuality:
-            self.changeQuality.emit([self.id, 400])
-            self.quality = 400
-            self.mediaReload()
-        elif action == highQuality:
-            self.changeQuality.emit([self.id, 250])
-            self.quality = 250
-            self.mediaReload()
-        elif action == lowQuality:
-            self.changeQuality.emit([self.id, 80])
-            self.quality = 80
-            self.mediaReload()
-        elif action == onlyAudio:
-            self.changeQuality.emit([self.id, -1])
-            self.quality = -1
-            self.mediaReload()
-        elif action in ampActions:
-            self.volumeAmplify = ampActions[action]
-            self._applyVolume()
-        elif action == switchCdn:
-            if self._stream_candidates and len(self._stream_candidates) > 1:
-                self._tryPlayNextStreamCandidate(max_tries=1)
-        if not self.top:
-            if action == popWindow:
-                self.popWindow.emit([self.id, self.roomID, self.quality, False, self.startWithDanmu])
-                self.mediaStop()
-        elif self.top:
-            if action in opacityActions:
-                pct = opacityActions[action]
-                self.setWindowOpacity(pct / 100.0)
-                self.opacity = pct
-            elif action == fullScreen:
-                if self.isFullScreen():
-                    self.showNormal()
-                else:
-                    self.showFullScreen()
-            elif action == exit:
-                self.closePopWindow.emit([self.id, self.roomID])
-                self.hide()
-                self.mediaStop()
-                self.hideTextBrowser()
+        menu.exec(self.mapToGlobal(event.pos()))
+
+    def _menuSetQuality(self, q):
+        self.changeQuality.emit([self.id, q])
+        self.quality = q
+        self.mediaReload()
+
+    def _menuSetAmplify(self, amp_val):
+        self.volumeAmplify = amp_val
+        self._applyVolume()
+
+    def _menuSwitchCdn(self):
+        if self._stream_candidates and len(self._stream_candidates) > 1:
+            self._tryPlayNextStreamCandidate(max_tries=1)
+
+    def _menuPopWindow(self):
+        self.popWindow.emit([self.id, self.roomID, self.quality, False, self.startWithDanmu])
+        self.mediaStop()
+
+    def _menuSetOpacity(self, pct):
+        self.setWindowOpacity(pct / 100.0)
+        self.opacity = pct
+
+    def _menuToggleFullScreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def _menuExitPopWindow(self):
+        self.closePopWindow.emit([self.id, self.roomID])
+        self.hide()
 
     def closeEvent(self, event):
         event.ignore()

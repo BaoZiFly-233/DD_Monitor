@@ -4,23 +4,31 @@ from PySide6.QtWidgets import (
     QLabel,
     QToolButton,
     QWidget,
-    QComboBox,
-    QLineEdit,
     QTextBrowser,
     QGridLayout,
-    QSlider,
-    QTabWidget,
 )
 from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtCore import Qt, Signal, QPoint, QSize
 from CommonWidget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
-from InstructionX_UIKit.icons import get_icon
-from uikit_bridge import apply_scoped_theme, current_color, is_dark, theme_changed
+from qfluentwidgets_pro import (
+    CheckBox,
+    ComboBox,
+    EditableComboBox,
+    FluentIcon,
+    Icon,
+    LineEdit,
+    Slider as FluentSlider,
+    TabWidget,
+)
+from uikit_bridge import is_dark, theme_changed
 
 # 弹幕显示比例（定义在 constants.py，此处重导出兼容旧导入路径）
 from constants import DISPLAY_RATIOS  # noqa: F401
 # 弹幕配置数据类（独立模块，纯数据无 Qt 依赖；重导出兼容旧导入路径）
 from danmaku_settings import DanmakuSettings  # noqa: F401
+
+# 弹幕机标题栏图标映射（Fluent 矢量图标，颜色随主题自动适配）
+_DANMU_ICONS = {"settings": FluentIcon.SETTING, "close": FluentIcon.CLOSE}
 
 
 class Bar(QLabel):
@@ -57,20 +65,18 @@ class Bar(QLabel):
 
 
 class ToolButton(QToolButton):
-    """标题栏按钮（UIKit 矢量图标）"""
+    """标题栏按钮（Fluent 矢量图标，颜色随主题自动适配）
+
+    注意：不能继承 qfluentwidgets 的 ToolButton——其构造用 singledispatch
+    重载，子类里 super().__init__(icon=...) 会被转发回子类自身导致
+    TypeError（弹幕机创建即崩）。用 QToolButton + Icon(QIcon) 同效。
+    """
 
     def __init__(self, icon_name, size=18):
-        super(ToolButton, self).__init__()
-        self._icon_name = icon_name
-        self._icon_size = size
+        super().__init__()
         self.setFixedSize(25, 25)
-        self._applyThemeColor()
-        theme_changed().connect(self._applyThemeColor)
-
-    def _applyThemeColor(self, dark=None):
-        self.setStyleSheet(f"border-color:{current_color('border.strong')}")
-        # 图标描边取 text.secondary 令牌，随明暗主题自动适配对比度
-        self.setIcon(get_icon(self._icon_name, size=self._icon_size, color=current_color("text.secondary")))
+        self.setIconSize(QSize(size, size))
+        self.setIcon(Icon(_DANMU_ICONS.get(icon_name, FluentIcon.INFO)))
 
 
 class TextOption(QWidget):
@@ -88,7 +94,7 @@ class TextOption(QWidget):
         # ---- 窗体布局 ----
         layout = QGridLayout(self)
         layout.addWidget(QLabel("字体大小"), 0, 0, 1, 1)
-        self.fontSizeCombox = QComboBox()
+        self.fontSizeCombox = ComboBox()
         self.fontSizeCombox.addItems([str(i) for i in range(5, 26)])
         self.fontSizeCombox.setCurrentIndex(setting[5])
         layout.addWidget(self.fontSizeCombox, 0, 1, 1, 1)
@@ -99,37 +105,34 @@ class TextOption(QWidget):
         layout.addWidget(self.opacitySlider, 1, 1, 1, 1)
 
         layout.addWidget(QLabel("窗体横向占比"), 2, 0, 1, 1)
-        self.horizontalCombobox = QComboBox()
+        self.horizontalCombobox = ComboBox()
         self.horizontalCombobox.addItems(["%d" % x + "%" for x in range(10, 110, 10)])
         self.horizontalCombobox.setCurrentIndex(setting[1])
         layout.addWidget(self.horizontalCombobox, 2, 1, 1, 1)
 
         layout.addWidget(QLabel("窗体纵向占比"), 3, 0, 1, 1)
-        self.verticalCombobox = QComboBox()
+        self.verticalCombobox = ComboBox()
         self.verticalCombobox.addItems(["%d" % x + "%" for x in range(10, 110, 10)])
         self.verticalCombobox.setCurrentIndex(setting[2])
         layout.addWidget(self.verticalCombobox, 3, 1, 1, 1)
 
         layout.addWidget(QLabel("弹幕窗类型"), 4, 0, 1, 1)
-        self.translateCombobox = QComboBox()
+        self.translateCombobox = ComboBox()
         self.translateCombobox.addItems(["弹幕和同传", "只显示弹幕", "只显示同传"])
         self.translateCombobox.setCurrentIndex(setting[3])
         layout.addWidget(self.translateCombobox, 4, 1, 1, 1)
 
         layout.addWidget(QLabel("同传过滤字符 (空格隔开)"), 5, 0, 1, 1)
-        self.translateFitler = QLineEdit("")
+        self.translateFitler = LineEdit()
         self.translateFitler.setText(setting[4])
         self.translateFitler.setFixedWidth(100)
         layout.addWidget(self.translateFitler, 5, 1, 1, 1)
 
         layout.addWidget(QLabel("礼物和进入信息"), 6, 0, 1, 1)
-        self.showEnterRoom = QComboBox()
+        self.showEnterRoom = ComboBox()
         self.showEnterRoom.addItems(["显示礼物和进入信息", "只显示礼物", "只显示进入信息", "隐藏窗口"])
         self.showEnterRoom.setCurrentIndex(setting[6])
         layout.addWidget(self.showEnterRoom, 6, 1, 1, 1)
-
-        # UIKit 局部主题：弹幕窗设置弹窗子树切换为暗色 UIKit 观感
-        apply_scoped_theme(self)
 
 
 class TextBrowser(QWidget):
@@ -219,19 +222,19 @@ class RollingOptionWidget(QWidget):
         layout.addWidget(self.opacitySlider, 0, 1, 1, 1)
 
         layout.addWidget(QLabel("显示区域"), 1, 0, 1, 1)
-        self.displayAreaCombobox = QComboBox()
+        self.displayAreaCombobox = ComboBox()
         self.displayAreaCombobox.addItems([f"{x}%" for x in range(10, 110, 10)])
         self.displayAreaCombobox.setCurrentIndex(int(settings_dict.get("display_area", 7)))
         layout.addWidget(self.displayAreaCombobox, 1, 1, 1, 1)
 
         layout.addWidget(QLabel("字体大小"), 2, 0, 1, 1)
-        self.fontSizeCombox = QComboBox()
+        self.fontSizeCombox = ComboBox()
         self.fontSizeCombox.addItems([str(i) for i in range(5, 26)])
         self.fontSizeCombox.setCurrentIndex(int(settings_dict.get("font_size", 10)))
         layout.addWidget(self.fontSizeCombox, 2, 1, 1, 1)
 
         layout.addWidget(QLabel("字体"), 3, 0, 1, 1)
-        self.fontFamilyCombobox = QComboBox()
+        self.fontFamilyCombobox = EditableComboBox()
         self.fontFamilyCombobox.addItems(
             ["Microsoft YaHei", "SimHei", "Microsoft JhengHei", "Arial", "Noto Sans SC", "PingFang SC"]
         )
@@ -239,41 +242,39 @@ class RollingOptionWidget(QWidget):
         idx = self.fontFamilyCombobox.findText(current_family)
         if idx >= 0:
             self.fontFamilyCombobox.setCurrentIndex(idx)
-        self.fontFamilyCombobox.setEditable(True)
+        self.fontFamilyCombobox.setText(current_family)
         layout.addWidget(self.fontFamilyCombobox, 3, 1, 1, 1)
 
         layout.addWidget(QLabel("弹幕速度"), 4, 0, 1, 1)
-        self.speedSlider = QSlider(Qt.Horizontal)
+        self.speedSlider = FluentSlider(Qt.Horizontal)
         self.speedSlider.setRange(50, 200)
         self.speedSlider.setValue(int(settings_dict.get("speed_percent", 85)))
         layout.addWidget(self.speedSlider, 4, 1, 1, 1)
 
         layout.addWidget(QLabel("描边粗细"), 5, 0, 1, 1)
-        self.strokeWidthSlider = QSlider(Qt.Horizontal)
+        self.strokeWidthSlider = FluentSlider(Qt.Horizontal)
         self.strokeWidthSlider.setRange(0, 60)
         self.strokeWidthSlider.setValue(int(settings_dict.get("stroke_width", 30)))
         layout.addWidget(self.strokeWidthSlider, 5, 1, 1, 1)
 
-        from PySide6.QtWidgets import QCheckBox
-
         layout.addWidget(QLabel("阴影效果"), 6, 0, 1, 1)
-        self.shadowEnabledCheckBox = QCheckBox()
+        self.shadowEnabledCheckBox = CheckBox()
         self.shadowEnabledCheckBox.setChecked(bool(settings_dict.get("shadow_enabled", False)))
         layout.addWidget(self.shadowEnabledCheckBox, 6, 1, 1, 1)
 
         layout.addWidget(QLabel("阴影强度"), 7, 0, 1, 1)
-        self.shadowStrengthSlider = QSlider(Qt.Horizontal)
+        self.shadowStrengthSlider = FluentSlider(Qt.Horizontal)
         self.shadowStrengthSlider.setRange(0, 100)
         self.shadowStrengthSlider.setValue(int(settings_dict.get("shadow_strength", 35)))
         layout.addWidget(self.shadowStrengthSlider, 7, 1, 1, 1)
 
         layout.addWidget(QLabel("允许顶部弹幕"), 8, 0, 1, 1)
-        self.topEnabledCheckBox = QCheckBox()
+        self.topEnabledCheckBox = CheckBox()
         self.topEnabledCheckBox.setChecked(bool(settings_dict.get("top_enabled", True)))
         layout.addWidget(self.topEnabledCheckBox, 8, 1, 1, 1)
 
         layout.addWidget(QLabel("允许底部弹幕"), 9, 0, 1, 1)
-        self.bottomEnabledCheckBox = QCheckBox()
+        self.bottomEnabledCheckBox = CheckBox()
         self.bottomEnabledCheckBox.setChecked(bool(settings_dict.get("bottom_enabled", True)))
         layout.addWidget(self.bottomEnabledCheckBox, 9, 1, 1, 1)
 
@@ -302,7 +303,7 @@ class GlobalDanmuOption(QWidget):
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.resize(400, 550)
 
-        tabs = QTabWidget()
+        tabs = TabWidget()
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(tabs)
@@ -316,9 +317,6 @@ class GlobalDanmuOption(QWidget):
 
         self.rollingOptionWidget = RollingOptionWidget(rolling_config_dict)
         tabs.addTab(self.rollingOptionWidget, "滚动弹幕")
-
-        # UIKit 局部主题：全局弹幕设置窗口子树切换为暗色 UIKit 观感
-        apply_scoped_theme(self)
 
     def syncBrowserSetting(self, danmu_config_list):
         if isinstance(danmu_config_list, list):

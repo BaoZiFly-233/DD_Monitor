@@ -18,8 +18,7 @@ import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QPixmap, QImage, QFont
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QHBoxLayout
-from InstructionX_UIKit.components import Button
-from uikit_bridge import apply_scoped_theme
+from qfluentwidgets_pro import PushButton, PrimaryPushButton
 
 HEADERS = {
     **http_utils.DEFAULT_HEADERS,
@@ -210,16 +209,13 @@ class LoginDialog(QDialog):
 
         btnRow = QHBoxLayout()
         btnRow.setSpacing(8)
-        refreshBtn = Button("刷新二维码", variant="primary")
+        refreshBtn = PrimaryPushButton("刷新二维码")
         refreshBtn.clicked.connect(self._fetchQRCode)
-        closeBtn = Button("关闭")
+        closeBtn = PushButton("关闭")
         closeBtn.clicked.connect(self.close)
         btnRow.addWidget(refreshBtn)
         btnRow.addWidget(closeBtn)
         lay.addLayout(btnRow)
-
-        # UIKit 局部主题：扫码窗子树切换为暗色 UIKit 观感
-        apply_scoped_theme(self)
 
     # ================================================================
     # 公开接口

@@ -15,15 +15,10 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QLabel,
-    QLineEdit,
-    QMenu,
-    QMessageBox,
-    QProgressBar,
     QPushButton,
-    QTabWidget,
-    QTableWidget,
     QTableWidgetItem,
     QToolTip,
     QWidget,
@@ -42,8 +37,8 @@ from PySide6.QtGui import (
 from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, QUrl, Signal
 import http_utils
 from CommonWidget import DownloadImage  # 公共图片下载线程
-from InstructionX_UIKit.components import Button
-from uikit_bridge import apply_scoped_theme, current_color, is_dark, theme_changed
+from qfluentwidgets_pro import FlowLayout, PrimaryPushButton, ProgressBar, RoundMenu, TableWidget, TabWidget, LineEdit
+from uikit_bridge import current_color, info as uikit_info, is_dark, theme_changed
 
 
 header = http_utils.DEFAULT_HEADERS
@@ -149,19 +144,23 @@ class CircleImage(QWidget):
 
 
 class TextButton(QPushButton):
-    """文字按钮（带选中态 pushToken 样式，底色随 UIKit 主题/配色）"""
+    """分类胶囊按钮（选中态 pushToken：选中=主题色，未选中=弱化色）"""
 
     def __init__(self, name, pushToken=False):
-        super().__init__()
-        self.setText(name)
+        super().__init__(name)
         self.pushToken = pushToken
         self._applyTheme()
         theme_changed().connect(self._applyTheme)
 
     def _applyTheme(self, *args):
-        # 选中态用主题主色，未选中用背景次色；边框圆角等由 scoped UIKit QSS 接管
-        color = current_color("primary") if self.pushToken else current_color("bg.muted")
-        self.setStyleSheet("background-color:%s;border-width:1px" % color)
+        # 胶囊圆角；选中态用主题主色 + 白字，未选中用弱化底色 + 主题文字色
+        if self.pushToken:
+            color, text = current_color("primary"), "white"
+        else:
+            color, text = current_color("bg.muted"), current_color("text.primary")
+        self.setStyleSheet(
+            f"background-color:{color};color:{text};border:none;border-radius:13px;padding:4px 12px;"
+        )
 
 
 class RecordThread(QThread):
@@ -266,6 +265,13 @@ class CoverLabel(QLabel):
         self.setObjectName("cover")
         self.setFrameShape(QFrame.Box)
         self._applyRoundedMask()
+        # Fluent 卡片阴影：悬停时柔和投影（提升卡片浮起感）
+        self._shadowEffect = QGraphicsDropShadowEffect(self)
+        self._shadowEffect.setBlurRadius(18)
+        self._shadowEffect.setOffset(0, 4)
+        self._shadowEffect.setColor(QColor(0, 0, 0, 90))
+        self._shadowEffect.setEnabled(False)
+        self.setGraphicsEffect(self._shadowEffect)
         self.firstUpdateToken = True
         self.layout = QGridLayout(self)
         self.profile = CircleImage()
@@ -398,9 +404,7 @@ class CoverLabel(QLabel):
     def recordError(self, roomID):
         self.recordThread.checkTimer.stop()
         self.refreshStateLabel()
-        QMessageBox.information(
-            self, "录制中止", "%s %s 录制结束 请检查网络或主播是否掉线" % (self.title, roomID), QMessageBox.Ok
-        )
+        uikit_info(self, "录制中止", "%s %s 录制结束 请检查网络或主播是否掉线" % (self.title, roomID))
 
     def updateProfile(self, img):
         self.profile.set_image(img)
@@ -419,6 +423,15 @@ class CoverLabel(QLabel):
     def dragEnterEvent(self, QDragEnterEvent):
         QDragEnterEvent.acceptProposedAction()
 
+    def enterEvent(self, event):
+        # 悬停浮起阴影（QGraphicsEffect 仅在悬停时启用，避免常驻渲染开销）
+        self._shadowEffect.setEnabled(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._shadowEffect.setEnabled(False)
+        super().leaveEvent(event)
+
     def mousePressEvent(self, QMouseEvent):  # 设置drag事件 发送拖动封面的房间号
         if QMouseEvent.button() == Qt.LeftButton:
             drag = QDrag(self)
@@ -427,81 +440,86 @@ class CoverLabel(QLabel):
             drag.setMimeData(mimeData)
             drag.exec()
         elif QMouseEvent.button() == Qt.RightButton:
-            menu = QMenu()
+            # RoundMenu.exec 是非阻塞的（只显示菜单立即返回），不能用
+            # exec 返回值判断选择；菜单项通过 triggered 信号处理
+            menu = RoundMenu()
             addTo = menu.addMenu("添加至窗口 ►")
-            addWindow = []
             for win in range(1, 10):
-                addWindow.append(addTo.addAction("窗口%s" % win))
-            if not self.topToken:
-                top = menu.addAction("添加置顶")
-            else:
-                top = menu.addAction("取消置顶")
-            record = None
-            if self.recordState == 0:  # 无录制任务
-                if self.liveState == 1:
-                    record = menu.addAction("录制(最高画质)")
-                elif self.liveState in [0, 2]:  # 未开播或轮播
-                    record = menu.addAction("开播自动录制")
-            else:  # 录制中或等待录制
-                record = menu.addAction("取消录制")
+                act = addTo.addAction("窗口%s" % win)
+                act.triggered.connect(lambda checked=False, w=win: self.addToWindow.emit([w - 1, self.roomID]))
+            top = menu.addAction("取消置顶" if self.topToken else "添加置顶")
+            top.triggered.connect(self._toggleTop)
+            record = menu.addAction(self._recordActionText())
+            record.triggered.connect(self._toggleRecord)
             openBrowser = menu.addAction("打开直播间")
+            openBrowser.triggered.connect(
+                lambda: QDesktopServices.openUrl(QUrl(r"https://live.bilibili.com/%s" % self.roomID))
+                if self.roomID != "0"
+                else None
+            )
             copyRoomID = menu.addAction("复制房号 %s" % self.roomID)
+            copyRoomID.triggered.connect(lambda: QApplication.clipboard().setText(self.roomID))
             menu.addSeparator()  # 添加分割线，防止误操作
             delete = menu.addAction("删除")
-            action = menu.exec(self.mapToGlobal(QMouseEvent.position().toPoint()))
-            if action == delete:
-                self.deleteCover.emit(self.roomID)
-                self.roomID = "0"
-                self.hide()
-            elif action == top:
-                self.topToken = not self.topToken
-                self.changeTopToken.emit([self.roomID, self.topToken])  # 发送修改后的置顶token
-                self._applyTheme()
-            elif action == record:
-                if self.roomID != "0":
-                    if self.recordState == 0:  # 无录制任务
-                        saveName = "%s_%s_%s" % (
-                            self.title,
-                            self.roomTitle,
-                            time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time())),
+            delete.triggered.connect(self._deleteSelf)
+            menu.exec(self.mapToGlobal(QMouseEvent.position().toPoint()))
+
+    def _recordActionText(self):
+        """录制菜单项的文案（按当前录制/直播状态）"""
+        if self.recordState == 0:  # 无录制任务
+            if self.liveState == 1:
+                return "录制(最高画质)"
+            if self.liveState in [0, 2]:  # 未开播或轮播
+                return "开播自动录制"
+        return "取消录制"
+
+    def _toggleTop(self):
+        """切换置顶状态"""
+        self.topToken = not self.topToken
+        self.changeTopToken.emit([self.roomID, self.topToken])  # 发送修改后的置顶token
+        self._applyTheme()
+
+    def _deleteSelf(self):
+        """右键菜单"删除"：从面板移除卡片"""
+        self.deleteCover.emit(self.roomID)
+        self.roomID = "0"
+        self.hide()
+
+    def _toggleRecord(self):
+        """录制状态机：开始录制 / 取消录制 / 等待录制"""
+        if self.roomID == "0":
+            return
+        if self.recordState == 0:  # 无录制任务
+            saveName = "%s_%s_%s" % (
+                self.title,
+                self.roomTitle,
+                time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time())),
+            )
+            self.savePath = QFileDialog.getSaveFileName(self, "选择保存路径", saveName, "*.flv")[0]
+            if self.savePath:  # 保存路径有效
+                if self.liveState == 1:  # 直播中
+                    self.recordThread.setSavePath(self.savePath)
+                    lp = getattr(self, "_liverPanel", None)
+                    if lp is not None:
+                        self.recordThread.setCredential(
+                            getattr(lp, "_credential", None), getattr(lp, "_sessionData", "")
                         )
-                        self.savePath = QFileDialog.getSaveFileName(self, "选择保存路径", saveName, "*.flv")[0]
-                        if self.savePath:  # 保存路径有效
-                            if self.liveState == 1:  # 直播中
-                                self.recordThread.setSavePath(self.savePath)
-                                lp = getattr(self, "_liverPanel", None)
-                                if lp is not None:
-                                    self.recordThread.setCredential(
-                                        getattr(lp, "_credential", None), getattr(lp, "_sessionData", "")
-                                    )
-                                self.recordThread.start()
-                                self.recordThread.checkTimer.start(3000)
-                                self.recordState = 1  # 改为录制状态
-                                self.refreshStateLabel("0min")
-                            elif self.liveState in [0, 2]:  # 未开播或轮播中
-                                self.recordState = 2  # 改为等待录制状态
-                                self.refreshStateLabel()
-                    elif self.recordState == 1:  # 录制中→取消录制
-                        self.recordState = 0  # 取消录制
-                        self.recordThread.checkTimer.stop()
-                        self.recordThread.stopRecording()  # 设置录像线程标志位让它自行退出结束
-                        self.refreshStateLabel()
-                    elif self.recordState == 2:  # 等待录制→取消录制
-                        self.recordState = 0  # 取消录制
-                        self.recordThread.checkTimer.stop()
-                        self.refreshStateLabel()
-            elif action == openBrowser:
-                if self.roomID != "0":
-                    QDesktopServices.openUrl(QUrl(r"https://live.bilibili.com/%s" % self.roomID))
-            elif action == copyRoomID:
-                clipboard = QApplication.clipboard()
-                clipboard.setText(self.roomID)
-            else:
-                for index, i in enumerate(addWindow):
-                    print(index, i)
-                    if action == i:
-                        self.addToWindow.emit([index, self.roomID])  # 添加至窗口 窗口 房号
-                        break
+                    self.recordThread.start()
+                    self.recordThread.checkTimer.start(3000)
+                    self.recordState = 1  # 改为录制状态
+                    self.refreshStateLabel("0min")
+                elif self.liveState in [0, 2]:  # 未开播或轮播中
+                    self.recordState = 2  # 改为等待录制状态
+                    self.refreshStateLabel()
+        elif self.recordState == 1:  # 录制中→取消录制
+            self.recordState = 0  # 取消录制
+            self.recordThread.checkTimer.stop()
+            self.recordThread.stopRecording()  # 设置录像线程标志位让它自行退出结束
+            self.refreshStateLabel()
+        elif self.recordState == 2:  # 等待录制→取消录制
+            self.recordState = 0  # 取消录制
+            self.recordThread.checkTimer.stop()
+            self.refreshStateLabel()
 
 
 class GetHotLiver(QThread):
@@ -776,7 +794,7 @@ class DownloadVTBList(QThread):
         self.vtbList.emit(vtbList)
 
 
-class HotLiverTable(QTableWidget):
+class HotLiverTable(TableWidget):
     """关注列表"""
 
     addToWindow = Signal(list)
@@ -785,17 +803,22 @@ class HotLiverTable(QTableWidget):
         super().__init__()
 
     def contextMenuEvent(self, event):
-        self.menu = QMenu(self)
-        addTo = self.menu.addMenu("添加至窗口 ►")
-        addWindow = []
+        # RoundMenu.exec 非阻塞，菜单项通过 triggered 信号处理
+        menu = RoundMenu(self)
+        addTo = menu.addMenu("添加至窗口 ►")
         for win in range(1, 10):
-            addWindow.append(addTo.addAction("窗口%s" % win))
-        action = self.menu.exec(self.mapToGlobal(event.pos()))
-        for index, i in enumerate(addWindow):
-            if action == i:
-                text = self.item(self.currentRow(), 2).text()
-                self.addToWindow.emit([index, text])
-                break
+            act = addTo.addAction("窗口%s" % win)
+            act.triggered.connect(lambda checked=False, w=win, m=self: self._addHotLiverToWindow(w))
+        menu.exec(self.mapToGlobal(event.pos()))
+
+    def _addHotLiverToWindow(self, win):
+        """热门直播表格右键：把当前行房号加入指定窗口"""
+        try:
+            item = self.item(self.currentRow(), 2)
+            text = item.text() if item is not None else ""
+        except Exception:
+            text = ""
+        self.addToWindow.emit([win - 1, text])
 
 
 class AddLiverRoomWidget(QWidget):
@@ -814,14 +837,15 @@ class AddLiverRoomWidget(QWidget):
         layout = QGridLayout(self)
         layout.addWidget(QLabel("请输入B站直播间房号 多个房号之间用空格隔开"), 0, 0, 1, 4)
         self.roomEditText = ""
-        self.roomEdit = QLineEdit()
+        self.roomEdit = LineEdit()
         # self.roomEdit.textChanged.connect(self.editChange)  # 手感不好 还是取消了
         layout.addWidget(self.roomEdit, 1, 0, 1, 5)
-        confirm = Button("完成", variant="primary", size="sm")
+        confirm = PrimaryPushButton("完成")
+        confirm.setFixedHeight(28)
         confirm.clicked.connect(self.sendSelectedRoom)
         layout.addWidget(confirm, 0, 4, 1, 1)
 
-        self.tabWidget = QTabWidget()
+        self.tabWidget = TabWidget()
         self.tabWidget.currentChanged.connect(self._onTabChanged)
         layout.addWidget(self.tabWidget, 2, 0, 5, 5)
 
@@ -847,7 +871,7 @@ class AddLiverRoomWidget(QWidget):
         self.buttonList = [self.virtual, self.onlineGame, self.mobileGame, self.consoleGame, self.entertainment]
         self.currentPage = 0
 
-        self.progressBar = QProgressBar(self)
+        self.progressBar = ProgressBar(parent=self)
         self.progressBar.setGeometry(0, 0, self.width(), 20)
         self.progressBar.setRange(0, 0)
         self.progressBar.hide()
@@ -876,15 +900,16 @@ class AddLiverRoomWidget(QWidget):
         followsLayout.setContentsMargins(0, 0, 0, 0)
         followsLayout.addWidget(QLabel(), 0, 2, 1, 1)
         followsLayout.addWidget(QLabel("自动添加你关注的up直播间 （只能拉取最近关注的500名）"), 0, 3, 1, 3)
-        self.uidEdit = QLineEdit()
+        self.uidEdit = LineEdit()
         self.uidEdit.setPlaceholderText("请输入你的uid")
         self.uidEdit.setMinimumWidth(120)
         self.uidEdit.setMaximumWidth(300)
         followsLayout.addWidget(self.uidEdit, 0, 0, 1, 1)
-        uidCheckButton = Button("查询", variant="primary", size="sm")
+        uidCheckButton = PrimaryPushButton("查询")
+        uidCheckButton.setFixedHeight(28)
         uidCheckButton.clicked.connect(self.checkFollows)  # 查询关注
         followsLayout.addWidget(uidCheckButton, 0, 1, 1, 1)
-        self.followsTable = QTableWidget()
+        self.followsTable = TableWidget()
         self.followsTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.followsTable.verticalScrollBar().installEventFilter(self)
         self.followsTable.verticalHeader().sectionClicked.connect(self.followLiverAdd)
@@ -911,7 +936,7 @@ class AddLiverRoomWidget(QWidget):
         self.vtbSearchButton = TextButton("查询VUP")
         self.vtbSearchButton.clicked.connect(self.vtbSearch)
         hacoLayout.addWidget(self.vtbSearchButton, 0, 1, 1, 1)
-        self.hacoTable = QTableWidget()
+        self.hacoTable = TableWidget()
         self.hacoTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.hacoTable.verticalScrollBar().installEventFilter(self)
         self.hacoTable.verticalHeader().sectionClicked.connect(self.hacoAdd)
@@ -947,9 +972,6 @@ class AddLiverRoomWidget(QWidget):
         self.tabWidget.addTab(hotLiverPage, "正在直播")
         self.tabWidget.addTab(hacoPage, "个人势/箱")
         self.tabWidget.addTab(followsPage, "关注添加")
-
-        # UIKit 局部主题：添加直播间弹窗子树切换为暗色 UIKit 观感
-        apply_scoped_theme(self)
 
     def editChange(self):  # 提取输入文本中的数字
         if len(self.roomEdit.text()) > len(self.roomEditText):
@@ -1049,7 +1071,7 @@ class AddLiverRoomWidget(QWidget):
     def collectVTBList(self, vtbList):
         try:
             if not vtbList:
-                QMessageBox.information(self, "更新VUP名单", "更新失败 请检查网络", QMessageBox.Ok)
+                uikit_info(self, "更新VUP名单", "更新失败 请检查网络")
                 return
             with open(os.path.join(self.application_path, "utils/vtb.csv"), "w", encoding="utf-8") as vtbs:
                 for line in vtbList:
@@ -1066,10 +1088,10 @@ class AddLiverRoomWidget(QWidget):
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
                     self.hacoTable.setItem(y, x, QTableWidgetItem(line[x]))
-            QMessageBox.information(self, "更新VUP名单", "更新完成", QMessageBox.Ok)
+            uikit_info(self, "更新VUP名单", "更新完成")
         except Exception:
             logging.exception("vtb.csv 写入失败")
-            QMessageBox.information(self, "更新VUP名单", "更新失败 请检查网络", QMessageBox.Ok)
+            uikit_info(self, "更新VUP名单", "更新失败 请检查网络")
         finally:
             # 恢复按钮状态与连接（无论成功/失败/空名单）
             self.refreshButton.setText("更新名单")
@@ -1429,8 +1451,8 @@ class LiverPanel(QWidget):
         self.addLiverRoomWidget = AddLiverRoomWidget(self.application_path)
         self.addLiverRoomWidget.roomList.connect(self.addLiverRoomList)
         self.addLiverRoomWidget.hotLiverTable.addToWindow.connect(self.addCoverToPlayer)
-        self.multiple = 1
-        self.layout = QGridLayout(self)
+        # Fluent FlowLayout：卡片流式自动换行，随容器宽度自适应列数
+        self.layout = FlowLayout(self, needAni=False)
         self.layout.setSpacing(9)
         self.layout.setContentsMargins(7, 7, 7, 7)
         self.coverList = []
@@ -1709,7 +1731,7 @@ class LiverPanel(QWidget):
                         tmpList.append(cover)
 
         for cnt, cover in enumerate(tmpList):
-            self.layout.addWidget(cover, cnt // self.multiple, cnt % self.multiple)
+            self.layout.addWidget(cover)
             cover.show()
         self.adjustSize()
 

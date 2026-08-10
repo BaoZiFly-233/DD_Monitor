@@ -14,3 +14,7 @@ qrcode[pil]>=7.4.0
 pure-protobuf~=3.1.2
 yarl>=1.9.0
 bilibili-api-python>=17.0.0,<18.0.0
+# qfluentwidgets_pro（vendored 于项目内）运行时依赖
+darkdetect>=0.8.0
+platformdirs>=3.0.0
+pywin32>=306; sys_platform == "win32"

@@ -17,6 +17,7 @@ dist/
 *.build/
 *.dist/
 logs/
+crash.log
 
 # Config
 config_*.json

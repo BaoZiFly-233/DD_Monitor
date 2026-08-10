@@ -3,8 +3,7 @@ import http_utils
 from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QGridLayout, QLabel, QTextBrowser, QWidget
-from InstructionX_UIKit.components import Button
-from uikit_bridge import apply_scoped_theme
+from qfluentwidgets_pro import PushButton, PrimaryPushButton
 from app_version import parse_version
 
 
@@ -64,20 +63,17 @@ class updateReminder(QWidget):
         self.updateInfo = QTextBrowser()
         self.layout.addWidget(self.updateInfo, 1, 0, 3, 3)
 
-        noMoreButton = Button("不再提示", variant="default")
+        noMoreButton = PushButton("不再提示")
         noMoreButton.clicked.connect(self.noMoreSignal.emit)
         noMoreButton.clicked.connect(self.close)
         self.layout.addWidget(noMoreButton, 4, 0, 1, 1)
-        noButton = Button("否", variant="default")
+        noButton = PushButton("否")
         noButton.clicked.connect(self.close)
         self.layout.addWidget(noButton, 4, 1, 1, 1)
-        yesButton = Button("是", variant="primary")
+        yesButton = PrimaryPushButton("是")
         yesButton.clicked.connect(self.openURL)
         yesButton.clicked.connect(self.close)
         self.layout.addWidget(yesButton, 4, 2, 1, 1)
-
-        # UIKit 局部主题：检查版本弹窗子树切换为暗色 UIKit 观感
-        apply_scoped_theme(self)
 
     def _show(self, link, version, infos):
         self.link = link

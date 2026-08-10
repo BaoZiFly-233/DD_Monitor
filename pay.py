@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from CommonWidget import DownloadImage  # 公共图片下载线程
-from uikit_bridge import apply_scoped_theme
 
 
 class thankToBoss(QThread):
@@ -87,9 +86,6 @@ class pay(QDialog):
         self.thankToBoss = thankToBoss()
         self.thankToBoss.bossList.connect(self.updateBossList)
         self.thankToBoss.start()  # 启动获取感谢名单（此前被注释，名单永远停在"正在获取..."）
-
-        # UIKit 局部主题：赞助窗子树切换为暗色 UIKit 观感
-        apply_scoped_theme(self)
 
     def updateQR(self, img):
         self.QR.setPixmap(img)
