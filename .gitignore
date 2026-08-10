@@ -6,6 +6,7 @@ venv/
 
 # AI 开发辅助工具（本地工作区，不纳入同步）
 .workbuddy/
+.claude/
 
 # Cache & binary & logs
 __pycache__

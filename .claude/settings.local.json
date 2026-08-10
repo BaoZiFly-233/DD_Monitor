@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(Set-Location D:\\\\DD_Monitor; $files = @\\(\"DD监控室.py\",\"danmu.py\",\"checkUpdate.py\",\"pay.py\",\"uikit_bridge.py\"\\); foreach \\($f in $files\\) { python -m py_compile $f 2>&1 | Out-String; Write-Output \"$f EXIT=$LASTEXITCODE\" })",
-      "PowerShell(Set-Location D:\\\\DD_Monitor; python -m py_compile DD监控室.py ReportException.py pay.py checkUpdate.py danmu.py uikit_bridge.py; Write-Output \"COMPILE=$LASTEXITCODE\"; python C:\\\\Users\\\\Administrator\\\\AppData\\\\Local\\\\Temp\\\\uikit_smoke2.py 2>&1 | Select-Object -Last 6)"
-    ]
-  }
-}
