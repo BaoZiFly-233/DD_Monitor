@@ -15,13 +15,22 @@ from PySide6.QtWidgets import (
     QLabel,
     QComboBox,
     QCheckBox,
-    QPushButton,
     QLineEdit,
     QFileDialog,
     QGroupBox,
 )
-from CommonWidget import Slider
+from InstructionX_UIKit.components import Button, Slider
+from uikit_bridge import apply_scoped_theme, ACCENT_NAMES
 from config_manager import MAX_WINDOWS
+
+#: 配色方案显示名（与 uikit_bridge.ACCENT_NAMES 一一对应）
+_ACCENT_LABELS = {
+    "blue": "默认蓝",
+    "teal": "青绿",
+    "purple": "紫罗兰",
+    "orange": "暖橙",
+    "green": "翠绿",
+}
 
 
 class SettingsDialog(QDialog):
@@ -56,11 +65,13 @@ class SettingsDialog(QDialog):
         # 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        apply_btn = QPushButton("应用")
+        apply_btn = Button("应用", variant="primary")
         apply_btn.clicked.connect(self._apply)
-        apply_btn.setStyleSheet("background-color:#3daee9;color:white;padding:6px 20px;border-radius:3px")
         btn_layout.addWidget(apply_btn)
         main_layout.addLayout(btn_layout)
+
+        # UIKit 局部主题：本弹窗子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
 
     # ---- 播放标签页 ----
 
@@ -229,8 +240,7 @@ class SettingsDialog(QDialog):
         self.cachePath = QLineEdit()
         self.cachePath.setText(self.config.get("saveCachePath", ""))
         path_layout.addWidget(self.cachePath)
-        browse_btn = QPushButton("...")
-        browse_btn.setFixedWidth(40)
+        browse_btn = Button("浏览")
         browse_btn.clicked.connect(self._browseCachePath)
         path_layout.addWidget(browse_btn)
         layout.addLayout(path_layout, 1, 1)
@@ -251,8 +261,7 @@ class SettingsDialog(QDialog):
         desc = QLabel("点击下方按钮打开布局选择面板，拖拽调整窗口排列。")
         desc.setWordWrap(True)
         layout.addWidget(desc)
-        open_btn = QPushButton("打开布局设置")
-        open_btn.setFixedHeight(40)
+        open_btn = Button("打开布局设置", size="lg", block=True)
         open_btn.clicked.connect(self._layout_panel_fn)
         layout.addWidget(open_btn)
         layout.addStretch()
@@ -277,8 +286,29 @@ class SettingsDialog(QDialog):
         self.checkUpdate.setChecked(self.config.get("checkUpdate", True))
         layout.addWidget(self.checkUpdate, 2, 0, 1, 2)
 
-        layout.setRowStretch(3, 1)
+        layout.addWidget(QLabel("主题"), 3, 0)
+        self.themeCombo = QComboBox()
+        self.themeCombo.addItems(["深色", "浅色"])
+        self.themeCombo.setCurrentIndex(0 if self.config.get("theme", "dark") == "dark" else 1)
+        layout.addWidget(self.themeCombo, 3, 1)
+
+        layout.addWidget(QLabel("配色"), 4, 0)
+        self.accentCombo = QComboBox()
+        self.accentCombo.addItems([_ACCENT_LABELS.get(n, n) for n in ACCENT_NAMES])
+        current_accent = self.config.get("accent", "blue")
+        self.accentCombo.setCurrentIndex(ACCENT_NAMES.index(current_accent) if current_accent in ACCENT_NAMES else 0)
+        # 选配色即实时预览（点"应用"才写入配置）
+        self.accentCombo.currentIndexChanged.connect(self._previewAccent)
+        layout.addWidget(self.accentCombo, 4, 1)
+
+        layout.setRowStretch(5, 1)
         return w
+
+    def _previewAccent(self, index):
+        """切换配色下拉框时立即应用配色（预览），应用按钮负责保存配置。"""
+        from uikit_bridge import set_accent
+
+        set_accent(ACCENT_NAMES[index])
 
     # ---- 应用 ----
 
@@ -329,6 +359,15 @@ class SettingsDialog(QDialog):
         cfg["startWithDanmu"] = self.startDanmu.isChecked()
         cfg["showStartLive"] = self.startLive.isChecked()
         cfg["checkUpdate"] = self.checkUpdate.isChecked()
+
+        # 主题 / 配色切换（全局 UIKit，保存后立即生效）
+        theme = "dark" if self.themeCombo.currentIndex() == 0 else "light"
+        cfg["theme"] = theme
+        cfg["accent"] = ACCENT_NAMES[self.accentCombo.currentIndex()]
+        from uikit_bridge import set_theme, set_accent
+
+        set_theme(theme == "dark")
+        set_accent(cfg["accent"])
 
         self.configManager.save()
         self.accept()

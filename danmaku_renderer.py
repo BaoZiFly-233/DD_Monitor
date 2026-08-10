@@ -90,13 +90,6 @@ class DanmakuImageCache:
         self._cache = OrderedDict()
         self._max_items = max(32, int(max_items))
 
-    @classmethod
-    def instance(cls):
-        """全局共享实例（按需创建）"""
-        if not hasattr(cls, "_instance") or cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
     def get_or_create(self, text, color, style: DanmakuStyle):
         key = self._build_key(text, color, style)
         sprite = self._cache.get(key)
@@ -109,12 +102,6 @@ class DanmakuImageCache:
         self._cache.move_to_end(key)
         while len(self._cache) > self._max_items:
             self._cache.popitem(last=False)
-        return sprite
-
-    def get_cached(self, key):
-        sprite = self._cache.get(key)
-        if sprite is not None:
-            self._cache.move_to_end(key)
         return sprite
 
     @staticmethod

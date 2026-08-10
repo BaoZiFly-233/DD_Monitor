@@ -2,7 +2,10 @@
 异常捕获器
 """
 
-import logging, traceback, platform, subprocess
+import logging
+import platform
+import subprocess
+import traceback
 
 
 def uncaughtExceptionHandler(exctype, value, tb):
@@ -36,7 +39,10 @@ def unraisableExceptionHandler(exc_type, exc_value, exc_traceback, err_msg, obje
     )
 
 
-def threadingExceptionHandler(exc_type, exc_value, exc_traceback, thread):
+def threadingExceptionHandler(args):
+    # Python 3.8+ threading.excepthook 只传一个 ThreadingException 对象，
+    # 旧的四参数签名会导致处理器自身抛 TypeError，掩盖真正的线程异常
+    exc_type, exc_value, exc_traceback, thread = args
     logging.error(
         "\n************!!!UNCAUGHT THREADING EXCEPTION!!!***********\n"
         + ("Type: %s" % exc_type)
@@ -66,10 +72,16 @@ def loggingSystemInfo():
         gpuCmd = "/usr/bin/lspci"
 
     try:
-        systemInfoProcess = subprocess.Popen(systemCmd, shell=True, stdout=subprocess.PIPE, universal_newlines=True)
-        systemInfoProcessReturn = systemInfoProcess.stdout.read()
-        gpuInfoProcess = subprocess.Popen(gpuCmd, shell=True, stdout=subprocess.PIPE, universal_newlines=True)
-        gpuInfoProcessReturn = gpuInfoProcess.stdout.read()
+        # subprocess.run 自动读取并关闭管道，避免 Popen.stdout.read() 在
+        # 输出超过管道缓冲时死锁，且带超时防止 systeminfo 长时间卡住
+        system_info_res = subprocess.run(
+            systemCmd, shell=True, capture_output=True, text=True, timeout=20
+        )
+        systemInfoProcessReturn = system_info_res.stdout
+        gpu_info_res = subprocess.run(
+            gpuCmd, shell=True, capture_output=True, text=True, timeout=20
+        )
+        gpuInfoProcessReturn = gpu_info_res.stdout
 
         if platform.system() == "Windows":
             gpuInfoProcessReturn = gpuInfoProcessReturn.strip()

@@ -4,9 +4,10 @@
 import logging
 
 from PySide6.QtCore import QByteArray, QMetaObject, QPoint, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QOpenGLContext, QPainter
+from PySide6.QtGui import QColor, QOpenGLContext, QPainter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication
+from uikit_bridge import current_color, is_dark, theme_changed
 
 
 class MpvGLWidget(QOpenGLWidget):
@@ -31,6 +32,8 @@ class MpvGLWidget(QOpenGLWidget):
         self._danmaku_timer.timeout.connect(self._on_danmaku_tick)
         self.frameSwapped.connect(self._on_frame_swapped)
         self.setUpdateBehavior(QOpenGLWidget.NoPartialUpdate)
+        # 明暗/配色切换后重绘 GL 面，使无视频占位色及时更新
+        theme_changed().connect(lambda *_: self.update())
         if self._danmaku_renderer is not None:
             self._danmaku_renderer.setUpdateCallback(self._schedule_danmaku_updates)
 
@@ -95,7 +98,13 @@ class MpvGLWidget(QOpenGLWidget):
         if current_context is not None:
             funcs = current_context.functions()
             if self._render_context is None or not self._playback_active:
-                funcs.glClearColor(0.3529, 0.3882, 0.4274, 1.0)  # #5a636d
+                if is_dark():
+                    # 暗色下用中灰蓝占位（略亮于背景，可辨识为视频区）
+                    funcs.glClearColor(0.3529, 0.3882, 0.4274, 1.0)  # #5a636d
+                else:
+                    # 亮色下用浅灰占位（bg.muted，随配色微染），避免"黑灰"突兀
+                    c = QColor(current_color("bg.muted"))
+                    funcs.glClearColor(c.redF(), c.greenF(), c.blueF(), 1.0)
             else:
                 funcs.glClearColor(0.0, 0.0, 0.0, 1.0)
             funcs.glClear(0x00004000)

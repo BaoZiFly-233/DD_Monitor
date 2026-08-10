@@ -1,8 +1,11 @@
-# ruff 配置 — 本项目代码风格约定
-# 背景：曾有自动格式化钩子以默认配置(black风格, 双引号, 88列)重排全文件，
-# 产生 800+ 行噪音 diff。这里直接禁用 formatter（lint 不受影响），
-# 需要格式化时由维护者显式执行并单独提交。
-line-length = 120
+# ruff 配置（独立文件，避免 pyproject.toml 自动发现不一致）
+line-length = 160
+target-version = "py311"
+exclude = ["blivedm", "__pycache__", "docs", "cache"]
 
-[format]
-exclude = ["*.py"]
+[lint]
+select = ["E", "F", "W"]
+# E402: DD监控室.py 顶部刻意先启用 faulthandler / Windows SetErrorMode 再 import，
+#       以保证崩溃捕获在任何业务模块加载前生效，属于有意为之。
+[lint.per-file-ignores]
+"DD监控室.py" = ["E402"]

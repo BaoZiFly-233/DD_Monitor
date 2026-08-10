@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QLabel, QWidget, QGridLayout
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal
 from LayoutConfig import layoutList
+from uikit_bridge import current_color, theme_changed
 
 
 class Label(QLabel):
@@ -16,7 +17,12 @@ class Label(QLabel):
         self.setText(text)
         self.setFont(QFont("微软雅黑", 13, QFont.Bold))
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color:#4682B4")
+        self._applyThemeColor()
+        # 跟随全局明暗主题刷新色块（primary 令牌色）
+        theme_changed().connect(self._applyThemeColor)
+
+    def _applyThemeColor(self, dark=None):
+        self.setStyleSheet(f"background-color:{current_color('primary')}")
 
 
 class LayoutWidget(QLabel):
@@ -38,7 +44,8 @@ class LayoutWidget(QLabel):
         self.clicked.emit(self.number)
 
     def enterEvent(self, QEvent):
-        self.setStyleSheet("background-color:#AFEEEE")
+        # hover 色取自主题令牌（primary.subtle），下次进入时随主题刷新
+        self.setStyleSheet(f"background-color:{current_color('primary.subtle')}")
 
     def leaveEvent(self, QEvent):
         self.setStyleSheet("background-color:#00000000")

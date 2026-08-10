@@ -14,9 +14,12 @@ from bilibili_api import live, sync
 from bili_credential import build_credential, normalize_credential_data
 from CommonWidget import Slider
 from remote import DanmakuEvent, remoteThread
-from danmu import TextBrowser, DanmakuSettings, DISPLAY_RATIOS
+from constants import DISPLAY_RATIOS
+from danmaku_settings import DanmakuSettings
+from danmu import TextBrowser
 from danmaku_renderer import DanmakuRenderer
 from mpv_gl_widget import MpvGLWidget
+from uikit_bridge import current_color, theme_changed
 import logging
 import warnings
 from datetime import datetime
@@ -410,7 +413,6 @@ class VideoWidget(QFrame):
         self.topLabel = QLabel()
         self.topLabel.setFixedHeight(30)
         self.topLabel.setObjectName("frame")
-        self.topLabel.setStyleSheet("background-color:#293038")
         self.topLabel.setFont(QFont("微软雅黑", 15, QFont.Bold))
         layout.addWidget(self.topLabel, 0, 0, 1, 12)
         self.topLabel.hide()
@@ -418,7 +420,6 @@ class VideoWidget(QFrame):
         # 控制栏
         self.frame = QWidget()
         self.frame.setObjectName("frame")
-        self.frame.setStyleSheet("background-color:#293038")
         self.frame.setFixedHeight(50)
         frameLayout = QHBoxLayout(self.frame)
         frameLayout.setContentsMargins(0, 0, 0, 0)
@@ -515,6 +516,16 @@ class VideoWidget(QFrame):
         self._resize_debounce.setInterval(100)
         self._resize_debounce.timeout.connect(self._onResizeDebounced)
 
+        # 控制条 / 标题栏背景色取自 UIKit 令牌，并随全局明暗主题刷新
+        self._applyThemeColors()
+        theme_changed().connect(self._applyThemeColors)
+
+    def _applyThemeColors(self, dark=None):
+        """按当前主题刷新控制条 / 标题栏背景色（浮层观感跟随主题）。"""
+        bg = current_color("bg.elevated")
+        self.topLabel.setStyleSheet(f"background-color:{bg}")
+        self.frame.setStyleSheet(f"background-color:{bg}")
+
     def ensureTextBrowser(self):
         if self.textBrowser is not None:
             return self.textBrowser
@@ -574,9 +585,10 @@ class VideoWidget(QFrame):
             return
 
         alpha_hex = format(max(0, min(255, int(round(browser_opacity / 100.0 * 255)))), "02x")
-        self.textBrowser.textBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000")
-        self.textBrowser.transBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000")
-        self.textBrowser.msgsBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000")
+        # 弹幕机为视频浮层：背景固定半透明黑 + 文字固定白色，不随明暗主题变化
+        self.textBrowser.textBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000;color:#FFFFFF")
+        self.textBrowser.transBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000;color:#FFFFFF")
+        self.textBrowser.msgsBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000;color:#FFFFFF")
 
         self.textBrowser.textBrowser.setFont(QFont("Microsoft JhengHei", browser_font_size, QFont.Bold))
         self.textBrowser.transBrowser.setFont(QFont("Microsoft JhengHei", browser_font_size, QFont.Bold))
@@ -783,13 +795,20 @@ class VideoWidget(QFrame):
 
     def applyCredentialContext(self, sessionData=None, credential=None):
         """统一同步播放器、取流线程和弹幕线程的登录态。"""
+        session_changed = False
         if sessionData is not None:
-            self.sessionData = sessionData if sessionData else ""
+            sessionData = sessionData if sessionData else ""
+            session_changed = sessionData != self.sessionData
+            self.sessionData = sessionData
         base_credential = self.credential if credential is None else credential
         self.credential = normalize_credential_data(base_credential, sessdata=self.sessionData)
         self.getMediaURL.sessionData = self.sessionData
         self.getMediaURL.credential = self.credential
         self.danmu.setSessionData(self.sessionData)
+        # 弹幕线程已连上游客连接时，setSessionData 只对下一次连接生效；
+        # 登录态变化（登录/登出）时重启弹幕连接，让 SESSDATA 立即生效
+        if session_changed and self.danmu.isRunning():
+            self._restartDanmu()
 
     # ==== MPV 播放器管理 ====
 

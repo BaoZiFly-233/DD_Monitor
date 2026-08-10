@@ -5,7 +5,9 @@ DD监控室主界面进程 包含对所有子页面的初始化、排版管理
 新增全局鼠标坐标跟踪 用于刷新鼠标交互效果
 """
 
-import os, sys, time
+import os
+import sys
+import time
 
 # 原生崩溃诊断 — 在全部 import 之前启用
 import faulthandler
@@ -44,9 +46,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QSplashScreen,
     QStyle,
@@ -60,7 +60,6 @@ from PySide6.QtGui import (
     QFont,
     QGuiApplication,
     QHideEvent,
-    QIcon,
     QIntValidator,
     QPixmap,
     QShowEvent,
@@ -72,7 +71,11 @@ from LiverSelect import LiverPanel
 from config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS
 from bili_credential import normalize_credential_data, build_credential, credential_to_dict
 import log  # 本地日志模块（faulthandler 块之后才安全）
+from InstructionX_UIKit.components import Button
+from InstructionX_UIKit.icons import get_icon
+from uikit_bridge import apply_scoped_theme, confirm, info, current_color, theme_changed
 from bilibili_api import sync
+from bilibili_api.exceptions import CredentialNoBiliJctException
 from danmu import GlobalDanmuOption
 from SettingsDialog import SettingsDialog
 from login import LoginDialog
@@ -89,6 +92,7 @@ def _translate(context, text, disambig):
 class CredentialRefreshWorker(QThread):
     refreshed = Signal(dict)
     failed = Signal(str)
+    skipped = Signal(str)
 
     def __init__(self, credential_data, sessionData):
         super().__init__()
@@ -104,6 +108,10 @@ class CredentialRefreshWorker(QThread):
             if sync(credential.check_refresh()):
                 sync(credential.refresh())
                 self.refreshed.emit(credential_to_dict(credential))
+        except CredentialNoBiliJctException:
+            # 旧凭据缺 bili_jct 无法续期：不是登录失效，观看/关注列表等读操作不受影响，
+            # 重新扫码登录可补齐 bili_jct（login.py 已从 Set-Cookie 捕获完整凭据）。
+            self.skipped.emit("凭据缺少 bili_jct，本次跳过续期（不影响观看与关注列表等读操作）")
         except Exception as e:
             logging.exception("[LOGIN] 验证登录异常")
             self.failed.emit(str(e))
@@ -177,11 +185,15 @@ class StartLiveWindow(QWidget):
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.resize(240, 70)
         self.tipLabel = QLabel()
-        self.tipLabel.setStyleSheet("color:#293038;background-color:#eeeeee")
+        # 提醒横幅背景/文字取自 UIKit 令牌，随明暗主题变化
+        self.tipLabel.setStyleSheet(
+            f"background-color:{current_color('primary.subtle')};color:{current_color('primary')}"
+        )
         self.tipLabel.setFont(QFont("微软雅黑", 15, QFont.Bold))
         layout = QGridLayout(self)
         layout.setContentsMargins(3, 3, 3, 3)
         layout.addWidget(self.tipLabel)
+        apply_scoped_theme(self)
 
         self.hideTimer = QTimer(self)
         self.hideTimer.setInterval(10000)
@@ -206,16 +218,17 @@ class CacheSetting(QWidget):
         self.maxCacheEdit.setValidator(QIntValidator(1, 9))
         layout.addWidget(self.maxCacheEdit, 0, 1, 1, 3)
         layout.addWidget(QLabel("缓存自动备份至以上路径 (若不填则默认删除)"), 2, 0, 1, 3)
-        selectButton = QPushButton("备份路径")
-        selectButton.setStyleSheet("background-color:#31363b;border-width:1px")
+        selectButton = Button("备份路径", variant="default")
         selectButton.clicked.connect(self.selectCopyPath)
         layout.addWidget(selectButton, 1, 0, 1, 1)
         self.savePathEdit = QLineEdit()
         layout.addWidget(self.savePathEdit, 1, 1, 1, 3)
-        okButton = QPushButton("OK")
-        okButton.setStyleSheet("background-color:#3daee9;border-width:1px")
+        okButton = Button("OK", variant="primary")
         okButton.clicked.connect(self.sendSetting)
         layout.addWidget(okButton, 2, 3, 1, 1)
+
+        # UIKit 局部主题：缓存设置窗子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
 
     def selectCopyPath(self):
         savePath = QFileDialog.getExistingDirectory(self, "选择备份缓存路径", None, QFileDialog.ShowDirsOnly)
@@ -262,10 +275,12 @@ class Version(QWidget):
         )
         layout.addWidget(fork_url, 2, 1, 1, 2, Qt.AlignRight)
 
-        checkButton = QPushButton("检查更新")
-        checkButton.setFixedHeight(40)
+        checkButton = Button("检查更新", size="lg")
         checkButton.clicked.connect(self.checkUpdate)
         layout.addWidget(checkButton, 0, 2, 1, 1)
+
+        # UIKit 局部主题：版本说明窗子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
 
     def checkUpdate(self):
         QDesktopServices.openUrl(QUrl(r"https://gitee.com/zhimingshenjun/DD_Monitor_latest/releases"))
@@ -320,6 +335,11 @@ class MainWindow(QMainWindow):
         # ---- json 配置文件加载 ----
         self.configManager = ConfigManager(application_path, parent=self)
         self.config = self.configManager.load()
+        # 应用配置的主题（明/暗）与配色，主界面全局 QSS 由 UIKit 主题驱动
+        from uikit_bridge import set_theme, set_accent
+
+        set_theme(self.config.get("theme", "dark") == "dark")
+        set_accent(self.config.get("accent", "blue"))
         self.credential = normalize_credential_data(
             self.config.get("credential", {}), sessdata=self.config["sessionData"]
         )
@@ -410,12 +430,11 @@ class MainWindow(QMainWindow):
         self.stop.clicked.connect(self.globalMediaStop)
         self.controlBarLayout.addWidget(self.stop, 0, 2, 1, 1)
 
-        # 全局弹幕设置
-        icon = QIcon()
-        icon.addFile(os.path.join(application_path, "utils/danmu.png"))
-        self.danmuButton = PushButton(icon)
+        # 全局弹幕设置（UIKit 矢量齿轮图标，替代 utils/danmu.png）
+        self.danmuButton = PushButton(get_icon("settings", size=22, color=current_color("text.secondary")))
         self.danmuButton.setToolTip("弹幕设置")
         self.danmuButton.clicked.connect(self.openGlobalDanmuSetting)
+        theme_changed().connect(self._applyDanmuIconTheme)
         # self.danmuButton = PushButton(text='弹')
         # self.globalDanmuToken = True
         # self.danmuButton.clicked.connect(self.globalDanmuShow)
@@ -434,9 +453,12 @@ class MainWindow(QMainWindow):
         progressText.setText("设置播放器控制...")
 
         # 添加主播按钮
-        self.addButton = QPushButton("+")
+        # UIKit 虚线按钮；内联 QSS 覆盖 UIKit 默认的 md 高度（32px），
+        # 保持 160x90 的拖放区尺寸与虚线描边
+        self.addButton = Button("+", variant="dashed")
         self.addButton.setFixedSize(160, 90)
-        self.addButton.setStyleSheet("border:3px dotted #EEEEEE")
+        self._applyAddButtonTheme()
+        theme_changed().connect(self._applyAddButtonTheme)
         self.addButton.setFont(QFont("Arial", 24, QFont.Bold))
         progressText.setText("设置添加控制...")
         self.controlBarLayout.addWidget(self.addButton, 2, 0, 1, 4)
@@ -736,11 +758,11 @@ class MainWindow(QMainWindow):
             videoWidget.moveTextBrowser(target)  # 重定位 + 边界钳制 + 刷新 textPosDelta/deltaX/deltaY
 
     def clearLiverPanel(self):  # 清空卡片槽
-        reply = QMessageBox.information(
-            self, "清空卡片槽", "注意：是否要清空卡片槽？", QMessageBox.Yes | QMessageBox.No
+        confirm(
+            self, "清空卡片槽", "注意：是否要清空卡片槽？",
+            on_result=lambda ok: self.liverPanel.deleteAll() if ok else None,
+            ok_text="是", cancel_text="否",
         )
-        if reply == QMessageBox.Yes:  # 确认用户操作
-            self.liverPanel.deleteAll()
 
     def setDanmu(self):
         self.configManager.save()
@@ -785,6 +807,23 @@ class MainWindow(QMainWindow):
         panel.show()
         panel.raise_()
         panel.activateWindow()
+
+    def _applyDanmuIconTheme(self, dark=None):
+        """"弹幕设置" 按钮图标取 UIKit 齿轮图标，随全局明暗主题刷新描边色。"""
+        self.danmuButton.setIcon(
+            get_icon("settings", size=22, color=current_color("text.secondary"))
+        )
+
+    def _applyAddButtonTheme(self, dark=None):
+        """"+" 添加主播按钮：虚线描边取 UIKit 令牌，随全局明暗主题刷新。"""
+        border = current_color("text.tertiary")
+        hover = current_color("primary")
+        self.addButton.setStyleSheet(
+            f'QPushButton[variant="dashed"]{{background-color:transparent;'
+            f'border:3px dotted {border};border-radius:8px;color:{border};'
+            f'min-height:84px;max-height:84px;}}'
+            f'QPushButton[variant="dashed"]:hover{{border-color:{hover};color:{hover};}}'
+        )
 
     def showAddButton(self, height):
         if height < 181:
@@ -1115,6 +1154,7 @@ class MainWindow(QMainWindow):
         self.credentialRefreshWorker = CredentialRefreshWorker(self.credential, self.sessionData)
         self.credentialRefreshWorker.refreshed.connect(self._onCredentialRefreshed)
         self.credentialRefreshWorker.failed.connect(self._onCredentialRefreshFailed)
+        self.credentialRefreshWorker.skipped.connect(self._onCredentialRefreshSkipped)
         self.credentialRefreshWorker.finished.connect(self._onCredentialRefreshFinished)
         self.credentialRefreshWorker.start()
 
@@ -1125,6 +1165,10 @@ class MainWindow(QMainWindow):
 
     def _onCredentialRefreshFailed(self, error):
         logging.warning(f"[LOGIN] 凭据刷新失败: {error}")
+
+    def _onCredentialRefreshSkipped(self, reason):
+        # 仅缺 bili_jct 时跳过续期，属正常情况而非错误：读操作不受影响
+        logging.info("[LOGIN] 凭据续期跳过（非错误）: %s", reason)
 
     def _onCredentialRefreshFinished(self):
         if self.credentialRefreshWorker is not None:
@@ -1206,28 +1250,22 @@ class MainWindow(QMainWindow):
 
     def switchAccount(self):
         """切换账号：退出当前登录并弹出扫码窗"""
-        if not self._confirmLoginAction("切换账号", "切换账号需要先退出当前登录，是否继续？"):
-            return
+        confirm(
+            self, "切换账号", "切换账号需要先退出当前登录，是否继续？",
+            on_result=lambda ok: self._doSwitchAccount() if ok else None,
+            ok_text="是", cancel_text="否",
+        )
+
+    def _doSwitchAccount(self):
         self.updateLogin(False)
         self.openLoginPage()
 
     def logoutAccount(self):
         """退出登录"""
-        if not self._confirmLoginAction("退出登录", "确定要退出当前 B站账号吗？"):
-            return
-        self.updateLogin(False)
-
-    @staticmethod
-    def _confirmLoginAction(title, message):
-        return (
-            QMessageBox.question(
-                None,
-                title,
-                message,
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            == QMessageBox.Yes
+        confirm(
+            self, "退出登录", "确定要退出当前 B站账号吗？",
+            on_result=lambda ok: self.updateLogin(False) if ok else None,
+            ok_text="是", cancel_text="否",
         )
 
     def _onDumpRoomConfig(self):
@@ -1265,12 +1303,12 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):  # 空输入/非法字符：按 0 处理并提示
             intergerMaxCache = 0
         if intergerMaxCache <= 0:
-            QMessageBox.warning(self, "大小错误", "缓存大小不能小于为0GB!", QMessageBox.Ok)
+            info(self, "大小错误", "缓存大小不能小于为0GB!")
             return
         self.config["maxCacheSize"] = intergerMaxCache * 1024000
         self.config["saveCachePath"] = savePath
         self.configManager.save()
-        QMessageBox.information(self, "缓存设置更改", "设置成功 重启监控室后生效", QMessageBox.Ok)
+        info(self, "缓存设置更改", "设置成功 重启监控室后生效")
 
     def openHotKey(self):
         hotkey_window = self._getHotKeyWindow()
@@ -1443,7 +1481,7 @@ class MainWindow(QMainWindow):
         if savePath:
             try:
                 self.configManager.export_to(savePath)
-                QMessageBox.information(self, "导出预设", "导出完成", QMessageBox.Ok)
+                info(self, "导出预设", "导出完成")
             except Exception:
                 logging.exception("json 配置导出失败")
 
@@ -1453,7 +1491,7 @@ class MainWindow(QMainWindow):
             if self.configManager.import_from(jsonPath, self.config["layout"]):
                 self.config = self.configManager.config
                 self.liverPanel.addLiverRoomList(self.config["roomid"])
-                QMessageBox.information(self, "导入预设", "导入完成", QMessageBox.Ok)
+                info(self, "导入预设", "导入完成")
 
     def muteExcept(self):
         if not self.soloToken:
@@ -1560,20 +1598,24 @@ if __name__ == "__main__":
         os.mkdir(cachePath)
     if not os.path.exists(logsPath):  # 启动前初始化logs文件夹
         os.mkdir(logsPath)
-    try:  # 尝试清除上次缓存 如果失败则跳过
+    try:  # 尝试清除上次缓存 如果失败则跳过（cache/ 内可能混有截图等文件，只删目录）
         for cacheFolder in os.listdir(cachePath):
-            shutil.rmtree(os.path.join(application_path, "cache/%s" % cacheFolder))
+            _cacheDir = os.path.join(cachePath, cacheFolder)
+            if os.path.isdir(_cacheDir):
+                shutil.rmtree(_cacheDir, ignore_errors=True)
     except Exception:
         logging.exception("清除缓存失败")
     cacheFolder = os.path.join(application_path, "cache/%d" % time.time())  # 初始化缓存文件夹
     os.mkdir(cacheFolder)
 
-    # 应用qss
+    # 应用全局样式：InstructionX_UIKit 暗色主题（替换原 qdark.qss）
+    # mpv 播放器 / 弹幕机 / 布局面板等自绘或带实例级内联样式的控件不受影响
     # Qt6 默认启用高 DPI，无需手动设置 AA_EnableHighDpiScaling
     app = QApplication(sys.argv)
-    with open(os.path.join(application_path, "utils/qdark.qss"), "r") as f:
-        qss = f.read()
-    app.setStyleSheet(qss)
+    from uikit_bridge import init_uikit, build_global_qss
+
+    init_uikit()
+    app.setStyleSheet(build_global_qss())
     app.setFont(QFont("微软雅黑", 9))
 
     # 日志采集初始化

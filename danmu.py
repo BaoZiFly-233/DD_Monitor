@@ -1,7 +1,5 @@
 """将弹幕机分离出来单独开发"""
 
-from dataclasses import dataclass
-
 from PySide6.QtWidgets import (
     QLabel,
     QToolButton,
@@ -10,95 +8,19 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QTextBrowser,
     QGridLayout,
-    QStyle,
     QSlider,
     QTabWidget,
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal, QPoint
-from CommonWidget import Slider
+from CommonWidget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
+from InstructionX_UIKit.icons import get_icon
+from uikit_bridge import apply_scoped_theme, current_color, is_dark, theme_changed
 
-# 全局显示比例选项
-DISPLAY_RATIOS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-
-
-@dataclass
-class DanmakuSettings:
-    """弹幕配置 — 替代旧版 textSetting list 魔法索引。
-
-    旧版索引: [0=enabled, 1=opacity, 2=horiz_idx, 3=vert_idx, 4=translate_mode,
-                5=filters, 6=font_size, 7=enter_room, 8=rolling_enabled]
-    """
-
-    enabled: bool = True
-    opacity: int = 50
-    horizontal_index: int = 1
-    vertical_index: int = 7
-    translate_mode: int = 0
-    translate_filters: str = "【 [ {"
-    font_size: int = 10
-    show_enter_room: int = 0
-    rolling_enabled: bool = True
-
-    def to_config_list(self):
-        """导出为兼容旧 config.json 的列表格式"""
-        return [
-            self.enabled,
-            self.opacity,
-            self.horizontal_index,
-            self.vertical_index,
-            self.translate_mode,
-            self.translate_filters,
-            self.font_size,
-            self.show_enter_room,
-            self.rolling_enabled,
-        ]
-
-    @classmethod
-    def from_config_list(cls, data):
-        """从 config.json 列表格式恢复"""
-        defaults = [True, 50, 1, 7, 0, "【 [ {", 10, 0, True]
-        if isinstance(data, bool):
-            data = [data, 20, 1, 7, 0, "【 [ {", 10, 0, data]
-        lst = list(data)
-        while len(lst) < 9:
-            lst.append(defaults[len(lst)])
-        lst = lst[:9]
-        return cls(
-            enabled=bool(lst[0]),
-            opacity=max(7, int(lst[1])),
-            horizontal_index=max(0, min(int(lst[2]), 9)),
-            vertical_index=max(0, min(int(lst[3]), 9)),
-            translate_mode=max(0, min(int(lst[4]), 2)),
-            translate_filters=str(lst[5]),
-            font_size=max(0, min(int(lst[6]), 25)),
-            show_enter_room=max(0, min(int(lst[7]), 3)),
-            rolling_enabled=bool(lst[8]),
-        )
-
-    # 兼容旧代码的列表索引访问
-    _INDEX_MAP = {
-        0: "enabled",
-        1: "opacity",
-        2: "horizontal_index",
-        3: "vertical_index",
-        4: "translate_mode",
-        5: "translate_filters",
-        6: "font_size",
-        7: "show_enter_room",
-        8: "rolling_enabled",
-    }
-
-    def __getitem__(self, index):
-        if index in self._INDEX_MAP:
-            return getattr(self, self._INDEX_MAP[index])
-        raise IndexError(f"DanmakuSettings index out of range: {index}")
-
-    def __setitem__(self, index, value):
-        if index in self._INDEX_MAP:
-            setattr(self, self._INDEX_MAP[index], value)
-            return
-        raise IndexError(f"DanmakuSettings index out of range: {index}")
+# 弹幕显示比例（定义在 constants.py，此处重导出兼容旧导入路径）
+from constants import DISPLAY_RATIOS  # noqa: F401
+# 弹幕配置数据类（独立模块，纯数据无 Qt 依赖；重导出兼容旧导入路径）
+from danmaku_settings import DanmakuSettings  # noqa: F401
 
 
 class Bar(QLabel):
@@ -112,6 +34,15 @@ class Bar(QLabel):
         self.setFixedHeight(25)
         self.startPos = self.pos()
         self.pressToken = False
+        self._applyThemeColor()
+        theme_changed().connect(self._applyThemeColor)
+
+    def _applyThemeColor(self, dark=None):
+        # 标题栏半透明底：暗色偏黑 / 亮色偏白，保证与图标文字对比清晰
+        if is_dark():
+            self.setStyleSheet("background: rgba(0,0,0,0.72)")
+        else:
+            self.setStyleSheet("background: rgba(255,255,255,0.82)")
 
     def mousePressEvent(self, event):
         self.startPos = event.pos()
@@ -126,13 +57,20 @@ class Bar(QLabel):
 
 
 class ToolButton(QToolButton):
-    """标题栏按钮"""
+    """标题栏按钮（UIKit 矢量图标）"""
 
-    def __init__(self, icon):
+    def __init__(self, icon_name, size=18):
         super(ToolButton, self).__init__()
-        self.setStyleSheet("border-color:#CCCCCC")
+        self._icon_name = icon_name
+        self._icon_size = size
         self.setFixedSize(25, 25)
-        self.setIcon(icon)
+        self._applyThemeColor()
+        theme_changed().connect(self._applyThemeColor)
+
+    def _applyThemeColor(self, dark=None):
+        self.setStyleSheet(f"border-color:{current_color('border.strong')}")
+        # 图标描边取 text.secondary 令牌，随明暗主题自动适配对比度
+        self.setIcon(get_icon(self._icon_name, size=self._icon_size, color=current_color("text.secondary")))
 
 
 class TextOption(QWidget):
@@ -190,6 +128,9 @@ class TextOption(QWidget):
         self.showEnterRoom.setCurrentIndex(setting[6])
         layout.addWidget(self.showEnterRoom, 6, 1, 1, 1)
 
+        # UIKit 局部主题：弹幕窗设置弹窗子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
+
 
 class TextBrowser(QWidget):
     """弹幕机 - 弹出式窗口
@@ -217,11 +158,13 @@ class TextBrowser(QWidget):
         self.bar.moveSignal.connect(self.moveWindow)
         layout.addWidget(self.bar, 0, 0, 1, 10)
         # 弹幕选项菜单
-        self.optionButton = ToolButton(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self.optionButton = ToolButton("settings")
+        self.optionButton.setToolTip("弹幕设置")
         self.optionButton.clicked.connect(self.optionWidget.show)  # 弹出设置菜单
         layout.addWidget(self.optionButton, 0, 8, 1, 1)
         # 关闭按钮
-        self.closeButton = ToolButton(self.style().standardIcon(QStyle.SP_TitleBarCloseButton))
+        self.closeButton = ToolButton("close")
+        self.closeButton.setToolTip("关闭")
         self.closeButton.clicked.connect(self.userClose)
         layout.addWidget(self.closeButton, 0, 9, 1, 1)
 
@@ -373,6 +316,9 @@ class GlobalDanmuOption(QWidget):
 
         self.rollingOptionWidget = RollingOptionWidget(rolling_config_dict)
         tabs.addTab(self.rollingOptionWidget, "滚动弹幕")
+
+        # UIKit 局部主题：全局弹幕设置窗口子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
 
     def syncBrowserSetting(self, danmu_config_list):
         if isinstance(danmu_config_list, list):

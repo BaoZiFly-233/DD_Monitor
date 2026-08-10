@@ -112,8 +112,6 @@ class remoteThread(QThread):
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_until_complete(self._connect())
-        except RuntimeError:
-            logging.exception(f"弹幕线程 room={self.roomID} 异常退出")
         except Exception:
             logging.exception(f"弹幕线程 room={self.roomID} 异常退出")
         finally:

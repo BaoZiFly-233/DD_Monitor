@@ -3,7 +3,11 @@ DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 包含主播开播/下播检测和刷新展示 置顶排序 录制管理等功能
 """
 
-import json, time, logging, os, threading
+import json
+import logging
+import os
+import threading
+import time
 from bilibili_api import live_area, user, sync
 from bili_credential import build_credential, normalize_credential_data
 from PySide6.QtWidgets import (
@@ -38,9 +42,31 @@ from PySide6.QtGui import (
 from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, QUrl, Signal
 import http_utils
 from CommonWidget import DownloadImage  # 公共图片下载线程
+from InstructionX_UIKit.components import Button
+from uikit_bridge import apply_scoped_theme, current_color, is_dark, theme_changed
 
 
 header = http_utils.DEFAULT_HEADERS
+
+#: 卡片标题字体候选：华康少女文字在部分系统未安装，缺字时会回退微软雅黑
+_FANCY_FONT_CANDIDATES = ("华康少女文字W5(P)", "DFGirlW5", "华康少女文字")
+_fancy_font = None
+
+
+def _fancy_font_family():
+    """返回可用的卡片标题字体（华康少女文字缺装时回退微软雅黑）。"""
+    global _fancy_font
+    if _fancy_font is None:
+        from PySide6.QtGui import QFontDatabase
+
+        available = set(QFontDatabase.families())
+        _fancy_font = next((f for f in _FANCY_FONT_CANDIDATES if f in available), "微软雅黑")
+        if _fancy_font != _FANCY_FONT_CANDIDATES[0]:
+            logging.info("华康少女文字字体未安装，卡片字体回退为: %s", _fancy_font)
+    return _fancy_font
+
+# 全局提示框字体只需设置一次（CoverLabel 每次构造都调用属于无效开销）
+QToolTip.setFont(QFont("微软雅黑", 16, QFont.Bold))
 
 
 def _chunked(items, size):
@@ -52,7 +78,7 @@ class CardLabel(QLabel):
     def __init__(self, text="NA", fontColor="#f1fefb", size=11):
         super(CardLabel, self).__init__()
         # self.setFont(QFont('微软雅黑', size, QFont.Bold))
-        self.setFont(QFont("华康少女文字W5(P)", size, QFont.Bold))
+        self.setFont(QFont(_fancy_font_family(), size, QFont.Bold))
         self.setStyleSheet("color:%s;background-color:#00000000" % fontColor)
         self.setText(text)
 
@@ -64,7 +90,7 @@ class OutlinedLabel(QLabel):
     def __init__(self, text="NA", fontColor="#FFFFFF", outColor="#222222", size=11):
         super().__init__()
         # self.setFont(QFont('微软雅黑', size, QFont.Bold))
-        self.setFont(QFont("华康少女文字W5(P)", size, QFont.Bold))
+        self.setFont(QFont(_fancy_font_family(), size, QFont.Bold))
         self.setStyleSheet("background-color:#00000000")
         self.setText(text)
         self.setBrush(fontColor)
@@ -123,16 +149,19 @@ class CircleImage(QWidget):
 
 
 class TextButton(QPushButton):
-    """文字按钮（带选中态 pushToken 样式）"""
+    """文字按钮（带选中态 pushToken 样式，底色随 UIKit 主题/配色）"""
 
     def __init__(self, name, pushToken=False):
         super().__init__()
         self.setText(name)
         self.pushToken = pushToken
-        if self.pushToken:
-            self.setStyleSheet("background-color:#3daee9;border-width:1px")
-        else:
-            self.setStyleSheet("background-color:#31363b;border-width:1px")
+        self._applyTheme()
+        theme_changed().connect(self._applyTheme)
+
+    def _applyTheme(self, *args):
+        # 选中态用主题主色，未选中用背景次色；边框圆角等由 scoped UIKit QSS 接管
+        color = current_color("primary") if self.pushToken else current_color("bg.muted")
+        self.setStyleSheet("background-color:%s;border-width:1px" % color)
 
 
 class RecordThread(QThread):
@@ -225,7 +254,6 @@ class CoverLabel(QLabel):
 
     def __init__(self, roomID, topToken=False):
         super(CoverLabel, self).__init__()
-        QToolTip.setFont(QFont("微软雅黑", 16, QFont.Bold))
         self.setAcceptDrops(True)
         self.roomID = roomID
         self.topToken = topToken
@@ -237,20 +265,13 @@ class CoverLabel(QLabel):
         self.setFixedSize(160, 90)
         self.setObjectName("cover")
         self.setFrameShape(QFrame.Box)
+        self._applyRoundedMask()
         self.firstUpdateToken = True
         self.layout = QGridLayout(self)
         self.profile = CircleImage()
         self.layout.addWidget(self.profile, 0, 4, 2, 2)
-        if topToken:
-            brush = "#FFC125"
-            self.setStyleSheet(
-                "#cover{border-width:3px;border-style:solid;border-color:#dfa616;background-color:#5a636d}"
-            )
-        else:
-            brush = "#f1fefb"
-            self.setStyleSheet("background-color:#5a636d")  # 灰色背景
-        self.titleLabel = OutlinedLabel(fontColor=brush)
-        # self.titleLabel = CardLabel(fontColor=brush)
+        self.titleLabel = OutlinedLabel()
+        # self.titleLabel = CardLabel()
         self.layout.addWidget(self.titleLabel, 0, 0, 1, 6)
         # self.roomIDLabel = OutlinedLabel(roomID, fontColor=brush)
         # self.roomIDLabel = CardLabel(roomID, fontColor=brush)
@@ -271,6 +292,48 @@ class CoverLabel(QLabel):
         self.recordThread.downloadTimer.connect(self.refreshStateLabel)
         self.recordThread.downloadError.connect(self.recordError)
 
+        self._applyTheme()
+        theme_changed().connect(self._applyTheme)
+
+    def _applyRoundedMask(self):
+        """圆角蒙版：让卡片底色与关键帧图片均呈现圆角（卡片尺寸固定，构造时算一次）。"""
+        from PySide6.QtGui import QBitmap
+        from PySide6.QtCore import QRectF
+
+        radius = 6
+        mask = QBitmap(self.size())
+        mask.fill(Qt.color0)
+        painter = QPainter(mask)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setBrush(Qt.color1)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        painter.end()
+        self.setMask(mask)
+
+    def _applyTheme(self, *args):
+        """按当前明暗主题刷新卡片底色与标题色（播放红/置顶金等语义色保留）。
+
+        标题描边沿用默认深色，亮色下标题文字切换为深灰保证可读。
+        """
+        if is_dark():
+            bg = "#5a636d"
+            title_brush = "#f1fefb"
+            top_brush = "#FFC125"
+        else:
+            bg = current_color("bg.muted")
+            title_brush = current_color("text.secondary")
+            top_brush = "#B8860B"  # 亮色下置顶金加深，避免浅底上金色看不清
+        radius = "border-radius:6px;"
+        if self.isPlaying:
+            style = "#cover{%sborder-width:3px;border-style:solid;border-color:red;background-color:%s}" % (radius, bg)
+        elif self.topToken:
+            style = "#cover{%sborder-width:3px;border-style:solid;border-color:#dfa616;background-color:%s}" % (radius, bg)
+        else:
+            style = "#cover{%sbackground-color:%s}" % (radius, bg)
+        self.setStyleSheet(style)
+        self.titleLabel.setBrush(top_brush if self.topToken else title_brush)
+
     def updateLabel(self, info):
         if not info[0]:  # 用户或直播间不存在
             self.liveState = -1
@@ -285,9 +348,9 @@ class CoverLabel(QLabel):
             self.setStyleSheet("background-color:#8B3A3A")  # 红色背景
         else:
             if self.firstUpdateToken:  # 初始化
-                self.firstUpdateToken = False
                 avatar_url = str(info[3] or "").strip()
                 if avatar_url:
+                    self.firstUpdateToken = False  # 仅在头像有效时消费首次标记，URL 为空则下次刷新重试
                     self.downloadFace.setUrl(avatar_url)  # 启动下载头像线程
                     if not self.downloadFace.isRunning():
                         self.downloadFace.start()
@@ -312,16 +375,7 @@ class CoverLabel(QLabel):
                 self.roomTitle = ""  # 房间直播标题
                 self.setToolTip(self.roomTitle)
                 self.clear()
-                if self.isPlaying:
-                    self.setStyleSheet(
-                        "#cover{border-width:3px;border-style:solid;border-color:red;background-color:#5a636d}"
-                    )
-                elif self.topToken:
-                    self.setStyleSheet(
-                        "#cover{border-width:3px;border-style:solid;border-color:#dfa616;background-color:#5a636d}"
-                    )
-                else:
-                    self.setStyleSheet("background-color:#5a636d")  # 灰色背景
+                self._applyTheme()
             self.refreshStateLabel()
 
     def refreshStateLabel(self, downloadTime=""):
@@ -400,28 +454,9 @@ class CoverLabel(QLabel):
                 self.roomID = "0"
                 self.hide()
             elif action == top:
-                if self.topToken:
-                    self.titleLabel.setBrush("#f1fefb")
-                    # self.roomIDLabel.setBrush('#f1fefb')
-                    if self.isPlaying:
-                        self.setStyleSheet(
-                            "#cover{border-width:3px;border-style:solid;border-color:red;background-color:#5a636d}"
-                        )
-                    else:
-                        self.setStyleSheet("border-width:0px")
-                else:
-                    self.titleLabel.setBrush("#FFC125")
-                    # self.roomIDLabel.setBrush('#FFC125')
-                    if self.isPlaying:
-                        self.setStyleSheet(
-                            "#cover{border-width:3px;border-style:solid;border-color:red;background-color:#5a636d}"
-                        )
-                    else:
-                        self.setStyleSheet(
-                            "#cover{border-width:3px;border-style:solid;border-color:#dfa616;background-color:#5a636d}"
-                        )
                 self.topToken = not self.topToken
                 self.changeTopToken.emit([self.roomID, self.topToken])  # 发送修改后的置顶token
+                self._applyTheme()
             elif action == record:
                 if self.roomID != "0":
                     if self.recordState == 0:  # 无录制任务
@@ -677,9 +712,11 @@ class GetFollows(QThread):
         followsIDs = list(followsIDs)
         if not followsIDs:
             if network_error is not None:
+                # 请求确实失败（网络/接口错误）才算异常
                 logging.error(f"获取关注列表失败（网络错误: {network_error}）— 请检查网络或代理设置")
             else:
-                logging.error("没有获取到关注列表，请检查 UID 是否正确")
+                # 请求成功但关注数为 0（新号/取消全部关注），属正常情况
+                logging.info("关注列表为空（当前账号未关注任何主播）")
             self.roomInfoSummary.emit([])
             return
 
@@ -780,10 +817,8 @@ class AddLiverRoomWidget(QWidget):
         self.roomEdit = QLineEdit()
         # self.roomEdit.textChanged.connect(self.editChange)  # 手感不好 还是取消了
         layout.addWidget(self.roomEdit, 1, 0, 1, 5)
-        confirm = QPushButton("完成")
-        confirm.setFixedHeight(28)
+        confirm = Button("完成", variant="primary", size="sm")
         confirm.clicked.connect(self.sendSelectedRoom)
-        confirm.setStyleSheet("background-color:#3daee9")
         layout.addWidget(confirm, 0, 4, 1, 1)
 
         self.tabWidget = QTabWidget()
@@ -846,9 +881,7 @@ class AddLiverRoomWidget(QWidget):
         self.uidEdit.setMinimumWidth(120)
         self.uidEdit.setMaximumWidth(300)
         followsLayout.addWidget(self.uidEdit, 0, 0, 1, 1)
-        uidCheckButton = QPushButton("查询")
-        uidCheckButton.setFixedHeight(27)
-        uidCheckButton.setStyleSheet("background-color:#3daee9")
+        uidCheckButton = Button("查询", variant="primary", size="sm")
         uidCheckButton.clicked.connect(self.checkFollows)  # 查询关注
         followsLayout.addWidget(uidCheckButton, 0, 1, 1, 1)
         self.followsTable = QTableWidget()
@@ -915,6 +948,9 @@ class AddLiverRoomWidget(QWidget):
         self.tabWidget.addTab(hacoPage, "个人势/箱")
         self.tabWidget.addTab(followsPage, "关注添加")
 
+        # UIKit 局部主题：添加直播间弹窗子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
+
     def editChange(self):  # 提取输入文本中的数字
         if len(self.roomEdit.text()) > len(self.roomEditText):
             roomEditText = ""
@@ -975,12 +1011,8 @@ class AddLiverRoomWidget(QWidget):
         if not self.buttonList[index].pushToken:
             self.currentPage = index
             for cnt, button in enumerate(self.buttonList):
-                if cnt == index:  # 点击的按钮
-                    button.pushToken = True
-                    button.setStyleSheet("background-color:#3daee9;border-width:1px")
-                else:
-                    button.pushToken = False
-                    button.setStyleSheet("background-color:#31363b;border-width:1px")
+                button.pushToken = cnt == index
+                button._applyTheme()
             self._fillHotLiverTable(index)
 
     def _fillHotLiverTable(self, index):
@@ -1549,23 +1581,25 @@ class LiverPanel(QWidget):
         self.refreshCount += 1  # 刷新计数+1
         roomIDToRefresh = []
         roomIDStartLive = []
+        # 建立房号→卡片索引，避免 O(房间数 × 卡片数) 的双重循环
+        cover_by_id = {cover.roomID: cover for cover in self.coverList}
         for index, info in enumerate(liverInfo):
             if info[0]:  # uid有效
-                for cover in self.coverList:
-                    if cover.roomID == info[1]:  # 字符串房号
-                        if (
-                            cover.recordState == 2 and cover.liveState == 0 and info[4] == 1
-                        ):  # 满足等待开播录制的3个条件
-                            cover.recordThread.setSavePath(cover.savePath)  # 启动录制线程
-                            cover.recordThread.setCredential(self._credential, self._sessionData)
-                            cover.recordThread.start()
-                            cover.recordThread.checkTimer.start(3000)
-                            cover.recordState = 1  # 改为录制状态
-                        elif cover.recordState == 1 and info[4] != 1:  # 满足停止录制的2个条件
-                            cover.recordState = 0  # 取消录制
-                            cover.recordThread.recordToken = False  # 设置录像线程标志位让它自行退出结束
-                            cover.recordThread.checkTimer.stop()  # 停止轮询，避免 180s 后误弹"录制结束"提示
-                        cover.updateLabel(info)  # 更新数据
+                cover = cover_by_id.get(info[1])
+                if cover is not None:  # 字符串房号
+                    if (
+                        cover.recordState == 2 and cover.liveState == 0 and info[4] == 1
+                    ):  # 满足等待开播录制的3个条件
+                        cover.recordThread.setSavePath(cover.savePath)  # 启动录制线程
+                        cover.recordThread.setCredential(self._credential, self._sessionData)
+                        cover.recordThread.start()
+                        cover.recordThread.checkTimer.start(3000)
+                        cover.recordState = 1  # 改为录制状态
+                    elif cover.recordState == 1 and info[4] != 1:  # 满足停止录制的2个条件
+                        cover.recordState = 0  # 取消录制
+                        cover.recordThread.stopRecording()  # 置 recordToken=False（线程安全），让 run() 自行退出
+                        cover.recordThread.checkTimer.stop()  # 停止轮询，避免 180s 后误弹"录制结束"提示
+                    cover.updateLabel(info)  # 更新数据
                 if info[1] not in self.oldLiveStatus:  # 软件启动后第一次更新添加
                     self.oldLiveStatus[info[1]] = info[4]  # 房号: 直播状态
                 elif self.oldLiveStatus[info[1]] != info[4]:  # 状态发生变化
@@ -1574,9 +1608,9 @@ class LiverPanel(QWidget):
                     roomIDToRefresh.append(info[1])  # 发送给主界面要刷新的房间号
                     self.oldLiveStatus[info[1]] = info[4]  # 更新旧的直播状态列表
             else:  # 错误的房号
-                for cover in self.coverList:
-                    if cover.roomID == info[1]:
-                        cover.updateLabel(info)
+                cover = cover_by_id.get(info[1])
+                if cover is not None:
+                    cover.updateLabel(info)
         if roomIDStartLive:
             self.startLiveList.emit(roomIDStartLive)
         if roomIDToRefresh:
@@ -1588,14 +1622,23 @@ class LiverPanel(QWidget):
         self.addToWindow.emit(info)
 
     def _stopCoverRecording(self, cover):
-        """删除卡片前安全停止录制线程，避免运行中的 QThread 被析构触发 Qt abort"""
+        """删除卡片前安全停止录制线程，避免运行中的 QThread 被析构触发 Qt abort。
+
+        返回 True 表示线程已安全退出，可立即销毁控件；
+        返回 False 表示线程未在超时内退出（网络阻塞等），控件改为线程结束后延迟清理。
+        """
         thread = cover.recordThread
         if thread is None:
-            return
+            return True
         thread.checkTimer.stop()
         if thread.isRunning():
             thread.stopRecording()  # 置 recordToken=False，让 run() 循环自行退出
-            thread.wait(3000)  # 等待退出（超时保护，防止阻塞 UI）
+            if not thread.wait(3000):  # 等待退出（超时保护）
+                # 线程仍卡在网络 IO：此时绝不能 deleteLater（运行中的 QThread 被析构会触发 Qt abort）
+                logging.warning("录制线程 %s 未在 3s 内退出，延迟清理控件", thread.roomID)
+                thread.finished.connect(cover.deleteLater, Qt.QueuedConnection)
+                return False
+        return True
 
     def deleteCover(self, roomID):
         roomID = self._normalize_room_id(roomID)
@@ -1603,12 +1646,13 @@ class LiverPanel(QWidget):
         self.oldLiveStatus.pop(roomID, None)
         for index, cover in enumerate(list(self.coverList)):
             if cover.roomID == roomID:
-                self._stopCoverRecording(cover)
+                safe_to_destroy = self._stopCoverRecording(cover)
                 cover.hide()
                 self.layout.removeWidget(cover)
                 self.coverList.pop(index)
                 cover.setParent(None)
-                cover.deleteLater()
+                if safe_to_destroy:
+                    cover.deleteLater()
                 break
         self._applyRoomListMutation(request_refresh=True, refresh_panel=True, dump_config=True)
 
@@ -1616,10 +1660,11 @@ class LiverPanel(QWidget):
         """清空卡片槽 — 释放所有卡片控件并清理房间列表"""
         self.roomIDDict.clear()
         self.oldLiveStatus.clear()
-        for cover in self.coverList:
-            self._stopCoverRecording(cover)
+        for cover in list(self.coverList):
+            safe_to_destroy = self._stopCoverRecording(cover)
             cover.hide()
-            cover.deleteLater()
+            if safe_to_destroy:
+                cover.deleteLater()
         self.coverList.clear()
         # _onDumpRoomConfig 会将空 roomid 写入 config 并保存
         self._applyRoomListMutation(request_refresh=True, refresh_panel=True, dump_config=True)
@@ -1636,20 +1681,13 @@ class LiverPanel(QWidget):
         self._applyRoomListMutation(request_refresh=False, refresh_panel=True, dump_config=True)
 
     def updatePlayingStatus(self, playerList):
+        """同步播放状态到卡片边框样式（播放态为语义红边框，其余走主题样式）"""
+        player_set = set(playerList)
         for cover in self.coverList:
-            if cover.roomID in playerList:
-                cover.isPlaying = True
-                cover.setStyleSheet(
-                    "#cover{border-width:3px;border-style:solid;border-color:red;background-color:#5a636d}"
-                )
-            else:
-                cover.isPlaying = False
-                if cover.topToken:
-                    cover.setStyleSheet(
-                        "#cover{border-width:3px;border-style:solid;border-color:#dfa616;background-color:#5a636d}"
-                    )
-                else:
-                    cover.setStyleSheet("#cover{border-width:0px;background-color:#5a636d}")
+            is_playing = cover.roomID in player_set
+            if cover.isPlaying != is_playing:
+                cover.isPlaying = is_playing
+                cover._applyTheme()
 
     def refreshPanel(self):
         for i in reversed(range(self.layout.count())):

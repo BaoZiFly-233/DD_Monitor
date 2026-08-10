@@ -1,0 +1,5 @@
+# pytest 配置（ruff 配置见独立的 ruff.toml，二者避免互相干扰）
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

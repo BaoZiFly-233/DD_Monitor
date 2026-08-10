@@ -11,14 +11,9 @@ from urllib.parse import unquote
 
 from PySide6.QtCore import QObject, QTimer
 
-# 常量
-MAX_WINDOWS = 16
-WINDOW_CARD_WIDTH = 169
-# 弹幕显示比例（定义在 danmu.py 中，此处重导出以便旧代码 from config_manager import DISPLAY_RATIOS）
-from danmu import DISPLAY_RATIOS  # noqa: E402,F401
-
-# 弹幕配置默认值 (兼容旧 list 格式)
-DEFAULT_DANMU_CONFIG = [True, 50, 1, 7, 0, "【 [ {", 10, 0, True]
+# 常量（定义在 constants.py，此处重导出以兼容旧代码 from config_manager import ...）
+# 注意：config_manager 不依赖任何 UI 模块，保持配置层纯净
+from constants import MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS, DEFAULT_DANMU_CONFIG  # noqa: E402,F401
 
 DEFAULT_ROLLING_DANMU = {
     "font_family": "Microsoft YaHei",
@@ -53,6 +48,8 @@ DEFAULT_CONFIG = {
     "startWithDanmu": True,
     "showStartLive": True,
     "checkUpdate": True,
+    "theme": "dark",
+    "accent": "blue",
     "sessionData": "",
     "loginUserInfo": {},
     "credential": {},
@@ -109,10 +106,10 @@ class ConfigManager(QObject):
         """兼容旧版本配置格式"""
         cfg = self.config
 
-        # 列表扩容到 MAX_WINDOWS
+        # 列表扩容到 MAX_WINDOWS（非 list 的异常数据一律重置为默认，防止 import_from 崩溃）
         for key in ["player", "volume", "danmu", "muted", "quality", "audioChannel", "translator"]:
             default = DEFAULT_CONFIG[key]
-            if key not in cfg:
+            if key not in cfg or not isinstance(cfg[key], list):
                 cfg[key] = list(default)
             while len(cfg[key]) < MAX_WINDOWS:
                 cfg[key].append(default[len(cfg[key]) % len(default)])
@@ -120,19 +117,23 @@ class ConfigManager(QObject):
 
         cfg["player"] = list(map(str, cfg["player"]))
 
-        # roomid: list → dict 迁移
+        # roomid: list → dict 迁移；非 dict 异常数据重置为空 dict
         if isinstance(cfg.get("roomid"), list):
             room_list = cfg["roomid"]
             cfg["roomid"] = {}
             for rid in room_list:
                 cfg["roomid"][str(rid)] = False
+        elif not isinstance(cfg.get("roomid"), dict):
+            cfg["roomid"] = {}
         if "0" in cfg.get("roomid", {}):
             del cfg["roomid"]["0"]
 
-        # 弹幕配置迁移
+        # 弹幕配置迁移（逐项兜底：元素非 list/bool 时重置为默认）
         for index, text_setting in enumerate(cfg.get("danmu", [])):
             if isinstance(text_setting, bool):
                 cfg["danmu"][index] = [text_setting, 20, 1, 7, 0, "【 [ {", 10, 0, text_setting]
+            elif not isinstance(text_setting, list):
+                cfg["danmu"][index] = list(DEFAULT_DANMU_CONFIG)
             else:
                 defaults = list(DEFAULT_DANMU_CONFIG)
                 while len(text_setting) < 8:

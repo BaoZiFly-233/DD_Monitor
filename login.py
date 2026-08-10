@@ -17,12 +17,27 @@ import http_utils
 import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QPixmap, QImage, QFont
-from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QHBoxLayout
+from InstructionX_UIKit.components import Button
+from uikit_bridge import apply_scoped_theme
 
 HEADERS = {
     **http_utils.DEFAULT_HEADERS,
     "Referer": "https://www.bilibili.com",
 }
+
+#: 登录成功响应里需要落盘保存的 cookie 名。扫码登录的跳转 URL 参数并不齐全
+#: （bili_jct / DedeUserID / buvid 等通常在 Set-Cookie 里），只解析 URL 会导致
+#: 保存的凭据缺 bili_jct，后续 check_refresh() 因缺少 CSRF 令牌而永远跳过续期。
+_CREDENTIAL_COOKIES = (
+    "SESSDATA",
+    "bili_jct",
+    "DedeUserID",
+    "DedeUserID__ckMd5",
+    "buvid3",
+    "buvid4",
+    "ac_time_value",
+)
 
 
 class FetchUserInfo(QThread):
@@ -195,15 +210,16 @@ class LoginDialog(QDialog):
 
         btnRow = QHBoxLayout()
         btnRow.setSpacing(8)
-        refreshBtn = QPushButton("刷新二维码")
-        refreshBtn.setCursor(Qt.PointingHandCursor)
+        refreshBtn = Button("刷新二维码", variant="primary")
         refreshBtn.clicked.connect(self._fetchQRCode)
-        closeBtn = QPushButton("关闭")
-        closeBtn.setCursor(Qt.PointingHandCursor)
+        closeBtn = Button("关闭")
         closeBtn.clicked.connect(self.close)
         btnRow.addWidget(refreshBtn)
         btnRow.addWidget(closeBtn)
         lay.addLayout(btnRow)
+
+        # UIKit 局部主题：扫码窗子树切换为暗色 UIKit 观感
+        apply_scoped_theme(self)
 
     # ================================================================
     # 公开接口
@@ -341,6 +357,13 @@ class LoginDialog(QDialog):
         # 否则 credentialReady 发出的凭据不含 sessdata，主窗口 updateCredential
         # 会用空值覆盖 config["sessionData"]，导致菜单退回"扫码登录"
         self._credential["SESSDATA"] = sessdata
+
+        # 从 Set-Cookie 补齐其余凭据：bili_jct 等通常只在响应 cookie 里，
+        # 缺了会导致保存的凭据无法续期（check_refresh 永远因缺 bili_jct 跳过）。
+        # URL 参数已有的值优先保留，不覆盖。
+        for cookie in resp.cookies:
+            if cookie.name in _CREDENTIAL_COOKIES and not self._credential.get(cookie.name):
+                self._credential[cookie.name] = cookie.value
 
         self._sessdata = sessdata
         logging.info(f"[LOGIN] 发射 sessionData 信号 (len={len(sessdata)})")
