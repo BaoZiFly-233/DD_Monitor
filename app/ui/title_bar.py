@@ -230,10 +230,11 @@ class AppTitleBar(TitleBarBase):
                 w.showNormal()
             apply_fullscreen_style(w, False)  # 恢复阴影与原生样式
             return
-        if w.isMaximized():
-            w.showNormal()
+        # 最大化/还原走原生 Win32：Qt showNormal 在无边框窗口上可能不生效
+        if _is_zoomed(w):
+            _native_restore(w)
         else:
-            w.showMaximized()
+            _native_maximize(w)
 
     def mouseDoubleClickEvent(self, event):
         # 统一走 _toggleMaxState（含全屏处理），覆盖组件库默认 toggleMaxState 逻辑
@@ -255,6 +256,39 @@ def apply_fullscreen_style(window, is_fullscreen: bool) -> None:
         window.windowEffect.removeShadowEffect(hwnd)
     else:
         window.windowEffect.addShadowEffect(hwnd)
+
+
+def _is_zoomed(window) -> bool:
+    """Windows 层真实最大化状态（比 Qt isMaximized 可靠，避免状态脱节）"""
+    if _sys.platform == "win32":
+        from ctypes import windll
+
+        return bool(windll.user32.IsZoomed(int(window.winId())))
+    return window.isMaximized()
+
+
+def _native_restore(window) -> None:
+    """原生还原窗口。Qt 的 showNormal() 在无边框窗口上（尤其启动即最大化、
+    从未以普通几何显示过时）不会把 SW_RESTORE 送达 Windows 层，导致
+    还原按钮无效；直接 ShowWindow(SW_RESTORE) 可靠。"""
+    if _sys.platform == "win32":
+        import win32con
+        import win32gui
+
+        win32gui.ShowWindow(int(window.winId()), win32con.SW_RESTORE)
+    else:
+        window.showNormal()
+
+
+def _native_maximize(window) -> None:
+    """原生最大化窗口（与还原对称，避免 Qt 状态机与 Windows 层脱节）"""
+    if _sys.platform == "win32":
+        import win32con
+        import win32gui
+
+        win32gui.ShowWindow(int(window.winId()), win32con.SW_MAXIMIZE)
+    else:
+        window.showMaximized()
 
 
 def _install_title_bar(window, title="", maximize_enabled=True):
