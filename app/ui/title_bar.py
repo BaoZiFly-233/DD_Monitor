@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
-"""应用统一 Fluent 标题栏 — 经典 一 / 口 / X 窗口按钮，主题色自适应。
+"""应用统一 Fluent 标题栏 — 参照组件库官方原版（zhiyiYo/PySide6-Fluent-Widgets）观感。
 
-组件库 qfluentwidgets_pro 自带的 FluentTitleBar 存在两个问题：
-1. 按钮顶对齐（48px 栏内按钮只有 32px 且 AlignTop），与垂直居中的标题不持平；
-2. 最大化按钮使用 FluentIcon.ZOOM（放大镜图标），不是常规的"口"字形，
-   且组件库编译资源中缺少 :/qframelesswindow/close.svg，CloseButton 无法渲染。
+官方 FluentTitleBar 的按钮是 qframelesswindow 的经典 QPainter 字形
+（MinimizeButton 一横 / MaximizeButton 方框与还原双框 / CloseButton 交叉线，
+1px 细线、小尺寸），标题为 13px 级标签。本模块按同样比例绘制，并修正官方
+实现的两处缺陷：
+1. 官方 48px 栏中按钮 32px 顶对齐（与垂直居中的标题不持平）→ 本实现按钮
+   垂直居中，字形中心与标题中心严格对齐；
+2. 官方 close.svg 资源缺失导致 CloseButton 渲染为空 → 本实现 QPainter 自绘。
 
-本模块用 QPainter 自绘经典窗口字形（一/口/X），颜色取自 UIKit 令牌并随
-明暗主题刷新；按钮撑满标题栏高度保证与标题垂直居中。同时提供统一的无边框
-对话框/窗口基类（FluentDialog / FluentWindow），让所有顶层窗口外观一致。
+同时提供统一的无边框对话框/窗口基类（FluentDialog / FluentWindow），
+让所有顶层窗口外观一致。
 """
+
+import sys as _sys
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen
@@ -22,8 +26,6 @@ from qfluentwidgets_pro.qframelesswindow.titlebar.title_bar_buttons import (
 )
 
 # 平台无关的无边框基类（mixin，用于 QFrame 等无法直接继承 FramelessWindow 的场景）
-import sys as _sys
-
 if _sys.platform == "win32":
     from qfluentwidgets_pro.qframelesswindow.windows import WindowsFramelessWindowBase as FramelessWindowBase  # noqa: F401
 elif _sys.platform == "darwin":
@@ -35,16 +37,19 @@ from app.ui.uikit_bridge import current_color, is_dark, theme_changed
 
 TITLE_BAR_HEIGHT = 48
 BUTTON_WIDTH = 46
-BUTTON_HEIGHT = TITLE_BAR_HEIGHT
-_CLOSE_HOVER = QColor(232, 17, 35)    # Windows 关闭键红
+# 官方按钮为 46x32；在 48px 栏中垂直居中，既与标题持平又保持官方轻盈比例
+BUTTON_HEIGHT = 32
+# 官方字形比例（46x32 按钮内约 10px 字形），48px 栏内略放大至 12px
+_GLYPH = 12
+_CLOSE_HOVER = QColor(232, 17, 35)      # Windows 关闭键红
 _CLOSE_PRESSED = QColor(241, 112, 122)
 
 
 class AppTitleBarButton(QtFramelessButton):
     """经典窗口按钮基类：字形颜色随主题，悬停/按下背景反馈。
 
-    继承组件库 TitleBarButton 以获得其状态机（enter/leave/press 事件、
-    isPressed()），并参与标题栏拖拽区域的排除判断。
+    继承组件库 TitleBarButton 获得状态机（enter/leave/press、isPressed()），
+    并参与标题栏拖拽区域的排除判断。
     """
 
     def __init__(self, parent=None):
@@ -76,23 +81,29 @@ class AppTitleBarButton(QtFramelessButton):
         self._drawGlyph(painter, color)
         painter.end()
 
+    @staticmethod
+    def _pen(color):
+        pen = QPen(color, 1.2)
+        pen.setCosmetic(True)
+        pen.setCapStyle(Qt.RoundCap)
+        return pen
+
     def _drawGlyph(self, painter: QPainter, color: QColor):
         raise NotImplementedError
 
 
 class MinButton(AppTitleBarButton):
-    """最小化 — 一（水平线）"""
+    """最小化 — 一（水平线，圆角线帽）"""
 
     def _drawGlyph(self, painter, color):
-        pen = QPen(color, 1.2)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
+        painter.setPen(self._pen(color))
         cx, cy = self.width() / 2, self.height() / 2
-        painter.drawLine(int(cx - 9), int(cy), int(cx + 9), int(cy))
+        half = _GLYPH
+        painter.drawLine(int(cx - half), int(cy), int(cx + half), int(cy))
 
 
 class MaxButton(AppTitleBarButton):
-    """最大化 / 还原 — 口（方框 / 双框）"""
+    """最大化 / 还原 — 口（方框 / 官方双框）"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -106,21 +117,20 @@ class MaxButton(AppTitleBarButton):
         self.update()
 
     def _drawGlyph(self, painter, color):
-        pen = QPen(color, 1.2)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
+        painter.setPen(self._pen(color))
         painter.setBrush(Qt.NoBrush)
         cx, cy = self.width() / 2, self.height() / 2
         if not self._isMax:
-            painter.drawRect(QRectF(cx - 7, cy - 7, 14, 14))
+            painter.drawRect(QRectF(cx - _GLYPH / 2, cy - _GLYPH / 2, _GLYPH, _GLYPH))
         else:
-            # 还原：后框左上 + 前框右下
-            painter.drawRect(QRectF(cx - 6.5, cy - 6.5, 10, 10))
-            painter.drawRect(QRectF(cx - 1.5, cy + 0.5, 10, 10))
+            # 官方还原双框：后框左上、前框右下
+            s = _GLYPH - 3
+            painter.drawRect(QRectF(cx - s / 2 - 2, cy - s / 2 - 2, s, s))
+            painter.drawRect(QRectF(cx - s / 2 + 1, cy - s / 2 + 1, s, s))
 
 
 class CloseXButton(AppTitleBarButton):
-    """关闭 — X（交叉线），悬停红底"""
+    """关闭 — X（交叉线，圆角线帽），悬停 Windows 红底"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -134,17 +144,15 @@ class CloseXButton(AppTitleBarButton):
         )
 
     def _drawGlyph(self, painter, color):
-        pen = QPen(color, 1.2)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
+        painter.setPen(self._pen(color))
         cx, cy = self.width() / 2, self.height() / 2
-        d = 9
+        d = _GLYPH
         painter.drawLine(int(cx - d), int(cy - d), int(cx + d), int(cy + d))
         painter.drawLine(int(cx - d), int(cy + d), int(cx + d), int(cy - d))
 
 
 class AppTitleBar(TitleBarBase):
-    """应用统一标题栏：窗口图标 + 标题 + 经典三键，全部垂直居中。
+    """应用统一标题栏：窗口图标 + 标题（13px）+ 经典三键，全部垂直居中。
 
     继承组件库 TitleBarBase 获得：窗口拖动（startSystemMove）、双击最大化、
     最大化状态联动（WindowStateChange 事件过滤器）。
@@ -166,32 +174,33 @@ class AppTitleBar(TitleBarBase):
         self.maxBtn.clicked.connect(self._toggleMaxState)
         self.closeBtn.clicked.connect(self.window().close)
 
-        # 窗口图标 + 标题
+        # 窗口图标 + 标题（13px，与官方 CaptionLabel 同级）
         self.iconLabel = QLabel(self)
         self.iconLabel.setFixedSize(18, 18)
         self.titleLabel = QLabel(self)
         self.titleLabel.setObjectName("appTitleLabel")
-        self._applyTitleColor()
-        theme_changed().connect(self._applyTitleColor)
+        self._applyTitleStyle()
+        theme_changed().connect(self._applyTitleStyle)
         self.window().windowTitleChanged.connect(self.setTitle)
         self.window().windowIconChanged.connect(self.setIcon)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 0, 0)
+        layout.setContentsMargins(14, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self.iconLabel, 0, Qt.AlignVCenter)
         layout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
         layout.addStretch(1)
-        layout.addWidget(self.minBtn)
-        layout.addWidget(self.maxBtn)
-        layout.addWidget(self.closeBtn)
+        layout.addWidget(self.minBtn, 0, Qt.AlignVCenter)
+        layout.addWidget(self.maxBtn, 0, Qt.AlignVCenter)
+        layout.addWidget(self.closeBtn, 0, Qt.AlignVCenter)
 
         self.setTitle(self.window().windowTitle())
         self.setIcon(self.window().windowIcon())
 
-    def _applyTitleColor(self, *args):
+    def _applyTitleStyle(self, *args):
         self.titleLabel.setStyleSheet(
             f"color: {current_color('text.primary')}; background: transparent;"
+            f" font-size: 13px;"
         )
 
     def setTitle(self, title):
