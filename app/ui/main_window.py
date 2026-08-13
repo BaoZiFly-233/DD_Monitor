@@ -313,7 +313,12 @@ class CheckDanmmuProvider(QThread):
         try:
             import dns.resolver
 
-            anwsers = dns.resolver.resolve("broadcastlv.chat.bilibili.com", "A")
+            # 限制解析超时（默认 lifetime 可达 30s+），避免退出时线程
+            # 阻塞在 DNS 查询导致 join 等待与异常退出码（实测 127）
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = 3
+            resolver.lifetime = 3
+            anwsers = resolver.resolve("broadcastlv.chat.bilibili.com", "A")
             danmu_ip = anwsers[0].to_text()
             logging.info("弹幕IP: %s" % danmu_ip)
         except Exception as e:
@@ -1468,6 +1473,10 @@ class MainWindow(WindowsFramelessMainWindow):
         # 会被强杀，触发原生 access violation 崩溃（FlClash 代理下尤为常见）
         self.liverPanel.collectLiverInfo.stop()
         self.liverPanel.collectLiverInfo.wait(5000)
+        # DNS 解析线程：解释器退出时若仍在运行（dnspython 阻塞中）会导致
+        # 非零退出码（实测 127）；等待其退出，超时由末尾硬退出兜底
+        if self.checkDanmmuProvider.isRunning():
+            self.checkDanmmuProvider.wait(3000)
         self.loginDialog.close()
         # 先停止所有窗口的取流线程（发停止信号），再并行等待退出，
         # 避免串行 wait(3000) × N 窗口导致最长 48s 的退出延迟
