@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QProgressBar,
     QSplashScreen,
@@ -58,7 +59,7 @@ from PySide6.QtGui import (
     QPixmap,
     QShowEvent,
 )
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QByteArray, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
 from LayoutPanel import LayoutSettingPanel
 from VideoWidget_mpv import VideoWidget, load_mpv_module
 from LiverSelect import LiverPanel
@@ -76,6 +77,7 @@ from qfluentwidgets_pro import (
     Slider as FluentSlider,
     SmoothScrollArea,
     ToolButton,
+    TransparentToolButton,
 )
 from qfluentwidgets_pro.qframelesswindow.windows import WindowsFramelessMainWindow
 from uikit_bridge import confirm, info, current_color, theme_changed
@@ -332,12 +334,10 @@ class MainWindow(WindowsFramelessMainWindow):
         self.setWindowIcon(Icon(FluentIcon.ROBOT))
         # QMainWindow 的 menuBar 从窗口顶部开始，会盖住 Fluent 标题栏
         # （48px，含窗口控制按钮）；把 QMainWindow 内容区（menuBar/
-        # dock/central）整体下移标题栏高度，menuBar 保持在 menuBar 区
+        # dock/central）整体下移标题栏高度。菜单栏已改为顶部导航按钮
+        # （_initNavBar 挂载到 menuWidget 区），无 QMenuBar 悬停问题
         self.setContentsMargins(0, self.titleBar.height(), 0, 0)
-        # 顶栏菜单悬停即弹：菜单（Qt.Popup）打开后鼠标事件被 popup
-        # 截获，menuBar 的 hovered 信号不再触发，必须用 app 级事件
-        # 过滤器监听全局鼠标移动来驱动菜单切换
-        QApplication.instance().installEventFilter(self)
+        self._initThemeButton()
         self.resize(1600, 900)
         self.maximumToken = True
         self.soloToken = False  # 记录静音除鼠标悬停窗口以外的其他所有窗口的标志位 True就是恢复所有房间声音
@@ -517,9 +517,8 @@ class MainWindow(WindowsFramelessMainWindow):
         self.liverPanel.updatePlayingStatus(self.config["player"])
         progressText.setText("设置主播选择控制...")
 
-        # ---- 菜单设置 ----
+        # ---- 菜单设置（RoundMenu 独立构建，导航按钮在 _initNavBar 挂载）----
         self.optionMenu = RoundMenu("设置", self)
-        self.menuBar().addMenu(self.optionMenu)
         self.controlBarLayoutToken = self.config["control"]
         settingsAction = QAction("打开设置面板...", self, triggered=self.openSettingsDialog)
         self.optionMenu.addAction(settingsAction)
@@ -567,7 +566,6 @@ class MainWindow(WindowsFramelessMainWindow):
         progressText.setText("设置选项菜单...")
 
         self.versionMenu = RoundMenu("帮助", self)
-        self.menuBar().addMenu(self.versionMenu)
         bilibiliAction = QAction("B站视频", self, triggered=self.openBilibili)
         self.versionMenu.addAction(bilibiliAction)
         hotKeyAction = QAction("快捷键", self, triggered=self.openHotKey)
@@ -582,7 +580,6 @@ class MainWindow(WindowsFramelessMainWindow):
         progressText.setText("设置帮助菜单...")
 
         self.payMenu = RoundMenu("开源和投喂", self)
-        self.menuBar().addMenu(self.payMenu)
         githubAction = QAction("GitHub", self, triggered=self.openGithub)
         self.payMenu.addAction(githubAction)
         feedAction = QAction("投喂作者", self, triggered=self.openFeed)
@@ -590,8 +587,8 @@ class MainWindow(WindowsFramelessMainWindow):
         progressText.setText("设置关于菜单...")
 
         self.loginMenu = RoundMenu("B站账号", self)
-        self.menuBar().addMenu(self.loginMenu)
         self._rebuildLoginMenu()
+        self._initNavBar()
 
         # 鼠标和计时器
         self.oldMousePos = QPoint(0, 0)  # 初始化鼠标坐标
@@ -1379,39 +1376,66 @@ class MainWindow(WindowsFramelessMainWindow):
                 videoWidget.topLabel.hide()  # 隐藏播放窗口的控制条
                 videoWidget.frame.hide()
 
-    def eventFilter(self, obj, event):
-        """全局鼠标移动 → 顶栏菜单悬停切换。
+    def _initThemeButton(self):
+        """标题栏最小化按钮左侧的主题切换按钮（参考 Easy-FFmpeg 实现）。
 
-        菜单（Qt.Popup）打开后鼠标事件被 popup 截获，menuBar 的
-        hovered 信号不再触发；在 app 级监听 MouseMove，光标位于
-        菜单栏菜单项上且该菜单未打开时执行切换（exec 动画路径）。
+        深色模式显示太阳（点它切浅色），浅色模式显示月亮（点它切深色），
+        图标随主题自动更新；切换同时写入自研 config 持久化。
         """
-        if event.type() == QEvent.MouseMove:
-            self._onGlobalMouseMove(event.globalPosition().toPoint())
-        return super().eventFilter(obj, event)
 
-    def _onGlobalMouseMove(self, gpos):
-        """光标在菜单栏菜单项上时，关闭其他菜单并弹出目标菜单。"""
-        mb = self.menuBar()
-        if mb is None or not mb.isVisible():
-            return
-        local = mb.mapFromGlobal(gpos)
-        if not mb.rect().contains(local):
-            return
-        for action in mb.actions():
-            if mb.actionGeometry(action).contains(local):
-                menu = action.menu()
-                if menu is not None and not menu.isVisible():
-                    self._openTopMenu(action)
-                return
+        self.themeButton = TransparentToolButton(self.titleBar)
+        self.themeButton.setFixedSize(self.titleBar.minBtn.size())
+        self.themeButton.setToolTip("切换明暗主题")
+        self.themeButton.clicked.connect(self._toggleThemeFromTitleBar)
+        self._updateThemeButtonIcon()
+        theme_changed().connect(self._updateThemeButtonIcon)
+        # 插入到最小化按钮左侧（buttonLayout: themeBtn, minBtn, maxBtn, closeBtn）
+        self.titleBar.buttonLayout.insertWidget(0, self.themeButton, 0, Qt.AlignTop)
 
-    def _openTopMenu(self, action):
-        """关闭其他顶层菜单并弹出目标菜单（exec：动画由菜单动画开关控制）"""
-        menu = action.menu()
-        for m in (self.optionMenu, self.versionMenu, self.payMenu, self.loginMenu):
-            if m is not menu and m.isVisible():
-                m.close()
-        pos = self.menuBar().mapToGlobal(self.menuBar().actionGeometry(action).bottomLeft())
+    def _updateThemeButtonIcon(self, dark=None):
+        """深色显示太阳（切浅色），浅色显示月亮（切深色）"""
+        from uikit_bridge import is_dark as bridge_is_dark
+
+        self.themeButton.setIcon(
+            Icon(FluentIcon.BRIGHTNESS if bridge_is_dark() else FluentIcon.QUIET_HOURS)
+        )
+
+    def _toggleThemeFromTitleBar(self):
+        """标题栏主题按钮：切换明暗并持久化到自研 config"""
+        from uikit_bridge import is_dark as bridge_is_dark, set_theme
+
+        dark = not bridge_is_dark()
+        self.config["theme"] = "dark" if dark else "light"
+        self.configManager.save()
+        set_theme(dark)
+
+    def _initNavBar(self):
+        """顶部导航按钮行（替代原 QMenuBar 菜单栏，参考 Easy-FFmpeg 导航）。
+
+        点击导航按钮在按钮下方弹出对应 RoundMenu——无 hover 弹出，
+        不存在 Popup 截获鼠标事件导致菜单"锁住"的问题。
+        """
+        nav_bar = QWidget()
+        nav_bar.setStyleSheet("background: transparent;")
+        nav_layout = QHBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(10, 2, 10, 2)
+        nav_layout.setSpacing(6)
+        for text, menu in (
+            ("设置", self.optionMenu),
+            ("帮助", self.versionMenu),
+            ("开源和投喂", self.payMenu),
+            ("B站账号", self.loginMenu),
+        ):
+            btn = FPushButton(text)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda checked=False, m=menu, b=btn: self._popupTopMenu(m, b))
+            nav_layout.addWidget(btn)
+        nav_layout.addStretch(1)
+        self.setMenuWidget(nav_bar)
+
+    def _popupTopMenu(self, menu, btn):
+        """在导航按钮正下方弹出菜单（exec 动画路径）。"""
+        pos = btn.mapToGlobal(QPoint(0, btn.height()))
         menu.exec(pos)
 
     def moveEvent(self, event):  # 捕获主窗口moveEvent来实时同步弹幕机位置

@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-统一设置面板 — Fluent SettingCard 格式
+统一设置面板 — Fluent SettingCard 现成卡片类
 
-以 qfluentwidgets 的 SettingCard / SettingCardGroup 组织所有配置项：
-图标 + 标题 + 说明 + 右侧控件 的行卡片格式。
+参考 Easy-FFmpeg（qfluentwidgets_pro 作者项目）的标准用法：
+SwitchSettingCard / ComboBoxSettingCard / RangeSettingCard /
+PushSettingCard 现成卡片类。配置项使用"假 ConfigItem"（未注册到
+qconfig，仅作为卡片取值容器），读写仍走自研 config_manager。
 """
 
 from PySide6.QtCore import Qt
@@ -15,17 +17,23 @@ from PySide6.QtWidgets import (
     QFileDialog,
 )
 from qfluentwidgets_pro import (
-    ComboBox,
     FluentIcon,
     LineEdit,
     PrimaryPushButton,
-    PushButton,
+    PushSettingCard,
+    RangeSettingCard,
     SettingCard,
     SettingCardGroup,
-    Slider,
     SmoothScrollArea,
-    SwitchButton,
+    SwitchSettingCard,
     TabWidget,
+    ComboBoxSettingCard,
+)
+from qfluentwidgets_pro.common.config import (
+    OptionsConfigItem,
+    OptionsValidator,
+    RangeConfigItem,
+    RangeValidator,
 )
 from uikit_bridge import ACCENT_NAMES, set_accent, set_menu_animation, set_theme
 from config_manager import MAX_WINDOWS
@@ -39,28 +47,37 @@ _ACCENT_LABELS = {
     "green": "翠绿",
 }
 
-#: 滑条在设置卡片右侧的固定宽度（默认 sizeHint 过窄）
-_SLIDER_W = 200
-#: 输入框在设置卡片右侧的固定宽度
-_EDIT_W = 220
-
 
 def _setting_card(icon, title, content, widget, parent):
-    """构建一行设置卡片：图标 + 标题 + 说明 + 右侧控件（留右间距）。"""
+    """基础设置卡片：图标 + 标题 + 说明 + 右侧控件（无现成卡片类时用）。"""
     card = SettingCard(icon, title, content, parent)
     card.hBoxLayout.addWidget(widget, 0, Qt.AlignRight)
     card.hBoxLayout.addSpacing(12)
     return card
 
 
-def _scrollable_page(build_fn):
-    """把标签页内容包进可滚动区域（内容超高时出现 Fluent 滚动条）。"""
-    scroll = SmoothScrollArea()
-    scroll.setWidgetResizable(True)
-    content = QWidget()
-    build_fn(content)
-    scroll.setWidget(content)
-    return scroll
+def _combo_card(icon, title, content, options, current_index, parent):
+    """下拉设置卡片（假 OptionsConfigItem 仅作取值容器，不持久化）。"""
+    item = OptionsConfigItem(
+        "settings", title, options[current_index], OptionsValidator(options)
+    )
+    card = ComboBoxSettingCard(item, icon, title, content, texts=options, parent=parent)
+    return card
+
+
+def _switch_card(icon, title, content, checked, parent):
+    """开关设置卡片（手动模式，不绑定 qconfig）。"""
+    card = SwitchSettingCard(icon, title, content, None, parent)
+    card.setChecked(checked)
+    return card
+
+
+def _range_card(icon, title, content, minimum, maximum, value, parent):
+    """滑条设置卡片（假 RangeConfigItem 仅作取值容器）。"""
+    item = RangeConfigItem("settings", title, value, RangeValidator(minimum, maximum))
+    card = RangeSettingCard(item, icon, title, content, parent)
+    card.setValue(value)
+    return card
 
 
 class SettingsDialog(QDialog):
@@ -109,28 +126,37 @@ class SettingsDialog(QDialog):
 
         group = SettingCardGroup("播放", w)
 
-        self.qualityCombo = ComboBox()
-        self.qualityCombo.addItems(["原画", "蓝光", "超清", "流畅", "仅音频"])
+        quality_options = ["原画", "蓝光", "超清", "流畅", "仅音频"]
         quality_map = {10000: 0, 400: 1, 250: 2, 80: 3, -1: 4}
         current_q = self.config.get("quality", [80] * 16)[0]
-        self.qualityCombo.setCurrentIndex(quality_map.get(current_q, 2))
-        group.addSettingCard(_setting_card(FluentIcon.VIDEO, "全局画质", "所有窗口的默认画质", self.qualityCombo, w))
+        quality_card = _combo_card(
+            FluentIcon.VIDEO, "全局画质", "所有窗口的默认画质",
+            quality_options, quality_map.get(current_q, 2), w,
+        )
+        self.qualityCombo = quality_card.comboBox
+        group.addSettingCard(quality_card)
 
-        self.decodeCombo = ComboBox()
-        self.decodeCombo.addItems(["硬解", "软解"])
-        self.decodeCombo.setCurrentIndex(0 if self.config.get("hardwareDecode", True) else 1)
-        group.addSettingCard(_setting_card(FluentIcon.SETTING, "解码方案", "硬解优先使用显卡，软解兼容性更好", self.decodeCombo, w))
+        decode_card = _combo_card(
+            FluentIcon.SETTING, "解码方案", "硬解优先使用显卡，软解兼容性更好",
+            ["硬解", "软解"], 0 if self.config.get("hardwareDecode", True) else 1, w,
+        )
+        self.decodeCombo = decode_card.comboBox
+        group.addSettingCard(decode_card)
 
-        self.audioCombo = ComboBox()
-        self.audioCombo.addItems(["原始", "杜比"])
         current_audio = self.config.get("audioChannel", [0] * 16)[0]
-        self.audioCombo.setCurrentIndex(0 if current_audio == 0 else 1)
-        group.addSettingCard(_setting_card(FluentIcon.HEADPHONE, "全局音效", "默认音频通道", self.audioCombo, w))
+        audio_card = _combo_card(
+            FluentIcon.HEADPHONE, "全局音效", "默认音频通道",
+            ["原始", "杜比"], 0 if current_audio == 0 else 1, w,
+        )
+        self.audioCombo = audio_card.comboBox
+        group.addSettingCard(audio_card)
 
-        self.volumeSlider = Slider(Qt.Horizontal)
-        self.volumeSlider.setFixedWidth(_SLIDER_W)
-        self.volumeSlider.setValue(self.config.get("globalVolume", 30))
-        group.addSettingCard(_setting_card(FluentIcon.VOLUME, "全局音量", "默认播放音量", self.volumeSlider, w))
+        volume_card = _range_card(
+            FluentIcon.VOLUME, "全局音量", "默认播放音量",
+            0, 100, self.config.get("globalVolume", 30), w,
+        )
+        self.volumeSlider = volume_card.slider
+        group.addSettingCard(volume_card)
 
         layout.addWidget(group)
         layout.addStretch()
@@ -152,41 +178,54 @@ class SettingsDialog(QDialog):
         # 弹幕窗设置
         browser_group = SettingCardGroup("弹幕窗", content)
 
-        self.browserOpacity = Slider(Qt.Horizontal)
-        self.browserOpacity.setFixedWidth(_SLIDER_W)
-        self.browserOpacity.setValue(danmu_cfg[1])
-        browser_group.addSettingCard(_setting_card(FluentIcon.ALBUM, "透明度", "弹幕窗整体透明度", self.browserOpacity, content))
+        op_card = _range_card(
+            FluentIcon.ALBUM, "透明度", "弹幕窗整体透明度",
+            0, 100, danmu_cfg[1], content,
+        )
+        self.browserOpacity = op_card.slider
+        browser_group.addSettingCard(op_card)
 
-        self.browserHori = ComboBox()
-        self.browserHori.addItems([f"{x}%" for x in range(10, 110, 10)])
-        self.browserHori.setCurrentIndex(danmu_cfg[2])
-        browser_group.addSettingCard(_setting_card(FluentIcon.ALIGNMENT, "横向占比", "弹幕窗宽度占屏幕比例", self.browserHori, content))
+        hori_card = _combo_card(
+            FluentIcon.ALIGNMENT, "横向占比", "弹幕窗宽度占屏幕比例",
+            [f"{x}%" for x in range(10, 110, 10)], danmu_cfg[2], content,
+        )
+        self.browserHori = hori_card.comboBox
+        browser_group.addSettingCard(hori_card)
 
-        self.browserVert = ComboBox()
-        self.browserVert.addItems([f"{x}%" for x in range(10, 110, 10)])
-        self.browserVert.setCurrentIndex(danmu_cfg[3])
-        browser_group.addSettingCard(_setting_card(FluentIcon.ALIGNMENT, "纵向占比", "弹幕窗高度占屏幕比例", self.browserVert, content))
+        vert_card = _combo_card(
+            FluentIcon.ALIGNMENT, "纵向占比", "弹幕窗高度占屏幕比例",
+            [f"{x}%" for x in range(10, 110, 10)], danmu_cfg[3], content,
+        )
+        self.browserVert = vert_card.comboBox
+        browser_group.addSettingCard(vert_card)
 
-        self.browserFont = ComboBox()
-        self.browserFont.addItems([str(i) for i in range(5, 26)])
-        self.browserFont.setCurrentIndex(danmu_cfg[6])
-        browser_group.addSettingCard(_setting_card(FluentIcon.FONT, "字体大小", "弹幕字体大小", self.browserFont, content))
+        font_card = _combo_card(
+            FluentIcon.FONT, "字体大小", "弹幕字体大小",
+            [str(i) for i in range(5, 26)], danmu_cfg[6], content,
+        )
+        self.browserFont = font_card.comboBox
+        browser_group.addSettingCard(font_card)
 
-        self.browserType = ComboBox()
-        self.browserType.addItems(["弹幕和同传", "只显示弹幕", "只显示同传"])
-        self.browserType.setCurrentIndex(danmu_cfg[4])
-        browser_group.addSettingCard(_setting_card(FluentIcon.CHAT, "显示类型", "弹幕与同传的显示方式", self.browserType, content))
+        type_card = _combo_card(
+            FluentIcon.CHAT, "显示类型", "弹幕与同传的显示方式",
+            ["弹幕和同传", "只显示弹幕", "只显示同传"], danmu_cfg[4], content,
+        )
+        self.browserType = type_card.comboBox
+        browser_group.addSettingCard(type_card)
 
-        self.browserMsgs = ComboBox()
-        self.browserMsgs.addItems(["显示礼物和进入", "只显示礼物", "只显示进入", "隐藏"])
-        self.browserMsgs.setCurrentIndex(danmu_cfg[7])
-        browser_group.addSettingCard(_setting_card(FluentIcon.HEART, "礼物/进入", "礼物与进入信息显示策略", self.browserMsgs, content))
+        msgs_card = _combo_card(
+            FluentIcon.HEART, "礼物/进入", "礼物与进入信息显示策略",
+            ["显示礼物和进入", "只显示礼物", "只显示进入", "隐藏"], danmu_cfg[7], content,
+        )
+        self.browserMsgs = msgs_card.comboBox
+        browser_group.addSettingCard(msgs_card)
 
         self.browserFilter = LineEdit()
-        self.browserFilter.setFixedWidth(_EDIT_W)
         self.browserFilter.setText(danmu_cfg[5])
         self.browserFilter.setPlaceholderText("空格分隔关键词")
-        browser_group.addSettingCard(_setting_card(FluentIcon.FILTER, "同传过滤", "命中关键词的同传将被过滤", self.browserFilter, content))
+        browser_group.addSettingCard(_setting_card(
+            FluentIcon.FILTER, "同传过滤", "命中关键词的同传将被过滤", self.browserFilter, content
+        ))
 
         layout.addWidget(browser_group)
 
@@ -194,47 +233,68 @@ class SettingsDialog(QDialog):
         rd = self.config.get("rollingDanmu", {})
         rolling_group = SettingCardGroup("滚动弹幕", content)
 
-        self.rollingOpacity = Slider(Qt.Horizontal)
-        self.rollingOpacity.setFixedWidth(_SLIDER_W)
-        self.rollingOpacity.setValue(rd.get("opacity", 50))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.ALBUM, "透明度", "滚动弹幕整体透明度", self.rollingOpacity, content))
+        rop_card = _range_card(
+            FluentIcon.ALBUM, "透明度", "滚动弹幕整体透明度",
+            0, 100, rd.get("opacity", 50), content,
+        )
+        self.rollingOpacity = rop_card.slider
+        rolling_group.addSettingCard(rop_card)
 
-        self.rollingArea = ComboBox()
-        self.rollingArea.addItems([f"{x}%" for x in range(10, 110, 10)])
-        self.rollingArea.setCurrentIndex(rd.get("display_area", 7))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.ALIGNMENT, "显示区域", "滚动弹幕显示区域占比", self.rollingArea, content))
+        area_card = _combo_card(
+            FluentIcon.ALIGNMENT, "显示区域", "滚动弹幕显示区域占比",
+            [f"{x}%" for x in range(10, 110, 10)], rd.get("display_area", 7), content,
+        )
+        self.rollingArea = area_card.comboBox
+        rolling_group.addSettingCard(area_card)
 
-        self.rollingFont = ComboBox()
-        self.rollingFont.addItems([str(i) for i in range(5, 26)])
-        self.rollingFont.setCurrentIndex(rd.get("font_size", 10))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.FONT, "字体大小", "滚动弹幕字体大小", self.rollingFont, content))
+        rfont_card = _combo_card(
+            FluentIcon.FONT, "字体大小", "滚动弹幕字体大小",
+            [str(i) for i in range(5, 26)], rd.get("font_size", 10), content,
+        )
+        self.rollingFont = rfont_card.comboBox
+        rolling_group.addSettingCard(rfont_card)
 
-        self.rollingSpeed = Slider(Qt.Horizontal)
-        self.rollingSpeed.setFixedWidth(_SLIDER_W)
-        self.rollingSpeed.setValue(rd.get("speed_percent", 85))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.PLAY, "弹幕速度", "滚动速度（50-200%）", self.rollingSpeed, content))
+        speed_card = _range_card(
+            FluentIcon.PLAY, "弹幕速度", "滚动速度（50-200%）",
+            50, 200, rd.get("speed_percent", 85), content,
+        )
+        self.rollingSpeed = speed_card.slider
+        rolling_group.addSettingCard(speed_card)
 
-        self.rollingStroke = Slider(Qt.Horizontal)
-        self.rollingStroke.setFixedWidth(_SLIDER_W)
-        self.rollingStroke.setValue(rd.get("stroke_width", 30))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.EDIT, "描边粗细", "文字描边宽度", self.rollingStroke, content))
+        stroke_card = _range_card(
+            FluentIcon.EDIT, "描边粗细", "文字描边宽度",
+            0, 60, rd.get("stroke_width", 30), content,
+        )
+        self.rollingStroke = stroke_card.slider
+        rolling_group.addSettingCard(stroke_card)
 
-        self.rollingShadow = SwitchButton()
-        self.rollingShadow.setChecked(rd.get("shadow_enabled", False))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.COMPLETED, "阴影效果", "弹幕文字投影", self.rollingShadow, content))
+        self.rollingShadow = _switch_card(
+            FluentIcon.COMPLETED, "阴影效果", "弹幕文字投影",
+            rd.get("shadow_enabled", False), content,
+        )
+        rolling_group.addSettingCard(self.rollingShadow)
 
-        self.rollingTop = SwitchButton()
-        self.rollingTop.setChecked(rd.get("top_enabled", True))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.UP, "顶部弹幕", "允许顶部弹幕", self.rollingTop, content))
+        self.rollingTop = _switch_card(
+            FluentIcon.UP, "顶部弹幕", "允许顶部弹幕",
+            rd.get("top_enabled", True), content,
+        )
+        rolling_group.addSettingCard(self.rollingTop)
 
-        self.rollingBottom = SwitchButton()
-        self.rollingBottom.setChecked(rd.get("bottom_enabled", True))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.DOWN, "底部弹幕", "允许底部弹幕", self.rollingBottom, content))
+        self.rollingBottom = _switch_card(
+            FluentIcon.DOWN, "底部弹幕", "允许底部弹幕",
+            rd.get("bottom_enabled", True), content,
+        )
+        rolling_group.addSettingCard(self.rollingBottom)
 
-        self.rollingFps = ComboBox()
-        self.rollingFps.addItems(["30", "60", "90", "120"])
-        self.rollingFps.setCurrentText(str(rd.get("fps", 60)))
-        rolling_group.addSettingCard(_setting_card(FluentIcon.VIDEO, "帧率上限", "渲染帧率上限", self.rollingFps, content))
+        fps_options = ["30", "60", "90", "120"]
+        fps_current = str(rd.get("fps", 60))
+        fps_index = fps_options.index(fps_current) if fps_current in fps_options else 1
+        fps_card = _combo_card(
+            FluentIcon.VIDEO, "帧率上限", "渲染帧率上限",
+            fps_options, fps_index, content,
+        )
+        self.rollingFps = fps_card.comboBox
+        rolling_group.addSettingCard(fps_card)
 
         layout.addWidget(rolling_group)
         layout.addStretch()
@@ -251,25 +311,22 @@ class SettingsDialog(QDialog):
         group = SettingCardGroup("缓存", w)
 
         self.cacheSize = LineEdit()
-        self.cacheSize.setFixedWidth(_EDIT_W)
         self.cacheSize.setPlaceholderText("1-9000")
         current_mb = max(1, self.config.get("maxCacheSize", 2048000) // 1024000)
         self.cacheSize.setText(str(current_mb))
-        group.addSettingCard(_setting_card(FluentIcon.DOWNLOAD, "最大缓存(MB)", "缓存文件夹大小上限", self.cacheSize, w))
+        group.addSettingCard(_setting_card(
+            FluentIcon.DOWNLOAD, "最大缓存(MB)", "缓存文件夹大小上限", self.cacheSize, w
+        ))
 
-        path_box = QHBoxLayout()
-        path_box.setContentsMargins(0, 0, 0, 0)
-        path_box.setSpacing(6)
         self.cachePath = LineEdit()
-        self.cachePath.setFixedWidth(_EDIT_W - 60)
         self.cachePath.setText(self.config.get("saveCachePath", ""))
-        path_box.addWidget(self.cachePath)
-        browse_btn = PushButton("浏览")
-        browse_btn.clicked.connect(self._browseCachePath)
-        path_box.addWidget(browse_btn)
-        path_widget = QWidget(w)
-        path_widget.setLayout(path_box)
-        group.addSettingCard(_setting_card(FluentIcon.FOLDER, "备份路径", "留空则直接删除缓存", path_widget, w))
+        browse_card = PushSettingCard(
+            "浏览", FluentIcon.FOLDER, "备份路径", "留空则直接删除缓存", w
+        )
+        self.cachePath.setFixedWidth(180)
+        browse_card.hBoxLayout.insertWidget(2, self.cachePath, 0, Qt.AlignRight)
+        browse_card.clicked.connect(self._browseCachePath)
+        group.addSettingCard(browse_card)
 
         layout.addWidget(group)
         layout.addStretch()
@@ -289,9 +346,11 @@ class SettingsDialog(QDialog):
 
         group = SettingCardGroup("布局", w)
 
-        open_btn = PushButton("打开布局设置")
-        open_btn.clicked.connect(self._layout_panel_fn)
-        group.addSettingCard(_setting_card(FluentIcon.ALBUM, "布局方式", "打开布局面板，拖拽调整窗口排列", open_btn, w))
+        open_card = PushSettingCard(
+            "打开布局设置", FluentIcon.ALBUM, "布局方式", "打开布局面板，拖拽调整窗口排列", w
+        )
+        open_card.clicked.connect(self._layout_panel_fn)
+        group.addSettingCard(open_card)
 
         layout.addWidget(group)
         layout.addStretch()
@@ -306,38 +365,52 @@ class SettingsDialog(QDialog):
 
         behavior_group = SettingCardGroup("启动行为", w)
 
-        self.startDanmu = SwitchButton()
-        self.startDanmu.setChecked(self.config.get("startWithDanmu", True))
-        behavior_group.addSettingCard(_setting_card(FluentIcon.PLAY, "启动时自动加载弹幕", "启动后自动打开弹幕机", self.startDanmu, w))
+        self.startDanmu = _switch_card(
+            FluentIcon.PLAY, "启动时自动加载弹幕", "启动后自动打开弹幕机",
+            self.config.get("startWithDanmu", True), w,
+        )
+        behavior_group.addSettingCard(self.startDanmu)
 
-        self.startLive = SwitchButton()
-        self.startLive.setChecked(self.config.get("showStartLive", True))
-        behavior_group.addSettingCard(_setting_card(FluentIcon.INFO, "开播提醒", "关注主播开播时弹出提醒", self.startLive, w))
+        self.startLive = _switch_card(
+            FluentIcon.INFO, "开播提醒", "关注主播开播时弹出提醒",
+            self.config.get("showStartLive", True), w,
+        )
+        behavior_group.addSettingCard(self.startLive)
 
-        self.checkUpdate = SwitchButton()
-        self.checkUpdate.setChecked(self.config.get("checkUpdate", True))
-        behavior_group.addSettingCard(_setting_card(FluentIcon.UPDATE, "启动时检查更新", "启动后自动检查新版本", self.checkUpdate, w))
+        self.checkUpdate = _switch_card(
+            FluentIcon.UPDATE, "启动时检查更新", "启动后自动检查新版本",
+            self.config.get("checkUpdate", True), w,
+        )
+        behavior_group.addSettingCard(self.checkUpdate)
 
-        self.menuAnimation = SwitchButton()
-        self.menuAnimation.setChecked(self.config.get("menuAnimation", True))
-        behavior_group.addSettingCard(_setting_card(FluentIcon.MUSIC, "菜单动画", "菜单弹出时的展开动画", self.menuAnimation, w))
+        self.menuAnimation = _switch_card(
+            FluentIcon.MUSIC, "菜单动画", "菜单弹出时的展开动画",
+            self.config.get("menuAnimation", True), w,
+        )
+        behavior_group.addSettingCard(self.menuAnimation)
 
         layout.addWidget(behavior_group)
 
         appearance_group = SettingCardGroup("外观", w)
 
-        self.themeCombo = ComboBox()
-        self.themeCombo.addItems(["深色", "浅色"])
-        self.themeCombo.setCurrentIndex(0 if self.config.get("theme", "dark") == "dark" else 1)
-        appearance_group.addSettingCard(_setting_card(FluentIcon.BRIGHTNESS, "主题", "界面明暗主题", self.themeCombo, w))
+        theme_card = _combo_card(
+            FluentIcon.BRIGHTNESS, "主题", "界面明暗主题",
+            ["深色", "浅色"], 0 if self.config.get("theme", "dark") == "dark" else 1, w,
+        )
+        self.themeCombo = theme_card.comboBox
+        appearance_group.addSettingCard(theme_card)
 
-        self.accentCombo = ComboBox()
-        self.accentCombo.addItems([_ACCENT_LABELS.get(n, n) for n in ACCENT_NAMES])
         current_accent = self.config.get("accent", "blue")
-        self.accentCombo.setCurrentIndex(ACCENT_NAMES.index(current_accent) if current_accent in ACCENT_NAMES else 0)
+        accent_card = _combo_card(
+            FluentIcon.BRUSH, "配色", "界面主题色",
+            [_ACCENT_LABELS.get(n, n) for n in ACCENT_NAMES],
+            ACCENT_NAMES.index(current_accent) if current_accent in ACCENT_NAMES else 0,
+            w,
+        )
+        self.accentCombo = accent_card.comboBox
         # 选配色即实时预览（点"应用"才写入配置）
         self.accentCombo.currentIndexChanged.connect(self._previewAccent)
-        appearance_group.addSettingCard(_setting_card(FluentIcon.BRUSH, "配色", "界面主题色", self.accentCombo, w))
+        appearance_group.addSettingCard(accent_card)
 
         layout.addWidget(appearance_group)
         layout.addStretch()
