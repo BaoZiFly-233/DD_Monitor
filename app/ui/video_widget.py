@@ -13,6 +13,7 @@ from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, 
 from bilibili_api import live, sync
 from app.core.bili_credential import build_credential, normalize_credential_data
 from app.ui.common_widget import Slider
+from app.ui.title_bar import AppTitleBar, FramelessWindowBase, TITLE_BAR_HEIGHT
 from app.media.remote import DanmakuEvent, remoteThread
 from app.core.constants import DISPLAY_RATIOS
 from app.danmaku.settings import DanmakuSettings
@@ -268,7 +269,7 @@ class VideoFrame(MpvGLWidget):
         self.setAcceptDrops(True)
 
 
-class VideoWidget(QFrame):
+class VideoWidget(FramelessWindowBase, QFrame):
     """
     视频播放窗口 - MPV 内核版本
     信号连接由 DD监控室.py 中的 _connectVideoWidget 完成
@@ -314,6 +315,9 @@ class VideoWidget(QFrame):
             textSetting = [True, 20, 2, 6, 0, "【 [ {", 10, 0, True]
         self.setAcceptDrops(True)
         self.installEventFilter(self)
+        # 提前初始化：setWindowFlags/_initFrameless 会触发 moveEvent，
+        # 此时 textBrowser 尚未创建，moveEvent 需能安全访问该属性
+        self.textBrowser = None
         self.id = id
         self.title = ""
         self.uname = ""
@@ -357,6 +361,12 @@ class VideoWidget(QFrame):
             self.setWindowFlags(Qt.Window)
         else:
             self.setStyleSheet("#video{border-width:1px;border-style:solid;border-color:gray}")
+        if top:
+            # 悬浮窗统一无边框 + Fluent 标题栏（须在所有窗口标志设置后初始化）
+            self._initFrameless()
+            self.setTitleBar(AppTitleBar(self))
+            self.titleBar.raise_()
+            self.setContentsMargins(0, TITLE_BAR_HEIGHT, 0, 0)
         self.textSetting = DanmakuSettings.from_config_list(textSetting)
         self.horiPercent = DISPLAY_RATIOS[self.textSetting.horizontal_index]
         self.vertPercent = DISPLAY_RATIOS[self.textSetting.vertical_index]
@@ -389,7 +399,7 @@ class VideoWidget(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # ---- 弹幕机 ----
-        self.textBrowser = None
+        # （textBrowser 已在 __init__ 开头初始化，供 moveEvent 等提前触发的事件安全访问）
         if not self.startWithDanmu:
             self.textSetting[0] = False
             self.textSetting[8] = False
@@ -1021,6 +1031,8 @@ class VideoWidget(QFrame):
 
     def resizeEvent(self, QEvent):
         try:
+            if self.top and hasattr(self, "titleBar"):
+                super().resizeEvent(QEvent)  # 悬浮窗标题栏跟随宽度
             self.titleLabel.hide() if self.width() < 350 else self.titleLabel.show()
             self.play.hide() if self.width() < 300 else self.play.show()
             self.danmuButton.show()

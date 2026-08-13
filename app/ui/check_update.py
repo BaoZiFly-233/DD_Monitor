@@ -2,7 +2,8 @@ import re
 from app.core import http_utils
 from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QGridLayout, QLabel, QTextBrowser, QWidget
+from app.ui.title_bar import FluentWindow
+from PySide6.QtWidgets import QGridLayout, QLabel, QTextBrowser
 from qfluentwidgets_pro import PushButton, PrimaryPushButton
 from app.core.app_version import parse_version
 
@@ -46,14 +47,13 @@ class checkUpdate(QThread):
             return
 
 
-class updateReminder(QWidget):
+class updateReminder(FluentWindow):
     noMoreSignal = Signal()
 
     def __init__(self):
-        super(updateReminder, self).__init__()
+        super(updateReminder, self).__init__(title="检查版本")
         self.link = ""
         self.resize(600, 400)
-        self.setWindowTitle("检查版本")
         self.layout = QGridLayout()
         self.setLayout(self.layout)
         label = QLabel("检测到新版本 是否前往下载？")

@@ -15,9 +15,10 @@ from urllib.parse import urlparse, parse_qs
 
 from app.core import http_utils
 import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
+from app.ui.title_bar import FluentDialog
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QPixmap, QImage, QFont
-from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout
 from qfluentwidgets_pro import PushButton, PrimaryPushButton
 
 HEADERS = {
@@ -144,7 +145,7 @@ class PollLoginStatus(QThread):
             self.pollError.emit()
 
 
-class LoginDialog(QDialog):
+class LoginDialog(FluentDialog):
     """极简扫码登录窗口
 
     信号（与主窗口对接）：
@@ -160,8 +161,7 @@ class LoginDialog(QDialog):
     userInfoReady = Signal(dict)
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("扫码登录")
+        super().__init__(parent=parent, title="扫码登录", maximize_enabled=False)
         self.setFixedSize(320, 420)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 

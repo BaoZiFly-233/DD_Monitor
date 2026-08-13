@@ -7,8 +7,8 @@
 """
 
 from PySide6.QtCore import Qt
+from app.ui.title_bar import FluentDialog
 from PySide6.QtWidgets import (
-    QDialog,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -63,16 +63,15 @@ def _scrollable_page(build_fn):
     return scroll
 
 
-class SettingsDialog(QDialog):
+class SettingsDialog(FluentDialog):
     """统一设置对话框（Fluent SettingCard 格式，5 个标签页）"""
 
     def __init__(self, parent, config, config_manager, danmu_panel_fn, layout_panel_fn):
-        super().__init__(parent)
+        super().__init__(parent=parent, title="设置")
         self.config = config
         self.configManager = config_manager
         self._danmu_panel_fn = danmu_panel_fn
         self._layout_panel_fn = layout_panel_fn
-        self.setWindowTitle("设置")
         self.resize(560, 520)
 
         tabs = TabWidget()

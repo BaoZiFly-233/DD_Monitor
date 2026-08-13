@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
 from app.ui.layout_panel import LayoutSettingPanel
+from app.ui.title_bar import AppTitleBar, FluentWindow
 from app.ui.video_widget import VideoWidget
 from app.ui.liver_select import LiverPanel
 from app.core.config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS
@@ -35,7 +36,6 @@ from app.core.bili_credential import normalize_credential_data, build_credential
 
 from qfluentwidgets_pro import (
     FluentIcon,
-    FluentTitleBar,
     Icon,
     LineEdit,
     PushButton as FPushButton,
@@ -155,13 +155,17 @@ class DockWidget(QDockWidget):
 
 
 class StartLiveWindow(QWidget):
-    """开播提醒弹窗"""
+    """开播提醒弹窗 — 无边框横幅（无标题栏，拖动移动）"""
 
     def __init__(self):
         super(StartLiveWindow, self).__init__()
         self.setWindowTitle("开播提醒")
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(240, 70)
+        self._drag_pos = None
         self.tipLabel = QLabel()
         # 提醒横幅背景/文字取自主题令牌，随明暗主题变化
         self.tipLabel.setStyleSheet(
@@ -176,19 +180,30 @@ class StartLiveWindow(QWidget):
         self.hideTimer.setInterval(10000)
         self.hideTimer.timeout.connect(self.hide)  # 10秒倒计时结束隐藏
 
-    def mousePressEvent(self, QMouseEvent):  # 点击的话就停止倒计时
+    def mousePressEvent(self, event):  # 点击的话就停止倒计时
         self.hideTimer.stop()
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None and event.buttons() & Qt.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
 
 
-class CacheSetting(QWidget):
+class CacheSetting(FluentWindow):
     """缓存设置窗口"""
 
     setting = Signal(list)
 
     def __init__(self):
-        super(CacheSetting, self).__init__()
+        super(CacheSetting, self).__init__(title="缓存设置")
         self.resize(400, 200)
-        self.setWindowTitle("缓存设置")
         layout = QGridLayout(self)
         layout.addWidget(QLabel("最大缓存(GB)"), 0, 0, 1, 1)
         self.maxCacheEdit = LineEdit()
@@ -214,13 +229,12 @@ class CacheSetting(QWidget):
         self.hide()
 
 
-class Version(QWidget):
+class Version(FluentWindow):
     """版本说明窗口"""
 
     def __init__(self):
-        super(Version, self).__init__()
+        super(Version, self).__init__(title="当前版本")
         self.resize(350, 220)
-        self.setWindowTitle("当前版本")
         layout = QGridLayout(self)
         layout.addWidget(QLabel(f"{APP_NAME} v{DISPLAY_VERSION} ({RELEASE_DATE})"), 0, 0, 1, 2)
         layout.addWidget(QLabel("原作者：神君Channel"), 1, 0, 1, 2)
@@ -258,13 +272,12 @@ class Version(QWidget):
         QDesktopServices.openUrl(QUrl(r"https://gitee.com/zhimingshenjun/DD_Monitor_latest/releases"))
 
 
-class HotKey(QWidget):
+class HotKey(FluentWindow):
     """热键说明窗口"""
 
     def __init__(self):
-        super(HotKey, self).__init__()
+        super(HotKey, self).__init__(title="快捷键")
         self.resize(350, 200)
-        self.setWindowTitle("快捷键")
         layout = QGridLayout(self)
         layout.addWidget(QLabel("F、f —— 全屏"), 0, 0)
         layout.addWidget(QLabel("H、h —— 隐藏控制条"), 1, 0)
@@ -298,10 +311,9 @@ class MainWindow(WindowsFramelessMainWindow):
         super(MainWindow, self).__init__()
         self.versionNumber = parse_version(VERSION)  # tuple 比较，兼容 x.y.z
         self.versionDisplay = DISPLAY_VERSION
-        # Fluent 自绘标题栏（图标 + 标题 + 最小化/最大化/关闭），
-        # qframelesswindow 提供边缘缩放与拖动；先装标题栏再设标题/图标，
-        # 让 FluentTitleBar 的 windowTitleChanged/windowIconChanged 信号生效
-        self.setTitleBar(FluentTitleBar(self))
+        # 统一 Fluent 标题栏（经典 一/口/X 按钮，主题色自适应），
+        # qframelesswindow 提供边缘缩放与拖动；先装标题栏再设标题/图标
+        self.setTitleBar(AppTitleBar(self))
         self.setWindowTitle(f"DD监控室{self.versionDisplay}")
         self.setWindowIcon(Icon(FluentIcon.ROBOT))
         # QMainWindow 的 menuBar 从窗口顶部开始，会盖住 Fluent 标题栏

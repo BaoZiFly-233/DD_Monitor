@@ -5,9 +5,9 @@
 import logging
 
 from app.core import http_utils
+from app.ui.title_bar import FluentDialog
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
     QGridLayout,
     QLabel,
     QTableWidget,
@@ -45,12 +45,11 @@ class thankToBoss(QThread):
             logging.error(str(e))
 
 
-class pay(QDialog):
+class pay(FluentDialog):
     """投喂弹窗"""
 
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("赞助和支持")
+        super().__init__(title="赞助和支持")
         self.resize(564, 500)
         layout = QGridLayout()
         self.setLayout(layout)

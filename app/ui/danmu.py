@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal, QPoint, QSize
 from app.ui.common_widget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
+from app.ui.title_bar import FluentWindow
 from qfluentwidgets_pro import (
     CheckBox,
     ComboBox,
@@ -79,16 +80,15 @@ class ToolButton(QToolButton):
         self.setIcon(Icon(_DANMU_ICONS.get(icon_name, FluentIcon.INFO)))
 
 
-class TextOption(QWidget):
+class TextOption(FluentWindow):
     """弹幕机选项 - 弹出式窗口"""
 
     def __init__(self, setting=None):
-        super(TextOption, self).__init__()
+        super(TextOption, self).__init__(title="弹幕窗设置")
         if setting is None:
             setting = [50, 1, 7, 0, "【 [ {", 10, 0]
         setting = list(setting)  # 防御：避免外部修改影响默认值
         self.resize(300, 300)
-        self.setWindowTitle("弹幕窗设置")
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 窗体布局 ----
@@ -294,12 +294,11 @@ class RollingOptionWidget(QWidget):
         self.bottomEnabledCheckBox.setChecked(bool(settings_dict.get("bottom_enabled", True)))
 
 
-class GlobalDanmuOption(QWidget):
+class GlobalDanmuOption(FluentWindow):
     """全局弹幕设置面板 — 浏览器弹幕 + 滚动弹幕综合设置"""
 
     def __init__(self, danmu_config_list, rolling_config_dict):
-        super().__init__()
-        self.setWindowTitle("全局弹幕设置")
+        super().__init__(title="全局弹幕设置")
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.resize(400, 550)
 

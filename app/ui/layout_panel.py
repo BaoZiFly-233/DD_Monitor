@@ -2,10 +2,11 @@
 选择布局方式的页面
 """
 
-from PySide6.QtWidgets import QLabel, QWidget, QGridLayout
+from PySide6.QtWidgets import QLabel, QGridLayout
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal
 from app.ui.layout_config import layoutList
+from app.ui.title_bar import FluentWindow
 from app.ui.uikit_bridge import current_color, theme_changed
 
 
@@ -51,15 +52,14 @@ class LayoutWidget(QLabel):
         self.setStyleSheet("background-color:#00000000")
 
 
-class LayoutSettingPanel(QWidget):
+class LayoutSettingPanel(FluentWindow):
     """布局选择窗口"""
 
     layoutConfig = Signal(list)
 
     def __init__(self):
-        super(LayoutSettingPanel, self).__init__()
+        super(LayoutSettingPanel, self).__init__(title="选择布局方式")
         self.resize(1280, 720)
-        self.setWindowTitle("选择布局方式")
 
         # 排列各种布局方式
         mainLayout = QGridLayout(self)
