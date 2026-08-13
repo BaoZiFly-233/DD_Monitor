@@ -68,8 +68,8 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 - **配置格式迁移**：v1.x - v3.x 的所有格式自动升级
 - **导入/导出预设**：JSON 格式备份当前布局、播放器、音量、关注列表
 - **Dock 状态持久化**：窗口布局和 Dock 位置自动保存
-- **优雅退出**：关闭时先释放全部 MPV 渲染上下文与内核再退出，杜绝
-  `Windows fatal exception: access violation` 类退出崩溃
+- **优雅退出**：退出时停止全部播放/弹幕/取流线程并保存配置，随后硬终止进程，
+  根治 `Windows fatal exception: 0xe24c4a02` 类退出崩溃
 
 ---
 
@@ -178,7 +178,7 @@ tests/                     # pytest 测试（无头 GUI 环境）
 | 配置去抖动保存 | 用户连续调整音量/画质时避免磁盘 IO 风暴 |
 | QThread + Qt Signal | 后台线程不直接操作 UI；通过 emit 跨线程通信 |
 | 单播放器单弹幕线程 | 16+16 窗口需 32 个弹幕线程；独立隔离避免相互影响 |
-| MPV 退出时序 | 关闭时先释放 render context（GL 存活期）再 `terminate()`，避免退出崩溃 |
+| MPV 退出时序 | 播放中销毁 libmpv 有已知死锁/崩溃，退出改为跳过销毁 + 硬终止进程 |
 
 ---
 
@@ -482,12 +482,18 @@ pyinstaller DDMonitor_unix.spec    # Linux
 2. macOS：`brew install mpv`
 3. Linux：安装 `libmpv-dev` 或 `mpv-libs`
 
-### 退出程序时崩溃（access violation）
+### 退出程序时崩溃（access violation / 0xe24c4a02）
 
-旧版本在关闭时未主动终止 MPV 实例，进程退出瞬间 libmpv 渲染线程与 GL 上下文
-销毁竞争会触发 `Windows fatal exception: access violation / 0xe24c4a02`。
-v3.51 魔改版已在关闭路径中先释放渲染上下文、再 `terminate()` 全部 MPV 内核
-（`VideoWidget.shutdown()`），如仍复现请携带 `logs/crash-*.log` 提交 issue。
+libmpv 的 `mpv_render_context_free` / `mpv_terminate_destroy` 在 Windows +
+QOpenGLWidget 组合下存在已知销毁缺陷（mpv#8509 / iina#5031）：播放中退出
+会死锁或崩溃。本项目采用可靠性优先的退出策略：
+
+1. `closeEvent` 停止全部播放/弹幕/取流线程、保存配置与窗口布局；
+2. **跳过 MPV 的 free/terminate**（不再触碰 libmpv 销毁路径）；
+3. 入口在 `app.exec()` 返回后 `TerminateProcess` 硬退出，由 OS 直接回收
+   进程，杜绝 DLL 卸载清理与 GL 上下文销毁的冲突。
+
+如仍复现请携带 `logs/crash-*.log` 提交 issue。
 
 ### 配置文件损坏
 
