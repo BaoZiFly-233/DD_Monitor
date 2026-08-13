@@ -15,7 +15,7 @@
 
 import sys as _sys
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel
 
@@ -227,6 +227,7 @@ class AppTitleBar(TitleBarBase):
                 w.showMaximized()
             else:
                 w.showNormal()
+            apply_fullscreen_style(w, False)  # 恢复阴影与原生样式
             return
         if w.isMaximized():
             w.showNormal()
@@ -238,6 +239,55 @@ class AppTitleBar(TitleBarBase):
         if event.button() != Qt.LeftButton or not self._isDoubleClickEnabled:
             return
         self._toggleMaxState()
+
+
+def _inject_animation_style(window, hwnd, tries):
+    """注入 WS_CAPTION/WS_THICKFRAME（Snap/动画原生样式）。
+
+    showNormal 等异步状态应用会先重置 GWL_STYLE，必须等其完成后注入
+    才不会被覆盖；注入成功后即停止，若仍被覆盖则每 100ms 重试兜底。
+    """
+    import win32con
+    import win32gui
+
+    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+    if style & win32con.WS_CAPTION:
+        return
+    try:
+        window.windowEffect.addWindowAnimation(hwnd)
+    except Exception:
+        pass
+    if tries > 0:
+        QTimer.singleShot(100, lambda: _inject_animation_style(window, hwnd, tries - 1))
+
+
+def apply_fullscreen_style(window, is_fullscreen: bool) -> None:
+    """全屏切换的 Windows 原生层处理。
+
+    qframelesswindow 的 addWindowAnimation 会注入 WS_CAPTION/WS_THICKFRAME
+    样式以启用 Snap 布局/窗口动画；全屏时若保留这些样式，DWM 会在全屏
+    窗口上额外渲染原生标题栏/边框层（表现为"两个窗口叠着"），且
+    WM_NCCALCSIZE 的最大化边框补偿在状态切换时会逐次偏移（窗口不断往
+    左上角跳）。全屏期间移除样式与阴影，退出后等待 Qt 状态稳定再恢复。
+    """
+    if _sys.platform != "win32":
+        return
+    import win32con
+    import win32gui
+
+    hwnd = int(window.winId())
+    if is_fullscreen:
+        window.windowEffect.removeShadowEffect(hwnd)
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+        win32gui.SetWindowLong(
+            hwnd,
+            win32con.GWL_STYLE,
+            style & ~win32con.WS_CAPTION & ~win32con.WS_THICKFRAME,
+        )
+    else:
+        window.windowEffect.addShadowEffect(hwnd)
+        # Qt 的 showNormal/showMaximized 异步重置样式，150ms 后（状态稳定）再注入
+        QTimer.singleShot(150, lambda: _inject_animation_style(window, hwnd, 10))
 
 
 def _install_title_bar(window, title="", maximize_enabled=True):

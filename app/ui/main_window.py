@@ -28,7 +28,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
 from app.ui.layout_panel import LayoutSettingPanel
-from app.ui.title_bar import AppTitleBar, FluentWindow
+from app.ui.title_bar import AppTitleBar, FluentWindow, apply_fullscreen_style
 from app.ui.video_widget import VideoWidget
 from app.ui.liver_select import LiverPanel
 from app.core.config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS
@@ -1515,6 +1515,8 @@ class MainWindow(WindowsFramelessMainWindow):
                 self.showMaximized()
             else:
                 self.showNormal()
+            # 恢复阴影与原生样式（内部轮询，等待 Qt 异步状态应用完成）
+            apply_fullscreen_style(self, False)
             self.optionMenu.menuAction().setVisible(True)
             self.versionMenu.menuAction().setVisible(True)
             self.payMenu.menuAction().setVisible(True)
@@ -1522,6 +1524,7 @@ class MainWindow(WindowsFramelessMainWindow):
                 self.controlDock.show()
                 self.cardDock.show()
         else:  # 全屏
+            apply_fullscreen_style(self, True)  # 移除阴影与 WS_CAPTION，防 DWM 幽灵标题栏
             for videoWidget in self.videoWidgetList:
                 videoWidget.fullScreen = True
             self.maximumToken = self.isMaximized()

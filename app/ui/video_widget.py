@@ -13,7 +13,7 @@ from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, 
 from bilibili_api import live, sync
 from app.core.bili_credential import build_credential, normalize_credential_data
 from app.ui.common_widget import Slider
-from app.ui.title_bar import AppTitleBar, FramelessWindowBase, TITLE_BAR_HEIGHT
+from app.ui.title_bar import AppTitleBar, FramelessWindowBase, TITLE_BAR_HEIGHT, apply_fullscreen_style
 from app.media.remote import DanmakuEvent, remoteThread
 from app.core.constants import DISPLAY_RATIOS
 from app.danmaku.settings import DanmakuSettings
@@ -1239,7 +1239,10 @@ class VideoWidget(FramelessWindowBase, QFrame):
     def _menuToggleFullScreen(self):
         if self.isFullScreen():
             self.showNormal()
+            # 恢复阴影与原生样式（内部轮询，等待 Qt 异步状态应用完成）
+            apply_fullscreen_style(self, False)
         else:
+            apply_fullscreen_style(self, True)
             self.showFullScreen()
 
     def _menuExitPopWindow(self):
@@ -1683,6 +1686,8 @@ class VideoWidget(FramelessWindowBase, QFrame):
         if QKeyEvent.key() == Qt.Key_Escape:
             if self.top and self.isFullScreen():
                 self.showNormal()
+                # 恢复阴影与原生样式（内部轮询，等待 Qt 异步状态应用完成）
+                apply_fullscreen_style(self, False)
             else:
                 self.fullScreenKey.emit()
         elif QKeyEvent.key() == Qt.Key_H:
