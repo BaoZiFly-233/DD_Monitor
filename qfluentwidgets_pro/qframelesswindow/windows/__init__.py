@@ -45,7 +45,10 @@ class WindowsFramelessWindowBase:
         stayOnTop = Qt.WindowStaysOnTopHint if self.windowFlags() & Qt.WindowStaysOnTopHint else 0
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | stayOnTop)
 
-        # add DWM shadow and window animation
+        # 纯 Qt 无边框：仅注入 WS_MINIMIZEBOX/WS_MAXIMIZEBOX（任务栏/快捷键行为），
+        # 不注入 WS_CAPTION/WS_THICKFRAME —— 原生样式 + WM_NCCALCSIZE 补偿会在
+        # 最大化/还原切换时反复引入非客户区，导致窗口几何逐次偏移（往左上角跳）
+        # 并出现 DWM 影子窗口。边缘缩放由 WM_NCHITTEST 消息驱动，无需原生样式。
         self.windowEffect.addWindowAnimation(self.winId())
         if not isinstance(self, AcrylicWindow):
             self.windowEffect.addShadowEffect(self.winId())
@@ -139,6 +142,8 @@ class WindowsFramelessWindowBase:
             elif rx:
                 return True, win32con.HTRIGHT
         elif msg.message == win32con.WM_NCCALCSIZE:
+            # 纯 Qt 无边框（无 WS_CAPTION/WS_THICKFRAME）：Windows 不计算非客户区，
+            # 无需几何补偿。保留自动隐藏任务栏的避让（最大化/全屏时）。
             if msg.wParam:
                 rect = cast(msg.lParam, LPNCCALCSIZE_PARAMS).contents.rgrc[0]
             else:
@@ -146,16 +151,6 @@ class WindowsFramelessWindowBase:
 
             isMax = win_utils.isMaximized(msg.hWnd)
             isFull = win_utils.isFullScreen(msg.hWnd)
-
-            # adjust the size of client rect
-            if isMax and not isFull:
-                ty = win_utils.getResizeBorderThickness(msg.hWnd, False)
-                rect.top += ty
-                rect.bottom -= ty
-
-                tx = win_utils.getResizeBorderThickness(msg.hWnd, True)
-                rect.left += tx
-                rect.right -= tx
 
             # handle the situation that an auto-hide taskbar is enabled
             if (isMax or isFull) and Taskbar.isAutoHide():

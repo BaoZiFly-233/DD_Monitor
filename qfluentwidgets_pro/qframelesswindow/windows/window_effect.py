@@ -269,12 +269,11 @@ class WindowsWindowEffect:
 
     @staticmethod
     def addWindowAnimation(hWnd):
-        """ Enables the maximize and minimize animation of the window
+        """ 启用最小化/最大化任务栏行为（纯 Qt 无边框模式）。
 
-        Parameters
-        ----------
-        hWnd : int or `sip.voidptr`
-            Window handle
+        仅注入 WS_MINIMIZEBOX/WS_MAXIMIZEBOX/WS_THICKFRAME 之外的最小集：
+        不注入 WS_CAPTION/WS_THICKFRAME，避免 DWM 渲染原生标题栏/边框层
+        （幽灵窗口）以及 WM_NCCALCSIZE 几何补偿造成的逐次偏移。
         """
         hWnd = int(hWnd)
         style = win32gui.GetWindowLong(hWnd, win32con.GWL_STYLE)
@@ -283,10 +282,7 @@ class WindowsWindowEffect:
             win32con.GWL_STYLE,
             style
             | win32con.WS_MINIMIZEBOX
-            | win32con.WS_MAXIMIZEBOX
-            | win32con.WS_CAPTION
-            | win32con.CS_DBLCLKS
-            | win32con.WS_THICKFRAME,
+            | win32con.WS_MAXIMIZEBOX,
         )
 
     @staticmethod
