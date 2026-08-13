@@ -10,7 +10,6 @@ qconfig，仅作为卡片取值容器），读写仍走自研 config_manager。
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -80,17 +79,18 @@ def _range_card(icon, title, content, minimum, maximum, value, parent):
     return card
 
 
-class SettingsDialog(QDialog):
+class SettingsInterface(QWidget):
     """统一设置对话框（Fluent SettingCard 格式，5 个标签页）"""
 
-    def __init__(self, parent, config, config_manager, danmu_panel_fn, layout_panel_fn):
+    def __init__(self, config, config_manager, danmu_panel_fn, layout_panel_fn, on_applied=None, parent=None):
         super().__init__(parent)
+        self.setObjectName("settingsInterface")
+        self.setProperty("isStackedTransparent", True)
         self.config = config
         self.configManager = config_manager
         self._danmu_panel_fn = danmu_panel_fn
         self._layout_panel_fn = layout_panel_fn
-        self.setWindowTitle("设置")
-        self.resize(560, 520)
+        self._on_applied = on_applied
 
         tabs = TabWidget()
         main_layout = QVBoxLayout(self)
@@ -480,4 +480,5 @@ class SettingsDialog(QDialog):
         set_accent(cfg["accent"])
 
         self.configManager.save()
-        self.accept()
+        if self._on_applied is not None:
+            self._on_applied()
