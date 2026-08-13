@@ -6,14 +6,14 @@ import os
 
 import pytest
 
-from config_manager import DEFAULT_CONFIG, ConfigManager
+from app.core.config_manager import DEFAULT_CONFIG, ConfigManager
 
 
 @pytest.fixture
 def cm(tmp_path):
-    """隔离的 ConfigManager（不触碰真实 utils/config.json）"""
-    utils_dir = tmp_path / "utils"
-    utils_dir.mkdir()
+    """隔离的 ConfigManager（不触碰真实 resources/config.json）"""
+    resources_dir = tmp_path / "resources"
+    resources_dir.mkdir()
     return ConfigManager(str(tmp_path))
 
 
@@ -140,11 +140,11 @@ class TestSave:
         cm.config["volume"] = [10] * 16
         cm.save(immediate=True)
         # 第一次保存：无旧文件可轮转，backup1 尚不存在
-        assert not os.path.exists(os.path.join(cm.application_path, "utils/config_备份1.json"))
+        assert not os.path.exists(os.path.join(cm.application_path, "resources/config_备份1.json"))
 
         cm.config["volume"] = [20] * 16
         cm.save(immediate=True)
-        backup1 = os.path.join(cm.application_path, "utils/config_备份1.json")
+        backup1 = os.path.join(cm.application_path, "resources/config_备份1.json")
         assert os.path.exists(backup1)
         # 备份内容是第一次保存的旧配置
         saved_backup = json.loads(open(backup1, encoding="utf-8").read())

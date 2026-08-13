@@ -1,10 +1,10 @@
 import re
-import http_utils
+from app.core import http_utils
 from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QGridLayout, QLabel, QTextBrowser, QWidget
 from qfluentwidgets_pro import PushButton, PrimaryPushButton
-from app_version import parse_version
+from app.core.app_version import parse_version
 
 
 class checkUpdate(QThread):

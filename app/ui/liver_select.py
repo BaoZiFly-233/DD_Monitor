@@ -9,7 +9,7 @@ import os
 import threading
 import time
 from bilibili_api import live_area, user, sync
-from bili_credential import build_credential, normalize_credential_data
+from app.core.bili_credential import build_credential, normalize_credential_data
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -35,10 +35,10 @@ from PySide6.QtGui import (
     QPen,
 )
 from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, QUrl, Signal
-import http_utils
-from CommonWidget import DownloadImage  # 公共图片下载线程
+from app.core import http_utils
+from app.ui.common_widget import DownloadImage  # 公共图片下载线程
 from qfluentwidgets_pro import FlowLayout, PrimaryPushButton, ProgressBar, RoundMenu, TableWidget, TabWidget, LineEdit
-from uikit_bridge import current_color, info as uikit_info, is_dark, theme_changed
+from app.ui.uikit_bridge import current_color, info as uikit_info, is_dark, theme_changed
 
 
 header = http_utils.DEFAULT_HEADERS
@@ -215,7 +215,7 @@ class RecordThread(QThread):
         self.reconnectCount = 0
         try:
             from bilibili_api import live, sync
-            from bili_credential import build_credential, normalize_credential_data
+            from app.core.bili_credential import build_credential, normalize_credential_data
 
             cred_data = normalize_credential_data(self.credential, sessdata=self.sessionData)
             room = live.LiveRoom(int(self.roomID), credential=build_credential(cred_data, sessdata=self.sessionData))
@@ -776,7 +776,7 @@ class DownloadVTBList(QThread):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36"
             }
             r = http_utils.get(
-                r"https://raw.githubusercontent.com/BaoZiFly-233/DD_Monitor/master/utils/vtb.csv", headers=headers
+                r"https://raw.githubusercontent.com/BaoZiFly-233/DD_Monitor/master/resources/vtb.csv", headers=headers
             )
             # raw URL 返回纯 CSV 文本（每行: 主播名,房号,所属），
             # 旧解析按 blob 页面 HTML 行号标记 split(">")，对 raw 内容永不命中 -> 名单恒空
@@ -943,7 +943,7 @@ class AddLiverRoomWidget(QWidget):
         self.hacoTable.setColumnCount(3)
         try:
             self.vtbList = []
-            with open(os.path.join(self.application_path, "utils/vtb.csv"), "r", encoding="utf-8") as vtbs:
+            with open(os.path.join(self.application_path, "resources/vtb.csv"), "r", encoding="utf-8") as vtbs:
                 for line in vtbs:
                     line = line.strip()
                     if line:
@@ -1073,7 +1073,7 @@ class AddLiverRoomWidget(QWidget):
             if not vtbList:
                 uikit_info(self, "更新VUP名单", "更新失败 请检查网络")
                 return
-            with open(os.path.join(self.application_path, "utils/vtb.csv"), "w", encoding="utf-8") as vtbs:
+            with open(os.path.join(self.application_path, "resources/vtb.csv"), "w", encoding="utf-8") as vtbs:
                 for line in vtbList:
                     vtbs.write(line)
             self.vtbList = []

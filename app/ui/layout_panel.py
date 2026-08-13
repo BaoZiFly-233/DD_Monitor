@@ -5,8 +5,8 @@
 from PySide6.QtWidgets import QLabel, QWidget, QGridLayout
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal
-from LayoutConfig import layoutList
-from uikit_bridge import current_color, theme_changed
+from app.ui.layout_config import layoutList
+from app.ui.uikit_bridge import current_color, theme_changed
 
 
 class Label(QLabel):

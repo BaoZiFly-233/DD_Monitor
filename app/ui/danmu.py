@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, Signal, QPoint, QSize
-from CommonWidget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
+from app.ui.common_widget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
 from qfluentwidgets_pro import (
     CheckBox,
     ComboBox,
@@ -20,12 +20,12 @@ from qfluentwidgets_pro import (
     Slider as FluentSlider,
     TabWidget,
 )
-from uikit_bridge import is_dark, theme_changed
+from app.ui.uikit_bridge import is_dark, theme_changed
 
 # 弹幕显示比例（定义在 constants.py，此处重导出兼容旧导入路径）
-from constants import DISPLAY_RATIOS  # noqa: F401
+from app.core.constants import DISPLAY_RATIOS  # noqa: F401
 # 弹幕配置数据类（独立模块，纯数据无 Qt 依赖；重导出兼容旧导入路径）
-from danmaku_settings import DanmakuSettings  # noqa: F401
+from app.danmaku.settings import DanmakuSettings  # noqa: F401
 
 # 弹幕机标题栏图标映射（Fluent 矢量图标，颜色随主题自动适配）
 _DANMU_ICONS = {"settings": FluentIcon.SETTING, "close": FluentIcon.CLOSE}

@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QTimer
 
 # 常量（定义在 constants.py，此处重导出以兼容旧代码 from config_manager import ...）
 # 注意：config_manager 不依赖任何 UI 模块，保持配置层纯净
-from constants import MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS, DEFAULT_DANMU_CONFIG  # noqa: E402,F401
+from app.core.constants import MAX_WINDOWS, WINDOW_CARD_WIDTH, DISPLAY_RATIOS, DEFAULT_DANMU_CONFIG  # noqa: E402,F401
 
 DEFAULT_ROLLING_DANMU = {
     "font_family": "Microsoft YaHei",
@@ -62,7 +62,7 @@ class ConfigManager(QObject):
     def __init__(self, application_path, parent=None):
         super().__init__(parent)
         self.application_path = application_path
-        self.config_path = os.path.join(application_path, "utils", "config.json")
+        self.config_path = os.path.join(application_path, "resources", "config.json")
         self.config = {}
         self._dirty = False
         self._debounce_timer = QTimer(self)
@@ -77,7 +77,7 @@ class ConfigManager(QObject):
         self.config = self._load_json(self.config_path)
         if not self.config:
             for backup_number in [1, 2, 3]:
-                backup_path = os.path.join(self.application_path, f"utils/config_备份{backup_number}.json")
+                backup_path = os.path.join(self.application_path, f"resources/config_备份{backup_number}.json")
                 self.config = self._load_json(backup_path)
                 if self.config:
                     logging.info(f"从备份 config_备份{backup_number}.json 恢复配置")
@@ -177,7 +177,7 @@ class ConfigManager(QObject):
             logging.info(f"[LOGIN] config sessionData URL 解码: {old_val[:30]}... -> {cfg['sessionData'][:30]}...")
 
         # credential 规范化
-        from bili_credential import normalize_credential_data
+        from app.core.bili_credential import normalize_credential_data
 
         cfg["credential"] = normalize_credential_data(cfg.get("credential", {}), sessdata=cfg.get("sessionData", ""))
         cfg["sessionData"] = cfg["credential"].get("sessdata", "")
@@ -206,8 +206,8 @@ class ConfigManager(QObject):
         self._dirty = False
         # 轮转备份：备份2 → 备份3, 备份1 → 备份2, 当前配置文件 → 备份1
         for src_num, dst_num in [(2, 3), (1, 2)]:
-            src = os.path.join(self.application_path, f"utils/config_备份{src_num}.json")
-            dst = os.path.join(self.application_path, f"utils/config_备份{dst_num}.json")
+            src = os.path.join(self.application_path, f"resources/config_备份{src_num}.json")
+            dst = os.path.join(self.application_path, f"resources/config_备份{dst_num}.json")
             try:
                 if os.path.exists(src):
                     if os.path.exists(dst):
@@ -216,7 +216,7 @@ class ConfigManager(QObject):
             except OSError:
                 pass
         # 当前 config.json → 备份1
-        backup1 = os.path.join(self.application_path, "utils/config_备份1.json")
+        backup1 = os.path.join(self.application_path, "resources/config_备份1.json")
         try:
             if os.path.exists(self.config_path):
                 if os.path.exists(backup1):
@@ -229,6 +229,9 @@ class ConfigManager(QObject):
 
     def _write_json(self, path, data):
         try:
+            parent = os.path.dirname(path)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
             with open(path, "w", encoding="utf-8", errors="ignore") as f:
                 f.write(json.dumps(data, ensure_ascii=False))
         except Exception as e:

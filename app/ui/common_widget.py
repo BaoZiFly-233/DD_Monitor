@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QSlider
 
-import http_utils
+from app.core import http_utils
 
 
 class Slider(QSlider):

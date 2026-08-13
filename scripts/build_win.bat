@@ -57,11 +57,11 @@ if not exist "%DIST_DIR%" (
 )
 
 if not exist "%DIST_DIR%\logs" mkdir "%DIST_DIR%\logs"
-if exist "%ROOT_DIR%utils" xcopy "%ROOT_DIR%utils" "%DIST_DIR%\utils\" /E /I /Y >nul
-if exist "%DIST_DIR%\utils\config.json" del /F /Q "%DIST_DIR%\utils\config.json"
-if exist "%DIST_DIR%\utils\config_*.json" del /F /Q "%DIST_DIR%\utils\config_*.json"
-if exist "%DIST_DIR%\utils\splash.psd" del /F /Q "%DIST_DIR%\utils\splash.psd"
-if exist "%DIST_DIR%\utils\entitlements.plist" del /F /Q "%DIST_DIR%\utils\entitlements.plist"
+if exist "%ROOT_DIR%resources" xcopy "%ROOT_DIR%resources" "%DIST_DIR%\resources\" /E /I /Y >nul
+if exist "%DIST_DIR%\resources\config.json" del /F /Q "%DIST_DIR%\resources\config.json"
+if exist "%DIST_DIR%\resources\config_*.json" del /F /Q "%DIST_DIR%\resources\config_*.json"
+if exist "%DIST_DIR%\resources\splash.psd" del /F /Q "%DIST_DIR%\resources\splash.psd"
+if exist "%DIST_DIR%\resources\entitlements.plist" del /F /Q "%DIST_DIR%\resources\entitlements.plist"
 copy /Y "%MPV_DLL%" "%DIST_DIR%\libmpv-2.dll" >nul
 
 rem libmpv 嵌入只需要 DLL 本体；d3dcompiler_43.dll 可选（mpv gpu 输出需要），

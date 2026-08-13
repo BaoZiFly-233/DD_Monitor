@@ -82,6 +82,8 @@ class remoteThread(QThread):
         # 停止请求标记（threading.Event 保证跨线程可见性）
         # 修复竞态：stop() 若在 _stop_event 创建前被调用，_connect() 创建后需能感知
         self._stop_requested = threading.Event()
+        # 是否进入过 run()（用于区分"stop 先于启动"与"stop 来自上一轮运行"）
+        self._has_run = False
 
     def setRoomID(self, roomID):
         self.roomID = str(roomID)
@@ -106,8 +108,11 @@ class remoteThread(QThread):
             return
 
         self._running = True
-        # 新一轮连接开始，清除历史停止请求（stop→start 是合法的重启流程）
-        self._stop_requested.clear()
+        # 上一轮运行遗留的停止标记在此清除（stop→start 是合法的重启流程）；
+        # 但 stop() 若发生在 run() 之前（从未运行过），标记必须保留给 _connect 消费
+        if self._has_run:
+            self._stop_requested.clear()
+        self._has_run = True
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
@@ -153,6 +158,7 @@ class remoteThread(QThread):
                 # 竞态修复：stop() 若在 _stop_event 创建前被调用（_stop_requested 已置位），
                 # 立即置位 event，避免 await 永久阻塞导致 QThread 运行中被析构崩溃
                 if self._stop_requested.is_set():
+                    self._stop_requested.clear()
                     self._stop_event.set()
                 await self._stop_event.wait()  # 阻塞直到 stop() 设置 event
             finally:

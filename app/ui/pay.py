@@ -4,7 +4,7 @@
 
 import logging
 
-import http_utils
+from app.core import http_utils
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from CommonWidget import DownloadImage  # 公共图片下载线程
+from app.ui.common_widget import DownloadImage  # 公共图片下载线程
 
 
 class thankToBoss(QThread):

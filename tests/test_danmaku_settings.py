@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """DanmakuSettings 数据类测试 — 序列化 / 反序列化 / 索引兼容 / 边界钳制。"""
 
-from danmaku_settings import DanmakuSettings
+from app.danmaku.settings import DanmakuSettings
 
 
 class TestFromConfigList:

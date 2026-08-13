@@ -11,21 +11,21 @@ from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QL
 from PySide6.QtGui import QDesktopServices, QDrag, QFont, QCursor
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
 from bilibili_api import live, sync
-from bili_credential import build_credential, normalize_credential_data
-from CommonWidget import Slider
-from remote import DanmakuEvent, remoteThread
-from constants import DISPLAY_RATIOS
-from danmaku_settings import DanmakuSettings
-from danmu import TextBrowser
-from danmaku_renderer import DanmakuRenderer
-from mpv_gl_widget import MpvGLWidget
+from app.core.bili_credential import build_credential, normalize_credential_data
+from app.ui.common_widget import Slider
+from app.media.remote import DanmakuEvent, remoteThread
+from app.core.constants import DISPLAY_RATIOS
+from app.danmaku.settings import DanmakuSettings
+from app.ui.danmu import TextBrowser
+from app.danmaku.renderer import DanmakuRenderer
+from app.media.mpv_gl_widget import MpvGLWidget
 from qfluentwidgets_pro import RoundMenu
-from uikit_bridge import current_color, theme_changed
+from app.ui.uikit_bridge import current_color, theme_changed
 import logging
 import warnings
 from datetime import datetime
 from urllib.parse import urlsplit
-import http_utils
+from app.core import http_utils
 
 _MPV_DLL_HANDLES = []
 _MPV_MODULE = None

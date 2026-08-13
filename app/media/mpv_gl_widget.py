@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QMetaObject, QPoint, Qt, QTimer, Signal, 
 from PySide6.QtGui import QColor, QOpenGLContext, QPainter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication
-from uikit_bridge import current_color, is_dark, theme_changed
+from app.ui.uikit_bridge import current_color, is_dark, theme_changed
 
 
 class MpvGLWidget(QOpenGLWidget):

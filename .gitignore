@@ -22,7 +22,7 @@ crash.log
 # Config
 config_*.json
 config.json
-!utils/config_default.json
+!resources/config_default.json
 
 # VLC bin
 plugins/

@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass
 
-from constants import DEFAULT_DANMU_CONFIG
+from app.core.constants import DEFAULT_DANMU_CONFIG
 
 
 @dataclass

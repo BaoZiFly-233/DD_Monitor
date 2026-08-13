@@ -3,7 +3,7 @@
 
 import time
 
-from danmaku_renderer import (
+from app.danmaku.renderer import (
     DanmakuDataFilter,
     DanmakuFilterResult,
     DanmakuImageCache,
@@ -30,6 +30,7 @@ class TestFilters:
                 return DanmakuFilterResult(True, "block_all")
 
         renderer = DanmakuRenderer()
+        renderer.setViewportSize(800, 600)
         renderer.setDataFilters([EmptyTextFilter(), BlockAll()])
         renderer.addDanmaku("visible", kind="scroll")
         assert renderer.activeCount() == 0
@@ -44,6 +45,7 @@ class TestFilters:
                 return DanmakuFilterResult(True, "stop")
 
         renderer = DanmakuRenderer()
+        renderer.setViewportSize(800, 600)
         renderer.setDataFilters([CountingFilter(), CountingFilter()])
         renderer.addDanmaku("x", kind="scroll")
         assert len(calls) == 1
@@ -51,7 +53,7 @@ class TestFilters:
 
 class TestImageCache:
     def test_same_key_returns_same_sprite(self, qapp):
-        from danmaku_renderer import DanmakuStyle
+        from app.danmaku.renderer import DanmakuStyle
 
         cache = DanmakuImageCache(max_items=32)
         style = DanmakuStyle()
@@ -60,7 +62,7 @@ class TestImageCache:
         assert s1 is s2  # 同一对象（缓存命中）
 
     def test_different_text_different_sprite(self, qapp):
-        from danmaku_renderer import DanmakuStyle
+        from app.danmaku.renderer import DanmakuStyle
 
         cache = DanmakuImageCache(max_items=32)
         style = DanmakuStyle()
@@ -69,18 +71,23 @@ class TestImageCache:
         assert s1 is not s2
 
     def test_lru_eviction(self, qapp):
-        from danmaku_renderer import DanmakuStyle
+        from app.danmaku.renderer import DanmakuStyle
 
-        cache = DanmakuImageCache(max_items=3)
+        # 构造器有最小容量钳制（max(32, max_items)），用 32 触发淘汰
+        cache = DanmakuImageCache(max_items=32)
         style = DanmakuStyle()
-        a = cache.get_or_create("a", "#FFFFFF", style)
-        b = cache.get_or_create("b", "#FFFFFF", style)
-        c = cache.get_or_create("c", "#FFFFFF", style)
-        # 访问 a 使其成为最近使用
-        cache.get_or_create("a", "#FFFFFF", style)
-        d = cache.get_or_create("d", "#FFFFFF", style)  # 淘汰最久未用的 b
-        assert len(cache._cache) == 3
-        assert cache.get_or_create("b", "#FFFFFF", style) is not b  # b 已被淘汰，重新创建
+        for i in range(32):
+            cache.get_or_create(f"s{i}", "#FFFFFF", style)
+        oldest = cache.get_or_create("s0", "#FFFFFF", style)
+        # 再访问 s0 使其成为最近使用，然后插入新条目
+        cache.get_or_create("s0", "#FFFFFF", style)
+        new_sprite = cache.get_or_create("new", "#FFFFFF", style)
+        assert len(cache._cache) == 32
+        # 最久未使用的 s1 已被淘汰，重新创建后不是旧对象
+        assert cache.get_or_create("s1", "#FFFFFF", style) is not oldest
+        # 被访问过的 s0 保留（仍是缓存中的同一对象）
+        assert cache.get_or_create("s0", "#FFFFFF", style) is oldest
+        assert new_sprite is cache.get_or_create("new", "#FFFFFF", style)
 
 
 class TestRendererLifecycle:
@@ -128,7 +135,8 @@ class TestRendererLifecycle:
     def test_fixed_kind_limit(self, qapp):
         """顶部弹幕每类最多 _MAX_FIXED_PER_KIND 条"""
         renderer = DanmakuRenderer()
-        renderer.setViewportSize(800, 600)
+        # 高视口保证轨道数 >= 上限，让布局先于数量限制被触发
+        renderer.setViewportSize(800, 4000)
         limit = renderer._MAX_FIXED_PER_KIND
         for i in range(limit + 10):
             renderer.addDanmaku(f"t{i}", kind="top")

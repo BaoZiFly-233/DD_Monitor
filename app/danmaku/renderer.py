@@ -9,7 +9,7 @@ import time
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QPen
 
-from danmaku_layout import BottomLayout, RollLayout, TopLayout
+from app.danmaku.layout import BottomLayout, RollLayout, TopLayout
 
 
 @dataclass(frozen=True)

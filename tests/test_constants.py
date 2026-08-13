@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """全局常量一致性测试 — 防止常量被改动导致跨模块不同步。"""
 
-from constants import (
+from app.core.constants import (
     DEFAULT_DANMU_CONFIG,
     DISPLAY_RATIOS,
     MAX_WINDOWS,
     WINDOW_CARD_WIDTH,
 )
-from config_manager import DEFAULT_CONFIG, DEFAULT_ROLLING_DANMU
-from danmaku_settings import DanmakuSettings
+from app.core.config_manager import DEFAULT_CONFIG, DEFAULT_ROLLING_DANMU
+from app.danmaku.settings import DanmakuSettings
 
 
 class TestWindowConstants:
@@ -39,9 +39,9 @@ class TestDisplayRatios:
 
     def test_single_source(self):
         """所有模块引用同一对象，避免复制导致不同步"""
-        import config_manager
-        import danmu
-        import VideoWidget_mpv  # noqa: F401
+        from app.core import config_manager
+        from app.ui import danmu
+        from app.ui import video_widget  # noqa: F401
 
         assert danmu.DISPLAY_RATIOS is DISPLAY_RATIOS
         assert config_manager.DISPLAY_RATIOS is DISPLAY_RATIOS

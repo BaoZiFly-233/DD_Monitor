@@ -3,7 +3,7 @@
 
 import re
 
-from remote import DanmakuEvent, _generate_buvid3
+from app.media.remote import DanmakuEvent, _generate_buvid3
 
 
 class TestGenerateBuvid3:
@@ -40,7 +40,7 @@ class TestRemoteThreadStopRace:
     """stop() 早于线程 _stop_event 创建时的竞态——线程必须能感知停止请求并退出"""
 
     def test_stop_before_start(self):
-        from remote import remoteThread
+        from app.media.remote import remoteThread
 
         thread = remoteThread("1", "")
         # 先 stop（模拟在 _stop_event 创建前停止）
@@ -55,7 +55,7 @@ class TestDanmakuHandlerSignals:
         """DanmakuHandler 收到弹幕消息后通过 Qt Signal 推送（消息以字符串形式）"""
         from PySide6.QtCore import QObject, Signal
 
-        from remote import DanmakuHandler
+        from app.media.remote import DanmakuHandler
 
         class Receiver(QObject):
             received = Signal(str)
@@ -75,7 +75,7 @@ class TestDanmakuHandlerSignals:
     def test_handler_skips_mirror(self, qapp):
         from PySide6.QtCore import QObject, Signal
 
-        from remote import DanmakuHandler
+        from app.media.remote import DanmakuHandler
 
         class Receiver(QObject):
             received = Signal(str)
@@ -95,7 +95,7 @@ class TestDanmakuHandlerSignals:
     def test_handler_gift_gold_only(self, qapp):
         from PySide6.QtCore import QObject, Signal
 
-        from remote import DanmakuHandler
+        from app.media.remote import DanmakuHandler
 
         class Receiver(QObject):
             received = Signal(str)

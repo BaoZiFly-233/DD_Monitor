@@ -27,8 +27,8 @@ from qfluentwidgets_pro import (
     SwitchButton,
     TabWidget,
 )
-from uikit_bridge import ACCENT_NAMES, set_accent, set_menu_animation, set_theme
-from config_manager import MAX_WINDOWS
+from app.ui.uikit_bridge import ACCENT_NAMES, set_accent, set_menu_animation, set_theme
+from app.core.config_manager import MAX_WINDOWS
 
 #: 配色方案显示名（与 uikit_bridge.ACCENT_NAMES 一一对应）
 _ACCENT_LABELS = {

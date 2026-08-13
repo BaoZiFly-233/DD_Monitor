@@ -13,7 +13,7 @@ B站扫码登录模块 — 极简版
 import logging
 from urllib.parse import urlparse, parse_qs
 
-import http_utils
+from app.core import http_utils
 import qrcode  # requirements.txt 已强制依赖 qrcode[pil]
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QPixmap, QImage, QFont
