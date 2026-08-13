@@ -7,7 +7,7 @@ DD监控室视频播放窗口 - MPV 内核版本
 import os
 import sys
 import time
-from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QStyle, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QWidget
 from PySide6.QtGui import QDesktopServices, QDrag, QFont, QCursor
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
 from bilibili_api import live, sync
@@ -20,7 +20,7 @@ from app.danmaku.settings import DanmakuSettings
 from app.ui.danmu import TextBrowser
 from app.danmaku.renderer import DanmakuRenderer
 from app.media.mpv_gl_widget import MpvGLWidget
-from qfluentwidgets_pro import RoundMenu
+from qfluentwidgets_pro import FluentIcon, Icon, RoundMenu
 from app.ui.uikit_bridge import current_color, theme_changed
 import logging
 import warnings
@@ -105,6 +105,7 @@ class PushButton(QPushButton):
     def __init__(self, icon="", text=""):
         super(PushButton, self).__init__()
         self.setFixedSize(30, 30)
+        self.setIconSize(QSize(16, 16))
         self.setStyleSheet("background-color:#00000000")
         if icon:
             self.setIcon(icon)
@@ -453,14 +454,14 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.timestampLabel.setStyleSheet("background-color:#00000000")
         self.timestampLabel.setText("0:00:00")
         frameLayout.addWidget(self.timestampLabel)
-        self.play = PushButton(self.style().standardIcon(QStyle.SP_MediaPause))
+        self.play = PushButton(Icon(FluentIcon.PAUSE))
         # clicked 信号带 checked 参数，用 lambda 显式忽略，避免误传 force
         self.play.clicked.connect(lambda: self.mediaPlay())
         frameLayout.addWidget(self.play)
-        self.reload = PushButton(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.reload = PushButton(Icon(FluentIcon.SYNC))
         self.reload.clicked.connect(lambda: self.mediaReload())
         frameLayout.addWidget(self.reload)
-        self.volumeButton = PushButton(self.style().standardIcon(QStyle.SP_MediaVolume))
+        self.volumeButton = PushButton(Icon(FluentIcon.VOLUME))
         self.volumeButton.clicked.connect(lambda: self.mediaMute())
         frameLayout.addWidget(self.volumeButton)
         self.slider = Slider()
@@ -475,7 +476,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.danmuDensityLabel.setAlignment(Qt.AlignCenter)
         self.danmuDensityLabel.setStyleSheet("color:#aaa;font-size:10px;background:transparent")
         frameLayout.addWidget(self.danmuDensityLabel)
-        self.stop = PushButton(self.style().standardIcon(QStyle.SP_DialogCancelButton))
+        self.stop = PushButton(Icon(FluentIcon.CANCEL))
         self.stop.clicked.connect(lambda: self._mediaStop())
         frameLayout.addWidget(self.stop)
         for control_button in (self.play, self.reload, self.volumeButton, self.danmuButton, self.stop):
@@ -1185,13 +1186,13 @@ class VideoWidget(FramelessWindowBase, QFrame):
         for text, q in quality_items.items():
             act = chooseQuality.addAction(text)
             if self.quality == q:
-                act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+                act.setIcon(Icon(FluentIcon.ACCEPT))
             act.triggered.connect(lambda checked=False, q=q: self._menuSetQuality(q))
         chooseAmplify = menu.addMenu("音量增大 ►")
         for amp_val in [0.5, 1.0, 1.5, 2.0, 3.0, 4.0]:
             action = chooseAmplify.addAction("x %.1f" % amp_val)
             if self.volumeAmplify == amp_val:
-                action.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+                action.setIcon(Icon(FluentIcon.ACCEPT))
             action.triggered.connect(lambda checked=False, a=amp_val: self._menuSetAmplify(a))
 
         switchCdn = menu.addAction("切换 CDN 节点")
@@ -1205,7 +1206,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
             for pct in [100, 80, 60, 40, 20]:
                 act = opacityMenu.addAction(f"{pct}%")
                 if self.opacity == pct:
-                    act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+                    act.setIcon(Icon(FluentIcon.ACCEPT))
                 act.triggered.connect(lambda checked=False, p=pct: self._menuSetOpacity(p))
             fullScreen = menu.addAction("退出全屏" if self.isFullScreen() else "全屏")
             fullScreen.triggered.connect(self._menuToggleFullScreen)
@@ -1291,7 +1292,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
                     pass
             if setUserPause:
                 self.userPause = True
-            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play.setIcon(Icon(FluentIcon.PLAY))
         elif force == 2:  # 播放
             if self._mpv:
                 try:
@@ -1300,7 +1301,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
                     pass
             if setUserPause:
                 self.userPause = False
-            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.play.setIcon(Icon(FluentIcon.PAUSE))
         else:  # 切换
             is_paused = True
             if self._mpv:
@@ -1315,7 +1316,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
                     except Exception:
                         pass
                 self.userPause = True
-                self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+                self.play.setIcon(Icon(FluentIcon.PLAY))
             else:
                 if self._mpv:
                     try:
@@ -1323,23 +1324,23 @@ class VideoWidget(FramelessWindowBase, QFrame):
                     except Exception:
                         pass
                 self.userPause = False
-                self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                self.play.setIcon(Icon(FluentIcon.PAUSE))
         if stopDownload:
             self.checkPlaying.stop()
 
     def mediaMute(self, force=0, emit=True):
         if force == 1:
             self.muted = False
-            self.volumeButton.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+            self.volumeButton.setIcon(Icon(FluentIcon.VOLUME))
         elif force == 2:
             self.muted = True
-            self.volumeButton.setIcon(self.style().standardIcon(QStyle.SP_MediaVolumeMuted))
+            self.volumeButton.setIcon(Icon(FluentIcon.MUTE))
         elif self.muted:
             self.muted = False
-            self.volumeButton.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+            self.volumeButton.setIcon(Icon(FluentIcon.VOLUME))
         else:
             self.muted = True
-            self.volumeButton.setIcon(self.style().standardIcon(QStyle.SP_MediaVolumeMuted))
+            self.volumeButton.setIcon(Icon(FluentIcon.MUTE))
         self._applyVolume()
         if emit:
             self.mutedChanged.emit([self.id, self.muted])
@@ -1364,7 +1365,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.timestampLabel.setText("0:00:00")
         self.playerRestart()
         self.videoFrame.setPlaybackActive(False)
-        self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.play.setIcon(Icon(FluentIcon.PLAY))
         # 悬浮窗(popup, id=16..31)的播放记录属于主窗口，由 closePopWindow 同步回主窗口；
         # 若在此 emit deleteMedia，主窗口 config["player"]（仅 16 项）会越界 IndexError
         # 且异常会中断本方法后续的 stopDanmu/refreshTimeStampTimer.stop/hideTextBrowser 清理
@@ -1442,7 +1443,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         if not self._stream_candidates:
             logging.error("%s 未获取到可播放的流地址", self.name_str)
             self.videoFrame.setPlaybackActive(False)
-            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play.setIcon(Icon(FluentIcon.PLAY))
             self.checkPlaying.stop()
             self.refreshTimeStampTimer.stop()
             return
@@ -1451,7 +1452,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         if not self._mpv:
             logging.error(f"{self.name_str} MPV 播放器未初始化或加载失败")
             self.videoFrame.setPlaybackActive(False)
-            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play.setIcon(Icon(FluentIcon.PLAY))
             self.checkPlaying.stop()
             self.refreshTimeStampTimer.stop()
             return
@@ -1459,12 +1460,12 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.retryTimes = 0
         self._stream_url = self._stream_candidates[0]
         self.cacheName = self._stream_url
-        self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        self.play.setIcon(Icon(FluentIcon.PAUSE))
         self.scrollingDanmaku.reset()
 
         if not self._tryPlayNextStreamCandidate():
             self.videoFrame.setPlaybackActive(False)
-            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play.setIcon(Icon(FluentIcon.PLAY))
             self.checkPlaying.stop()
             self.refreshTimeStampTimer.stop()
             return
@@ -1565,7 +1566,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
             self._startStreamFetch()
         else:
             self.videoFrame.setPlaybackActive(False)
-            self.play.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play.setIcon(Icon(FluentIcon.PLAY))
             self.checkPlaying.stop()
             self.refreshTimeStampTimer.stop()
             self.timestampLabel.setText("0:00:00")
