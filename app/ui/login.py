@@ -162,7 +162,7 @@ class LoginDialog(FluentDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent, title="扫码登录", maximize_enabled=False)
-        self.setFixedSize(320, 420)
+        self.setFixedSize(340, 480)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
         # ---- 核心数据 ----

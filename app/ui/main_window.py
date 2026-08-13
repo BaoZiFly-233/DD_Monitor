@@ -203,7 +203,7 @@ class CacheSetting(FluentWindow):
 
     def __init__(self):
         super(CacheSetting, self).__init__(title="缓存设置")
-        self.resize(400, 200)
+        self.resize(400, 230)
         layout = QGridLayout(self)
         layout.addWidget(QLabel("最大缓存(GB)"), 0, 0, 1, 1)
         self.maxCacheEdit = LineEdit()
@@ -234,7 +234,7 @@ class Version(FluentWindow):
 
     def __init__(self):
         super(Version, self).__init__(title="当前版本")
-        self.resize(350, 220)
+        self.resize(350, 260)
         layout = QGridLayout(self)
         layout.addWidget(QLabel(f"{APP_NAME} v{DISPLAY_VERSION} ({RELEASE_DATE})"), 0, 0, 1, 2)
         layout.addWidget(QLabel("原作者：神君Channel"), 1, 0, 1, 2)
@@ -277,7 +277,7 @@ class HotKey(FluentWindow):
 
     def __init__(self):
         super(HotKey, self).__init__(title="快捷键")
-        self.resize(350, 200)
+        self.resize(350, 240)
         layout = QGridLayout(self)
         layout.addWidget(QLabel("F、f —— 全屏"), 0, 0)
         layout.addWidget(QLabel("H、h —— 隐藏控制条"), 1, 0)
