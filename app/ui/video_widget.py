@@ -1489,29 +1489,44 @@ class VideoWidget(FramelessWindowBase, QFrame):
                 pass
         self.videoFrame.setPlaybackActive(False)
 
-    def shutdown(self):
-        """程序退出前调用：干净地终止 MPV 实例。
+    def shutdown(self, skip_mpv=False):
+        """退出前清理。
 
-        必须先释放渲染上下文（GL 仍存活时）再 terminate 内核，并等待
-        mpv 内部线程退出；否则进程退出时 libmpv 渲染线程会在 GL 上下文
-        销毁后继续回调，触发 Windows access violation 崩溃（0xe24c4a02）。
+        skip_mpv=True：跳过 MPV 的 free/terminate —— Windows 上 libmpv 的
+        render context / core 销毁在播放中有已知死锁/崩溃（mpv#8509 /
+        iina#5031，本机实测播放 lavfi 无限源时 free/terminate 死锁；用户
+        环境表现为 0xe24c4a02）。入口已在 closeEvent 后 TerminateProcess
+        硬退出，由 OS 直接回收进程，无需（也不能安全地）同步销毁 MPV。
         """
         try:
             self.checkPlaying.stop()
             self.refreshTimeStampTimer.stop()
             self._danmuDensityTimer.stop()
             self.stopDanmu()
-            self.playerFree()
-            logging.info("%s MPV 已释放", self.name_str)
+            if not skip_mpv:
+                self.playerFree()
+            logging.info("%s 已停止%s", self.name_str, "（跳过 MPV 销毁）" if skip_mpv else "")
         except Exception:
             logging.exception("%s 关闭异常", self.name_str)
 
     def playerFree(self):
-        """销毁 MPV 实例"""
+        """销毁 MPV 实例
+
+        释放顺序（libmpv 要求 render context 先于 core 销毁）：
+        1. 先 stop() 停止播放，让解码线程/事件线程安静，避免销毁时竞争
+        2. 释放 render context（需 GL 上下文有效，setPlayer 内处理）
+        3. terminate() 销毁核心并等待事件线程退出
+        """
         self.scrollingDanmaku.stop()
         self.scrollingDanmaku.cleanup_file()
         self.videoFrame.setPlaybackActive(False)
         if self._mpv:
+            # 先停止播放：mpv_render_context_free / mpv_terminate_destroy
+            # 在播放中销毁会与活跃的事件线程竞争，触发 0xe24c4a02
+            try:
+                self._mpv.stop()
+            except Exception:
+                pass
             self.videoFrame.setPlayer(None)
             try:
                 self._mpv.terminate()

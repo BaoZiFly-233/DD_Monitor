@@ -127,4 +127,16 @@ if __name__ == "__main__":
     mainWindow.showMaximized()
     mainWindow.show()
     splash.hide()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    if sys.platform == "win32":
+        # libmpv-2.dll 的退出清理（DllMain/atexit）与 Qt GL 上下文销毁存在
+        # 已知冲突（0xe24c4a02 / segfault），且 mpv_render_context_free /
+        # mpv_terminate_destroy 在 Windows 上也有已知崩溃（mpv#8509/iina#5031）。
+        # 所有业务清理（配置保存/线程停止/MPV 释放）已在 closeEvent 内完成，
+        # 此处用 TerminateProcess 硬终止，跳过 DLL 清理，保证退出不崩溃。
+        import ctypes
+
+        ctypes.windll.kernel32.TerminateProcess(
+            ctypes.windll.kernel32.GetCurrentProcess(), exit_code
+        )
+    sys.exit(exit_code)

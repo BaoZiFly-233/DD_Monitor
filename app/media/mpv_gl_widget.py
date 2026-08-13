@@ -56,16 +56,24 @@ class MpvGLWidget(QOpenGLWidget):
             return
         if self._closing:
             return
+        # mpv_render_context_free 要求调用线程持有有效 GL 上下文；
+        # makeCurrent 失败（窗口隐藏/上下文失效）时跳过 C 层释放，
+        # 避免 libmpv 内部 GL 调用触发致命异常（0xe24c4a02）
+        gl_ok = False
         try:
-            self.makeCurrent()
+            gl_ok = self.makeCurrent()
         except Exception:
-            pass
-        self._free_render_context()
+            gl_ok = False
+        if gl_ok:
+            self._free_render_context()
+        else:
+            self._render_context = None
         self._mpv = mpv_instance
         self._render_init_failed = False
         if mpv_instance is None:
             self._playback_active = False
-        self._ensure_render_context()
+        if gl_ok:
+            self._ensure_render_context()
         try:
             self.doneCurrent()
         except Exception:

@@ -1464,10 +1464,10 @@ class MainWindow(WindowsFramelessMainWindow):
             _waiter = threading.Thread(target=lambda: [t.wait(3000) for t in _wait_threads], daemon=True)
             _waiter.start()
             _waiter.join(4000)
-        # 干净地终止所有 MPV 实例（先释放渲染上下文，再 terminate 内核），
-        # 避免退出时 libmpv 线程在 GL 上下文销毁后回调导致 access violation
+        # 停止所有窗口的播放与周边线程（跳过 MPV free/terminate：
+        # libmpv 销毁在播放中有已知死锁/崩溃，入口 TerminateProcess 硬退出保底）
         for videoWidget in self._iterVideoWidgets(include_popups=True):
-            videoWidget.shutdown()
+            videoWidget.shutdown(skip_mpv=True)
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.close()
         self.saveDockLayout()
