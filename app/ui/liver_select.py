@@ -351,7 +351,10 @@ class CoverLabel(QLabel):
             else:
                 self.titleLabel.setText(info[1])
                 self.stateLabel.setText("无该房间或已加密")
-            self.setStyleSheet("background-color:#8B3A3A")  # 红色背景
+            # 保持圆角与悬停阴影的主题 QSS，仅叠加封禁红底
+            self.setStyleSheet(
+                "#cover{border-radius:6px;background-color:#8B3A3A}"
+            )
         else:
             if self.firstUpdateToken:  # 初始化
                 avatar_url = str(info[3] or "").strip()
