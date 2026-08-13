@@ -44,6 +44,8 @@ def prepare_mpv_runtime():
     module_dir = os.path.dirname(os.path.abspath(__file__))
     add_candidate(module_dir)
     add_candidate(os.path.dirname(module_dir))
+    # 项目根目录：app/ui/video_widget.py → 上溯三级（libmpv-2.dll 位于根目录）
+    add_candidate(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
     if getattr(sys, "frozen", False):
         add_candidate(os.path.dirname(sys.executable))
