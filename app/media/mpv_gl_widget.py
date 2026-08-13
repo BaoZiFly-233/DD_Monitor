@@ -27,6 +27,9 @@ class MpvGLWidget(QOpenGLWidget):
         self._left_press_pos = QPoint()
         self._left_pressed = False
         self._left_drag_emitted = False
+        # 关闭标记：一旦置位，mpv 线程回调与延迟刷新全部失效，避免退出时
+        # 对已销毁的 GL 上下文调用 mpv_render_context_render 导致崩溃
+        self._closing = False
         self._danmaku_timer = QTimer(self)
         self._danmaku_timer.setInterval(16)  # 默认 60fps, setDanmakuInterval 可调
         self._danmaku_timer.timeout.connect(self._on_danmaku_tick)
@@ -51,14 +54,22 @@ class MpvGLWidget(QOpenGLWidget):
     def setPlayer(self, mpv_instance):
         if self._mpv is mpv_instance:
             return
-        self.makeCurrent()
+        if self._closing:
+            return
+        try:
+            self.makeCurrent()
+        except Exception:
+            pass
         self._free_render_context()
         self._mpv = mpv_instance
         self._render_init_failed = False
         if mpv_instance is None:
             self._playback_active = False
         self._ensure_render_context()
-        self.doneCurrent()
+        try:
+            self.doneCurrent()
+        except Exception:
+            pass
         self.update()
 
     def setPlaybackActive(self, active):
@@ -90,6 +101,9 @@ class MpvGLWidget(QOpenGLWidget):
 
     def paintGL(self):
         self._update_scheduled = False
+        if self._closing:
+            # 退出流程中不再触碰 GL/mpv
+            return
         self._ensure_render_context()
         dpr = max(float(self.devicePixelRatioF()), 1.0)
         pixel_width = max(1, int(round(self.width() * dpr)))
@@ -109,15 +123,18 @@ class MpvGLWidget(QOpenGLWidget):
                 funcs.glClearColor(0.0, 0.0, 0.0, 1.0)
             funcs.glClear(0x00004000)
         if self._render_context is not None and self._playback_active:
-            self._render_context.render(
-                opengl_fbo={
-                    "w": pixel_width,
-                    "h": pixel_height,
-                    "fbo": int(self.defaultFramebufferObject()),
-                    "internal_format": 0,
-                },
-                flip_y=True,
-            )
+            try:
+                self._render_context.render(
+                    opengl_fbo={
+                        "w": pixel_width,
+                        "h": pixel_height,
+                        "fbo": int(self.defaultFramebufferObject()),
+                        "internal_format": 0,
+                    },
+                    flip_y=True,
+                )
+            except Exception:
+                logging.debug("MpvGLWidget render 失败", exc_info=True)
         if self._danmaku_renderer is not None:
             painter = QPainter(self)
             try:
@@ -174,14 +191,21 @@ class MpvGLWidget(QOpenGLWidget):
                 return 0
 
     def _on_mpv_update(self):
+        # mpv 渲染线程回调：关闭中或上下文已释放时直接忽略，
+        # 绝不触碰已销毁的 render context（退出期 access violation 源头）
+        if self._closing or self._render_context is None:
+            return
         if self._update_scheduled:
             return
         self._update_scheduled = True
-        QMetaObject.invokeMethod(self, "_triggerUpdate", Qt.QueuedConnection)
+        try:
+            QMetaObject.invokeMethod(self, "_triggerUpdate", Qt.QueuedConnection)
+        except RuntimeError:
+            pass  # C++ 对象已销毁（关闭竞态），忽略
 
     @Slot()
     def _on_frame_swapped(self):
-        if self._render_context is None:
+        if self._closing or self._render_context is None:
             return
         try:
             self._render_context.report_swap()
@@ -204,7 +228,8 @@ class MpvGLWidget(QOpenGLWidget):
 
     @Slot()
     def _triggerUpdate(self):
-        self.update()
+        if not self._closing:
+            self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton:
@@ -237,10 +262,23 @@ class MpvGLWidget(QOpenGLWidget):
         super().mouseDoubleClickEvent(event)
 
     def closeEvent(self, event):
+        # 置位关闭标记：mpv 线程回调与排队刷新全部失效，
+        # 防止退出期对已销毁的 GL 上下文执行 render/report_swap
+        self._closing = True
         self._danmaku_timer.stop()
-        self.makeCurrent()
+        try:
+            self.frameSwapped.disconnect(self._on_frame_swapped)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            self.makeCurrent()
+        except Exception:
+            pass
         if self._danmaku_renderer is not None:
             self._danmaku_renderer.cleanup_gl()
         self._free_render_context()
-        self.doneCurrent()
+        try:
+            self.doneCurrent()
+        except Exception:
+            pass
         super().closeEvent(event)

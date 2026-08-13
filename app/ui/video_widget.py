@@ -1471,6 +1471,23 @@ class VideoWidget(QFrame):
                 pass
         self.videoFrame.setPlaybackActive(False)
 
+    def shutdown(self):
+        """程序退出前调用：干净地终止 MPV 实例。
+
+        必须先释放渲染上下文（GL 仍存活时）再 terminate 内核，并等待
+        mpv 内部线程退出；否则进程退出时 libmpv 渲染线程会在 GL 上下文
+        销毁后继续回调，触发 Windows access violation 崩溃（0xe24c4a02）。
+        """
+        try:
+            self.checkPlaying.stop()
+            self.refreshTimeStampTimer.stop()
+            self._danmuDensityTimer.stop()
+            self.stopDanmu()
+            self.playerFree()
+            logging.info("%s MPV 已释放", self.name_str)
+        except Exception:
+            logging.exception("%s 关闭异常", self.name_str)
+
     def playerFree(self):
         """销毁 MPV 实例"""
         self.scrollingDanmaku.stop()

@@ -30,3 +30,6 @@ plugins/
 
 # Reasonix 本地工具配置
 reasonix.toml
+
+# qfluentwidgets 运行时配置
+config/

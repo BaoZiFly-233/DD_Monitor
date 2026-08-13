@@ -1340,7 +1340,10 @@ class MainWindow(WindowsFramelessMainWindow):
     def checkMousePos(self):
         newMousePos = QCursor.pos()
         if newMousePos != self.oldMousePos:
-            self.setCursor(Qt.ArrowCursor)  # 鼠标动起来就显示
+            # 仅在光标形状不同时才设置，避免鼠标持续移动时每 200ms 重复
+            # setCursor 造成光标抖动/子控件光标被反复覆盖
+            if self.cursor().shape() != Qt.ArrowCursor:
+                self.setCursor(Qt.ArrowCursor)  # 鼠标动起来就显示
             self.oldMousePos = newMousePos
             self.hideMouseCnt = 10  # 刷新隐藏鼠标的间隔（200ms * 10 = 2s）
         if self.hideMouseCnt > 0:
@@ -1449,6 +1452,10 @@ class MainWindow(WindowsFramelessMainWindow):
             _waiter = threading.Thread(target=lambda: [t.wait(3000) for t in _wait_threads], daemon=True)
             _waiter.start()
             _waiter.join(4000)
+        # 干净地终止所有 MPV 实例（先释放渲染上下文，再 terminate 内核），
+        # 避免退出时 libmpv 线程在 GL 上下文销毁后回调导致 access violation
+        for videoWidget in self._iterVideoWidgets(include_popups=True):
+            videoWidget.shutdown()
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.close()
         self.saveDockLayout()
