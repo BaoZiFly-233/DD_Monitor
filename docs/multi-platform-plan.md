@@ -41,7 +41,7 @@
    - `412` 请求过快 → IP 暂时封禁
    - 登录态失效（SESSDATA 约 6 个月）
 3. **维护者风险**：bilibili-api-python 是社区逆向维护，若维护者停更，接口一变动即失效。
-4. **项目自身风险**：`LiverSelect.py` 依赖 `live_area` 分区接口，历史上触发过 `-352`（已有 fallback 到 HTTP 直连）。
+4. **项目自身风险**：`app/ui/liver_select.py` 依赖 `live_area` 分区接口，历史上触发过 `-352`（已有 fallback 到 HTTP 直连）。
 
 ### 1.3 兜底与容错策略
 
@@ -59,7 +59,7 @@ L1（现状）: bilibili-api-python 官方封装
 | 措施 | 说明 |
 |---|---|
 | ① 版本锁定 + 定期检查 | `>=17,<18` 已锁；每季度检查 18.x 发布并验证 |
-| ② HTTP fallback 层 | `LiverSelect` 已示范（`-352` 时切换直连 API）；推广到取流/房间信息 |
+| ② HTTP fallback 层 | `app/ui/liver_select.py` 已示范（`-352` 时切换直连 API）；推广到取流/房间信息 |
 | ③ 请求频率控制 | 全局限流：热门列表 ≥5s/页，房间轮询 ≥60s/轮（已具备） |
 | ④ 登录态预检 | 启动时静默验证（已有 `FetchUserInfo`），过期提前提示 |
 | ⑤ 弹幕降级 | blivedm → bilibili-api 自带 `LiveDanmaku`（同作者、随 pip 分发）→ 纯 HTTP 轮询房间状态（仅开播提醒，无弹幕） |
@@ -395,9 +395,9 @@ def get_adapter(platform: str) -> PlatformAdapter:
 | 现有代码 | 改造方式 |
 |---|---|
 | `remote.py::remoteThread` | 泛化为 `DanmakuChannel`，按平台选择实现；`DanmakuHandler` 改为统一事件映射 |
-| `VideoWidget_mpv.py::GetStreamURL` | 改为调用 `adapter.fetch_stream_url()`；`qn_mapping` 换 `QUALITY_MAP` |
-| `VideoWidget_mpv.py::FetchRoomInfo` | 改为调用 `adapter.fetch_room_info()` |
-| `LiverSelect.py::CollectLiverInfo` | 批量查询按平台分组，各平台 adapter 实现 `fetch_batch` |
+| `app/ui/video_widget.py::GetStreamURL` | 改为调用 `adapter.fetch_stream_url()`；`qn_mapping` 换 `QUALITY_MAP` |
+| `app/ui/video_widget.py::FetchRoomInfo` | 改为调用 `adapter.fetch_room_info()` |
+| `app/ui/liver_select.py::CollectLiverInfo` | 批量查询按平台分组，各平台 adapter 实现 `fetch_batch` |
 | `DD监控室.py` 全局 | room_id 统一为 `"bilibili:123456"` 或 `"huya:123456"` 前缀格式（config 迁移） |
 
 ### 房间号格式约定
@@ -416,7 +416,7 @@ config 中 `roomid` / `player` 数组存上述格式；`_normalize_room_id` 兼�
 
 ### 7.1 旧配置兼容
 
-- 纯数字房号 → 自动补 `bilibili:` 前缀（迁移函数在 `config_manager._migrate` 中）
+- 纯数字房号 → 自动补 `bilibili:` 前缀（迁移函数在 `app/core/config_manager.py::_migrate` 中）
 - `player` / `roomid` / `danmu` 等数组长度不变，只改元素格式
 
 ### 7.2 降级矩阵

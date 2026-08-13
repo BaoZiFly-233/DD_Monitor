@@ -1,6 +1,6 @@
 # DD Monitor
 
-> B 站多窗口直播监控工具 · 基于 PySide6 + MPV + 自研 OpenGL 弹幕引擎  
+> B 站多窗口直播监控工具 · 基于 PySide6 + MPV + 自研 OpenGL 弹幕引擎
 > 支持 16 个嵌入式 + 16 个悬浮窗同时观看，实时弹幕、自适应画质、CDN 切换、开播提醒、录制
 
 ---
@@ -9,6 +9,7 @@
 
 - [关于本项目](#关于本项目)
 - [核心特性](#核心特性)
+- [截图](#截图)
 - [架构概览](#架构概览)
 - [快速上手](#快速上手)
 - [配置指引](#配置指引)
@@ -49,7 +50,7 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 - **同传过滤、礼物/进入信息筛选**：空格分隔关键词，灵活控制弹幕窗内容
 
 ### 账号与互动
-- **扫码登录**：qrcode 库本地生成二维码，Session 持久化到 config，启动自动验证
+- **扫码登录**：qrcode 库本地生成二维码，Session 持久化到配置，启动自动验证
 - **凭据自动刷新**：后台每 6 小时检查 + 主动刷新（避免登录态过期掉线）
 - **开播提醒**：浮窗 10s 自动关闭，鼠标点击取消倒计时
 - **录制直播流**：手动录制 / 开播自动录制（断流 180s 自动中止并提示）
@@ -57,7 +58,7 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 ### 卡片面板
 - **热门分区**：虚拟主播 / 网游 / 手游 / 单机 / 娱乐
 - **关注列表**：登录后自动拉取最近 500 名关注，按直播状态排序
-- **VTB 名册**：内置 8 万行名单 + 在线更新（从 GitHub 仓库）
+- **VTB 名册**：内置 8 万行名单 + 在线更新（从 GitHub 仓库拉取 `resources/vtb.csv`）
 - **短号解析**：输入短号自动解析为真实房间号
 - **置顶**：把常看主播置顶；录制开关单房间独立
 
@@ -67,54 +68,103 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 - **配置格式迁移**：v1.x - v3.x 的所有格式自动升级
 - **导入/导出预设**：JSON 格式备份当前布局、播放器、音量、关注列表
 - **Dock 状态持久化**：窗口布局和 Dock 位置自动保存
+- **优雅退出**：关闭时先释放全部 MPV 渲染上下文与内核再退出，杜绝
+  `Windows fatal exception: access violation` 类退出崩溃
+
+---
+
+## 截图
+
+**主窗口（4 宫格默认布局）：**
+
+![主窗口](docs/screenshot-main.png)
+
+**统一设置面板：**
+
+![设置面板](docs/screenshot-settings.png)
+
+**添加直播间面板（多 tab：热门 / VTB / 关注）：**
+
+![添加直播间](docs/screenshot-addroom.png)
+
+> 截图由 `scripts/make_screenshots.py` 渲染真实 UI 生成（隔离临时配置，不触碰
+> 用户数据）。发版后如需更新截图，直接重跑该脚本即可。
 
 ---
 
 ## 架构概览
 
-### 截图
+### 目录结构
 
-**主窗口（4 宫格默认布局）：**
-![主窗口](docs/screenshot-main.png)
+```
+DD监控室.py                # 程序入口（faulthandler / 日志 / 闪屏 / 启动主窗口）
+app/                        # 业务代码（按职责分层，包内绝对导入）
+├── core/                   # 基础设施：常量、配置、网络、日志、凭据
+│   ├── constants.py            # 全局常量（窗口数、弹幕比例等）
+│   ├── config_manager.py       # 配置加载/迁移/去抖动保存/备份轮转
+│   ├── http_utils.py           # 共享 requests.Session + 指数退避
+│   ├── bili_credential.py      # B站凭据规范化
+│   ├── app_version.py          # 版本号（发版唯一修改入口）
+│   ├── log.py                  # 全局日志
+│   └── exception_handlers.py   # 未捕获异常/线程异常兜底
+├── danmaku/                # 自研 OpenGL 弹幕引擎（无 Qt 依赖的纯逻辑可单测）
+│   ├── renderer.py             # 精灵缓存 + 轨道分配 + 绘制
+│   ├── layout.py               # 滚动/顶部/底部三轨布局
+│   └── settings.py             # 弹幕配置数据模型
+├── media/                  # 播放与弹幕接收
+│   ├── mpv_gl_widget.py        # MPV render API + QOpenGLWidget（含退出保护）
+│   └── remote.py               # 弹幕 WebSocket 接收线程（基于 blivedm）
+└── ui/                     # 窗口与控件
+    ├── main_window.py          # 主窗口 + 全局控制
+    ├── video_widget.py         # 播放窗口（MPV 生命周期/取流/画质/CDN）
+    ├── liver_select.py         # 卡片面板 + 关注列表 + VTB 名册
+    ├── settings_dialog.py      # 统一设置
+    ├── login.py                # 扫码登录
+    ├── danmu.py                # 弹幕机 / 全局弹幕设置
+    ├── layout_panel.py         # 布局方案面板
+    ├── check_update.py         # 版本更新检查
+    ├── pay.py                  # 打赏感谢
+    ├── common_widget.py        # 通用组件（Slider、图片下载线程）
+    └── uikit_bridge.py         # Fluent 主题桥（令牌表/取色/QSS）
+resources/                 # 运行时资源：splash.jpg、vtb.csv、entitlements.plist
+                           #   + config.json 及 3 份轮转备份（运行时生成，不入库）
+blivedm/                   # vendored 弹幕协议库（上游不发布 PyPI）
+qfluentwidgets_pro/        # vendored Fluent 组件库（PySide6-Fluent-Widgets-Pro）
+docs/                      # 截图、发版说明、多平台方案、文档规范
+scripts/                   # 构建脚本、运行脚本、截图生成器
+tests/                     # pytest 测试（无头 GUI 环境）
+```
 
-**统一设置面板：**
-![设置面板](docs/screenshot-settings.png)
-
-**添加直播间面板（多 tab：热门 / VTB / 关注）：**
-![添加直播间](docs/screenshot-addroom.png)
-
-### 模块分层
+### 模块分层与线程模型
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│  UI 层 (PySide6)                                        │
-│  ├─ MainWindow      主窗口 + 全局控制（DD监控室.py）      │
-│  ├─ VideoWidget     播放窗口（VideoWidget_mpv.py）       │
-│  ├─ LiverSelect     卡片面板 + 关注列表（LiverSelect.py）│
-│  ├─ LoginDialog     扫码登录（login.py）                │
-│  ├─ SettingsDialog  统一设置（SettingsDialog.py）        │
-│  └─ DanmakuUIs      弹幕机/全局弹幕设置（danmu.py）     │
+│  UI 层（app.ui，主线程）                                 │
+│  ├─ MainWindow     主窗口 + 全局控制（main_window.py）    │
+│  ├─ VideoWidget    播放窗口（video_widget.py）           │
+│  ├─ LiverPanel     卡片面板 + 关注列表（liver_select.py） │
+│  ├─ LoginDialog    扫码登录（login.py）                 │
+│  ├─ SettingsDialog 统一设置（settings_dialog.py）        │
+│  └─ DanmakuUIs     弹幕机/全局弹幕设置（danmu.py）       │
 ├────────────────────────────────────────────────────────┤
 │  渲染层                                                 │
 │  ├─ MpvGLWidget    MPV render API + QOpenGLWidget       │
-│  ├─ DanmakuRenderer 滚动弹幕引擎（danmaku_renderer.py） │
-│  └─ DanmakuLayout   轨道布局（danmaku_layout.py）        │
+│  ├─ DanmakuRenderer 滚动弹幕引擎（app.danmaku.renderer） │
+│  └─ DanmakuLayout   轨道布局（app.danmaku.layout）       │
 ├────────────────────────────────────────────────────────┤
-│  IO 层（线程）                                           │
+│  IO 层（线程，只通过 Qt Signal 回传）                     │
 │  ├─ GetStreamURL   直播流地址获取（B站 API）             │
-│  ├─ FetchRoomInfo   房间信息（标题/主播/状态）           │
-│  ├─ remoteThread    弹幕 WebSocket 接收（基于 blivedm）  │
+│  ├─ FetchRoomInfo  房间信息（标题/主播/状态）             │
+│  ├─ remoteThread   弹幕 WebSocket 接收（基于 blivedm）   │
 │  ├─ CollectLiverInfo 批量房间状态轮询（60s）            │
-│  ├─ RecordThread    直播流录制                          │
-│  ├─ CredentialRefresh 凭据自动刷新（6h）              │
-│  └─ UpdateChecker   版本更新检查（GitHub API）          │
+│  ├─ RecordThread   直播流录制                           │
+│  ├─ CredentialRefreshWorker 凭据自动刷新（6h）         │
+│  └─ checkUpdate    版本更新检查（GitHub API）           │
 ├────────────────────────────────────────────────────────┤
-│  基础设施                                               │
-│  ├─ ConfigManager   统一配置（去抖动/轮转/迁移）         │
-│  ├─ http_utils      共享 HTTP 会话 + 指数退避            │
-│  ├─ bili_credential B站凭据规范化                        │
-│  ├─ LayoutConfig    布局模板                             │
-│  └─ CommonWidget    通用组件（Slider、DownloadImage）    │
+│  基础设施（app.core）                                    │
+│  ├─ ConfigManager  统一配置（去抖动/轮转/迁移）           │
+│  ├─ http_utils     共享 HTTP 会话 + 指数退避             │
+│  └─ bili_credential B站凭据规范化                        │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -122,12 +172,13 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 
 | 决策 | 理由 |
 |---|---|
-| MPV + OpenGL 替代 VLC | VLC 实例管理开销大、依赖 200+ DLL、字幕闪烁；MPV 单 DLL（112MB）、GPU 直渲 |
+| MPV + OpenGL 替代 VLC | VLC 实例管理开销大、依赖 200+ DLL、字幕闪烁；MPV 单 DLL、GPU 直渲 |
 | 自研 OpenGL 弹幕引擎 | MPV 内置 ASS 字幕依赖 libass 跨平台不一致；自研可完全控制渲染细节 |
 | blivedm vendored | 上游 xfgryujk/blivedm 不发布 PyPI（README 明确说明）；vendored 保证版本可控 |
 | 配置去抖动保存 | 用户连续调整音量/画质时避免磁盘 IO 风暴 |
 | QThread + Qt Signal | 后台线程不直接操作 UI；通过 emit 跨线程通信 |
 | 单播放器单弹幕线程 | 16+16 窗口需 32 个弹幕线程；独立隔离避免相互影响 |
+| MPV 退出时序 | 关闭时先释放 render context（GL 存活期）再 `terminate()`，避免退出崩溃 |
 
 ---
 
@@ -137,7 +188,7 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 
 | 组件 | 要求 |
 |---|---|
-| Python | 3.9 或更高版本 |
+| Python | 3.9 或更高版本（开发目标 3.11） |
 | libmpv | MPV 播放器库（Windows 用户需手动下载 DLL） |
 | 操作系统 | Windows 10+ / macOS 10.15+ / Linux（X11/Wayland） |
 
@@ -183,7 +234,7 @@ pip install -r requirements.txt
 python DD监控室.py
 ```
 
-首次启动会自动创建 `cache/` 和 `logs/` 目录，配置写入 `utils/config.json`（**不会被提交到 Git**）。
+首次启动会自动创建 `cache/` 和 `logs/` 目录，配置写入 `resources/config.json`（**不会被提交到 Git**）。
 
 ### 步骤四：快速自检
 
@@ -203,12 +254,12 @@ test_run.bat
 
 | 平台 | 路径 |
 |---|---|
-| 源码运行 | `<项目根>/utils/config.json` |
-| 打包后 | 应用数据目录（Windows: `%APPDATA%/DDMonitor/`） |
+| 源码运行 | `<项目根>/resources/config.json` |
+| 打包后 | `<可执行文件目录>/resources/config.json` |
 
 ### 配置自动迁移
 
-`config_manager.py` 在加载时会自动识别旧版本格式并迁移：
+`app/core/config_manager.py` 在加载时会自动识别旧版本格式并迁移：
 
 | 字段 | 兼容范围 |
 |---|---|
@@ -249,10 +300,10 @@ test_run.bat
 
 ### 配置备份
 
-`utils/` 下自动维护 3 份轮转备份：
+`resources/` 下自动维护 3 份轮转备份：
 
 ```
-utils/
+resources/
 ├── config.json
 ├── config_备份1.json    ← 最近一次配置
 ├── config_备份2.json    ← 上上次配置
@@ -263,7 +314,7 @@ utils/
 
 ### 凭据安全
 
-`utils/config.json` 中的 `sessionData` 与 `credential` 是敏感信息，**项目 `.gitignore` 已默认忽略此文件**，不会被提交到 Git。但请勿将备份文件上传到公开仓库。
+`resources/config.json` 中的 `sessionData` 与 `credential` 是敏感信息，**项目 `.gitignore` 已默认忽略此文件**，不会被提交到 Git。但请勿将备份文件上传到公开仓库。
 
 ---
 
@@ -315,10 +366,10 @@ utils/
 
 > 以下是开发扩展时最常涉及的入口。详细文档见 [docs/](docs/)。
 
-### `http_utils` — 共享 HTTP 会话
+### `app.core.http_utils` — 共享 HTTP 会话
 
 ```python
-import http_utils
+from app.core import http_utils
 
 resp = http_utils.get("https://api.live.bilibili.com/...", params={...})
 resp = http_utils.post("https://...", data=json.dumps({...}), headers=header)
@@ -328,10 +379,10 @@ resp = http_utils.post("https://...", data=json.dumps({...}), headers=header)
 - `post(url, **kwargs)`
 - `session` — 全局共享的 `requests.Session`（连接池 20 / host 10）
 
-### `config_manager` — 配置管理
+### `app.core.config_manager` — 配置管理
 
 ```python
-from config_manager import ConfigManager, MAX_WINDOWS
+from app.core.config_manager import ConfigManager, MAX_WINDOWS
 
 cm = ConfigManager(application_path, parent=parent)
 config = cm.load()          # 加载 + 自动迁移旧格式
@@ -341,16 +392,16 @@ cm.export_to(path)          # 导出预设
 cm.import_from(path, layout)  # 导入预设（保留当前布局）
 ```
 
-### `bili_credential` — 凭据规范化
+### `app.core.bili_credential` — 凭据规范化
 
 ```python
-from bili_credential import normalize_credential_data, build_credential
+from app.core.bili_credential import normalize_credential_data, build_credential
 
 cred_data = normalize_credential_data(config.get("credential", {}), sessdata=session)
 credential = build_credential(cred_data, sessdata=session)
 ```
 
-### `danmaku_renderer` — 滚动弹幕渲染器
+### `app.danmaku.renderer` — 滚动弹幕渲染器
 
 ```python
 renderer = DanmakuRenderer()
@@ -362,7 +413,7 @@ renderer.setUpdateCallback(self._schedule_danmaku_updates)
 - `kind` 支持 `"scroll"` / `"top"` / `"bottom"`
 - 精灵缓存为 LRU（默认 128 条），相同文字+样式只渲染一次
 
-### `remote.remoteThread` — 弹幕接收线程
+### `app.media.remote` — 弹幕接收线程
 
 ```python
 thread = remoteThread(roomID, sessionData)
@@ -380,12 +431,13 @@ thread.stop()  # 优雅退出，非阻塞
 ### Windows
 
 ```bat
-scripts\build_win.bat x64
 set APP_VERSION=3.51
 set MPV_DLL=D:\path\to\libmpv-2.dll
+scripts\build_win.bat x64
 ```
 
-打包完成后 `release/` 目录生成 `DDMonitor-3.51-windows-x64.zip`。
+打包完成后 `release/` 目录生成 `DDMonitor-3.51-windows-x64.zip`（`libmpv-2.dll`、
+`resources/splash.jpg`、`resources/vtb.csv` 自动随包分发）。
 
 ### macOS / Linux
 
@@ -430,9 +482,16 @@ pyinstaller DDMonitor_unix.spec    # Linux
 2. macOS：`brew install mpv`
 3. Linux：安装 `libmpv-dev` 或 `mpv-libs`
 
+### 退出程序时崩溃（access violation）
+
+旧版本在关闭时未主动终止 MPV 实例，进程退出瞬间 libmpv 渲染线程与 GL 上下文
+销毁竞争会触发 `Windows fatal exception: access violation / 0xe24c4a02`。
+v3.51 魔改版已在关闭路径中先释放渲染上下文、再 `terminate()` 全部 MPV 内核
+（`VideoWidget.shutdown()`），如仍复现请携带 `logs/crash-*.log` 提交 issue。
+
 ### 配置文件损坏
 
-程序自动维护 3 份轮转备份（`config_备份1.json` ~ `config_备份3.json`）。主配置损坏时自动从备份恢复。
+程序自动维护 3 份轮转备份（`resources/config_备份1.json` ~ `config_备份3.json`）。主配置损坏时自动从备份恢复。
 
 ### 录制没有文件
 
@@ -443,7 +502,7 @@ pyinstaller DDMonitor_unix.spec    # Linux
 ### 弹幕风控 -352 错误
 
 1. B站偶发风控校验失败（IP 触发限流）
-2. 项目已内置 HTTP fallback（`LiverSelect` 热门列表在 `-352` 时自动切换直连 API）
+2. 项目已内置 HTTP fallback（`liver_select.py` 热门列表在 `-352` 时自动切换直连 API）
 3. 等待 10-30 分钟后自动恢复，或切换网络（重启路由器换 IP）
 
 ---
@@ -452,11 +511,12 @@ pyinstaller DDMonitor_unix.spec    # Linux
 
 欢迎提交 issue 和 PR。在动手之前，请阅读 [docs/writing-docs.md](docs/writing-docs.md) 了解文档约定，并遵循以下原则：
 
-- **保持模块边界清晰**：播放器逻辑在 `VideoWidget_mpv.py`，弹幕渲染在 `danmaku_renderer.py`，不要在弹幕渲染器里塞网络请求
-- **所有网络请求走 `http_utils`**：不要直接 `requests.get`，保证连接池与超时策略统一
+- **保持模块边界清晰**：播放器逻辑在 `app/ui/video_widget.py`，弹幕渲染在 `app/danmaku/renderer.py`，不要在弹幕渲染器里塞网络请求
+- **所有网络请求走 `app.core.http_utils`**：不要直接 `requests.get`，保证连接池与超时策略统一
 - **线程间通信只用 Qt Signal**：后台线程不要直接操作 UI 控件
-- **QThread 必须保存为成员引用**：运行中的 QThread 被 GC 析构会触发原生崩溃，参考 `login.py` 中的注释
-- **配置新增字段**：在 `config_manager.py` 的 `DEFAULT_CONFIG` 和 `_migrate()` 中同时补充默认值与迁移逻辑
+- **QThread 必须保存为成员引用**：运行中的 QThread 被 GC 析构会触发原生崩溃，参考 `app/ui/login.py` 中的注释
+- **配置新增字段**：在 `app/core/config_manager.py` 的 `DEFAULT_CONFIG` 和 `_migrate()` 中同时补充默认值与迁移逻辑
+- **退出路径新增资源**：确认 `MainWindow.closeEvent` 中的释放顺序（先 GL 后内核）
 - **提交信息用中文**，说明改动原因（为什么）而非罗列改动（做了什么）
 
 ### 开发环境
@@ -469,10 +529,12 @@ pip install -r requirements-dev.txt   # 开发工具（ruff）
 python DD监控室.py
 ```
 
-### 代码检查
+### 代码检查与测试
 
 ```bash
-ruff check .
+ruff check .                        # lint（配置文件见 ruff.toml）
+python -m pytest tests/             # 测试（无头 Qt，全绿基线 86 项）
+python scripts/make_screenshots.py  # 重新生成 README 截图
 ```
 
 ---
@@ -489,5 +551,3 @@ DD Monitor 由 [神君Channel](https://space.bilibili.com/637783) 创作。没�
 - [PySide6](https://wiki.qt.io/Qt_for_Python) — Qt for Python GUI 框架
 
 特别感谢大锅饭、美东矿业、inkydragon、聪_哥 PR 对原项目的贡献。
-
-**许可证**：LGPL-2.1。原项目版权归 [zhimingshenjun](https://github.com/zhimingshenjun) 所有。魔改部分同样以 LGPL-2.1 协议开源。

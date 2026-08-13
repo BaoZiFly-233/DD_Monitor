@@ -19,8 +19,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
-from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QSplashScreen  # noqa: E402
-from PySide6.QtGui import QFont, QPixmap  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar  # noqa: E402
+from PySide6.QtGui import QFont  # noqa: E402
 
 # ---- 隔离配置：复制真实配置结构到临时目录，避免污染用户数据 ----
 _tmp_root = tempfile.mkdtemp(prefix="ddmon_shot_")
