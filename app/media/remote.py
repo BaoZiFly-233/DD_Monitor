@@ -19,6 +19,19 @@ import blivedm
 import blivedm.models.web as web_models
 
 
+class _BlivedmNoiseFilter(logging.Filter):
+    """过滤 blivedm 的协议噪音：B 站弹幕协议迭代频繁，新命令（如
+    ONLINE_RANK_V3 / LOG_IN_NOTICE）会被库标记为 unknown cmd 并整包
+    打 WARNING（含大段 base64），并非错误，刷屏日志干扰排查。"""
+
+    def filter(self, record):
+        msg = record.getMessage()
+        return not ("unknown cmd" in msg or "is calling close()" in msg)
+
+
+logging.getLogger("blivedm").addFilter(_BlivedmNoiseFilter())
+
+
 @dataclass
 class DanmakuEvent:
     """统一弹幕事件 — 标准化来自不同来源的弹幕数据"""

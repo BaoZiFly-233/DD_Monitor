@@ -73,13 +73,19 @@ def loggingSystemInfo():
 
     try:
         # subprocess.run 自动读取并关闭管道，避免 Popen.stdout.read() 在
-        # 输出超过管道缓冲时死锁，且带超时防止 systeminfo 长时间卡住
+        # 输出超过管道缓冲时死锁，且带超时防止 systeminfo 长时间卡住。
+        # Windows 中文系统下 wmic/systeminfo 输出为 GBK，text=True 若按
+        # UTF-8 解码（PYTHONUTF8 环境）会抛 UnicodeDecodeError，显式指定
+        # 平台编码 + errors=replace 兜底。
+        enc = "gbk" if platform.system() == "Windows" else "utf-8"
         system_info_res = subprocess.run(
-            systemCmd, shell=True, capture_output=True, text=True, timeout=20
+            systemCmd, shell=True, capture_output=True, text=True,
+            encoding=enc, errors="replace", timeout=20,
         )
         systemInfoProcessReturn = system_info_res.stdout
         gpu_info_res = subprocess.run(
-            gpuCmd, shell=True, capture_output=True, text=True, timeout=20
+            gpuCmd, shell=True, capture_output=True, text=True,
+            encoding=enc, errors="replace", timeout=20,
         )
         gpuInfoProcessReturn = gpu_info_res.stdout
 
