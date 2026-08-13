@@ -215,15 +215,29 @@ class AppTitleBar(TitleBarBase):
             self.iconLabel.hide()
 
     def setMaximizeEnabled(self, enabled):
-        """固定尺寸窗口（如扫码登录）可隐藏最大化按钮"""
+        """固定尺寸窗口（如扫码登录）：隐藏最大化按钮并禁止双击最大化"""
         self.maxBtn.setVisible(bool(enabled))
+        self.setDoubleClickEnabled(bool(enabled))
 
     def _toggleMaxState(self):
         w = self.window()
+        if w.isFullScreen():
+            # 全屏状态下点最大化/双击标题栏 → 退出全屏（主窗口恢复全屏前状态）
+            if getattr(w, "maximumToken", False):
+                w.showMaximized()
+            else:
+                w.showNormal()
+            return
         if w.isMaximized():
             w.showNormal()
         else:
             w.showMaximized()
+
+    def mouseDoubleClickEvent(self, event):
+        # 统一走 _toggleMaxState（含全屏处理），覆盖组件库默认 toggleMaxState 逻辑
+        if event.button() != Qt.LeftButton or not self._isDoubleClickEnabled:
+            return
+        self._toggleMaxState()
 
 
 def _install_title_bar(window, title="", maximize_enabled=True):
