@@ -136,7 +136,8 @@ if __name__ == "__main__":
         # 此处用 TerminateProcess 硬终止，跳过 DLL 清理，保证退出不崩溃。
         import ctypes
 
-        ctypes.windll.kernel32.TerminateProcess(
-            ctypes.windll.kernel32.GetCurrentProcess(), exit_code
-        )
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        _kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        _kernel32.TerminateProcess(_kernel32.GetCurrentProcess(), exit_code)
     sys.exit(exit_code)

@@ -54,6 +54,22 @@ from app.ui.settings_dialog import SettingsDialog
 from app.ui.login import LoginDialog
 from app.core.app_version import APP_NAME, DISPLAY_VERSION, VERSION, RELEASE_DATE, parse_version
 
+def _hard_exit():
+    """退出竞态窗口防护：checkUpdate/凭据刷新/热门列表等后台线程仍在运行，
+    其 bilibili_api sync() 的 futures 线程在进程收尾时可能触发 0xe24c4a02
+    （LuaJIT panic）崩溃。所有业务清理已完成，直接硬终止进程，跳过
+    DLL/线程收尾的竞态窗口。测试/截图脚本可 monkeypatch 本函数跳过。"""
+    if sys.platform == "win32":
+        import ctypes
+
+        # 64 位 Windows 上 HANDLE 是 8 字节，ctypes 默认按 c_int 截断会导致
+        # TerminateProcess 静默失败（进程继续收尾，触发 0xe24c4a02 竞态崩溃）
+        _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        _kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        _kernel32.TerminateProcess(_kernel32.GetCurrentProcess(), 0)
+
+
 def get_application_path() -> str:
     """返回程序根目录（frozen 打包后为可执行文件所在目录）。
 
@@ -1473,6 +1489,7 @@ class MainWindow(WindowsFramelessMainWindow):
         self.saveDockLayout()
         self.configManager.save_now()
         event.accept()
+        _hard_exit()
 
     def openLayoutSetting(self):
         self.layoutSettingPanel.show()

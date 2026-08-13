@@ -40,6 +40,7 @@ def _fake_application_path(tmp_root):
     import app.ui.main_window as mw
 
     mw.get_application_path = lambda: tmp_root
+    mw._hard_exit = lambda: None  # 截图脚本不走硬退出，保留正常收尾
 
 
 app = QApplication(sys.argv)
