@@ -10,9 +10,9 @@
 import re
 
 APP_NAME = "DD监控室"
-VERSION = "3.51"  # 主版本号（x.y 或 x.y.z）
+VERSION = "3.52"  # 主版本号（x.y 或 x.y.z）
 VERSION_SUFFIX = "魔改版"  # 展示后缀（可为空字符串）
-RELEASE_DATE = "2026/04/28"  # 发版日期
+RELEASE_DATE = "2026/08/14"  # 发版日期
 
 # 展示用："3.51魔改版"
 DISPLAY_VERSION = f"{VERSION}{VERSION_SUFFIX}"

@@ -27,7 +27,7 @@
 DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发，本仓库是魔改分支，由 [BaoZi_Fly](https://space.bilibili.com/34094740) 维护。在保留原作者全部功能的基础上，进行了底层架构重构、弹幕系统重写、配置管理改良和大量 bug 修复。
 
 - **原项目**：[zhimingshenjun/DD_Monitor](https://github.com/zhimingshenjun/DD_Monitor)
-- **当前版本**：**v3.51 魔改版**（基于 MPV + OpenGL 的弹幕渲染方案，告别 VLC 依赖）
+- **当前版本**：**v3.52 魔改版**（基于 MPV + OpenGL 的弹幕渲染方案，告别 VLC 依赖）
 - **目标用户**：B站"多开党"、主播比较、VUP 观测站运营、直播监管
 
 ---
@@ -432,12 +432,12 @@ thread.stop()  # 优雅退出，非阻塞
 ### Windows
 
 ```bat
-set APP_VERSION=3.51
+set APP_VERSION=3.52
 set MPV_DLL=D:\path\to\libmpv-2.dll
 scripts\build_win.bat x64
 ```
 
-打包完成后 `release/` 目录生成 `DDMonitor-3.51-windows-x64.zip`（`libmpv-2.dll`、
+打包完成后 `release/` 目录生成 `DDMonitor-3.52-windows-x64.zip`（`libmpv-2.dll`、
 `resources/splash.jpg`、`resources/vtb.csv` 自动随包分发）。
 
 ### macOS / Linux

@@ -23,7 +23,7 @@ if "%APP_VERSION%"=="" (
     rem 自动从 app_version.py 读取版本号（打包环境必有 python）
     for /f "delims=" %%V in ('python -c "import app_version; print(app_version.VERSION)" 2^>nul') do set "APP_VERSION=%%V"
 )
-if "%APP_VERSION%"=="" set "APP_VERSION=3.51"
+if "%APP_VERSION%"=="" set "APP_VERSION=3.52"
 
 set "DIST_NAME=DDMonitor"
 set "DIST_DIR=%ROOT_DIR%dist\%DIST_NAME%"
