@@ -35,13 +35,13 @@ for n in ("splash.jpg", "vtb.csv"):
         shutil.copy2(src, os.path.join(tmp, "resources", n))
 
 app = QApplication(sys.argv)
-from app.ui.uikit_bridge import init_uikit
+from app.ui.uikit_bridge import init_uikit  # noqa: E402
 init_uikit()
 app.setFont(QFont("微软雅黑", 9))
 
-import app.ui.main_window as mw
+import app.ui.main_window as mw  # noqa: E402
 mw.get_application_path = lambda: tmp
-from app.core import log
+from app.core import log  # noqa: E402
 log.init_log(tmp)
 
 win = mw.MainWindow(tmp + "/cache", QProgressBar(), QLabel("x"))
@@ -97,7 +97,7 @@ for vw in win.videoWidgetList[3:]:
     vw._init_mpv()
 
 # 真实弹幕线程（blivedm 直连房间）
-from app.media.remote import remoteThread
+from app.media.remote import remoteThread  # noqa: E402
 
 real_danmu_thread = remoteThread(ROOM_ID, "")
 
