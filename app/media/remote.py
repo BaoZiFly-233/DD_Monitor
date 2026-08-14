@@ -5,9 +5,11 @@
 """
 
 import asyncio
+import hashlib
 import http.cookies
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -119,6 +121,17 @@ class remoteThread(QThread):
     def run(self):
         if not self.roomID or self.roomID == "0":
             return
+
+        # 启动错峰：多个弹幕线程（多窗口/重启）并发创建 asyncio loop + aiohttp
+        # session 时，与 MPV 内核 C 初始化竞争易触发内存破坏（实测启动期
+        # 0xe24c4a02 / http.cookies 崩溃）。用房间号哈希做确定性延迟（同一
+        # 房间重启延迟一致，多窗口自然错开 0.3~1.8s），对用户无感知。
+        try:
+            seed = int(hashlib.md5(str(self.roomID).encode()).hexdigest()[:8], 16)
+            delay = 0.3 + (seed % 1500) / 1000.0
+        except Exception:
+            delay = 0.5
+        time.sleep(delay)
 
         self._running = True
         # 上一轮运行遗留的停止标记在此清除（stop→start 是合法的重启流程）；
