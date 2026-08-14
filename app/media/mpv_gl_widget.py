@@ -33,6 +33,7 @@ class MpvGLWidget(QOpenGLWidget):
         self._danmaku_timer = QTimer(self)
         self._danmaku_timer.setInterval(16)  # 默认 60fps, setDanmakuInterval 可调
         self._danmaku_timer.timeout.connect(self._on_danmaku_tick)
+        self._render_suspended = False  # 窗口隐藏（页面切换）时挂起渲染
         self.frameSwapped.connect(self._on_frame_swapped)
         self.setUpdateBehavior(QOpenGLWidget.NoPartialUpdate)
         # 明暗/配色切换后重绘 GL 面，使无视频占位色及时更新
@@ -79,6 +80,20 @@ class MpvGLWidget(QOpenGLWidget):
         except Exception:
             pass
         self.update()
+
+    def hideEvent(self, event):
+        """窗口隐藏（如导航切换离开直播监控页）：挂起 mpv 渲染与弹幕刷新，
+        避免 Qt 销毁 WGL surface 后 mpv 仍在失效表面上做 GL 操作（access violation）。"""
+        self._render_suspended = True
+        self._danmaku_timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        """窗口重新可见：恢复渲染"""
+        self._render_suspended = False
+        if self._danmaku_renderer is not None and self._danmaku_renderer.hasActiveDanmaku():
+            self._danmaku_timer.start()
+        super().showEvent(event)
 
     def setPlaybackActive(self, active):
         active = bool(active)
@@ -199,9 +214,10 @@ class MpvGLWidget(QOpenGLWidget):
                 return 0
 
     def _on_mpv_update(self):
-        # mpv 渲染线程回调：关闭中或上下文已释放时直接忽略，
-        # 绝不触碰已销毁的 render context（退出期 access violation 源头）
-        if self._closing or self._render_context is None:
+        # mpv 渲染线程回调：关闭中、上下文已释放或窗口隐藏（页面切换）时
+        # 直接忽略，绝不触碰已销毁/失效的 render context
+        # （退出期与页面切换期的 access violation 源头）
+        if self._closing or self._render_context is None or self._render_suspended:
             return
         if self._update_scheduled:
             return
@@ -236,7 +252,7 @@ class MpvGLWidget(QOpenGLWidget):
 
     @Slot()
     def _triggerUpdate(self):
-        if not self._closing:
+        if not self._closing and not self._render_suspended:
             self.update()
 
     def mousePressEvent(self, event):
