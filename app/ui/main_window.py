@@ -346,6 +346,8 @@ class MainWindow(WindowsFramelessMainWindow):
         # 过滤器监听全局鼠标移动来驱动菜单切换
         QApplication.instance().installEventFilter(self)
         self.resize(1600, 900)
+        # 最小尺寸：防止无边框窗口被拖到极小导致布局错乱/控件不可见
+        self.setMinimumSize(640, 480)
         self.maximumToken = True
         self.soloToken = False  # 记录静音除鼠标悬停窗口以外的其他所有窗口的标志位 True就是恢复所有房间声音
         self.cacheFolder = cacheFolder
