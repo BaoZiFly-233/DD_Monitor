@@ -6,7 +6,7 @@
 图标 + 标题 + 说明 + 右侧控件 的行卡片格式。
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from app.ui.title_bar import FluentDialog
 from PySide6.QtWidgets import (
     QWidget,
@@ -65,6 +65,9 @@ def _scrollable_page(build_fn):
 
 class SettingsDialog(FluentDialog):
     """统一设置对话框（Fluent SettingCard 格式，5 个标签页）"""
+
+    # 应用设置后发射：主窗口据此把新配置同步到所有播放窗口（音量/弹幕等）
+    applied = Signal()
 
     def __init__(self, parent, config, config_manager, danmu_panel_fn, layout_panel_fn):
         super().__init__(parent=parent, title="设置")
@@ -409,4 +412,5 @@ class SettingsDialog(FluentDialog):
         set_accent(cfg["accent"])
 
         self.configManager.save()
+        self.applied.emit()
         self.accept()

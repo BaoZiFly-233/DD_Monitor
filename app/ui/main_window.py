@@ -1123,9 +1123,23 @@ class MainWindow(WindowsFramelessMainWindow):
             )
             self._settingsDialog.setAttribute(Qt.WA_DeleteOnClose)
             self._settingsDialog.destroyed.connect(lambda: setattr(self, "_settingsDialog", None))
+            self._settingsDialog.applied.connect(self._applySettingsToWindows)
         self._settingsDialog.show()
         self._settingsDialog.raise_()
         self._settingsDialog.activateWindow()
+
+    def _applySettingsToWindows(self):
+        """设置应用后：把新配置同步到所有播放窗口（音量/弹幕/滚动弹幕）
+
+        VideoWidget 的 textSetting/rollingSetting 是 config 对象的引用，
+        设置对话框修改后 applyDanmuSettings() 重读即可生效。"""
+        try:
+            volume = self.config.get("globalVolume", 30)
+            for video_widget in self._iterVideoWidgets(include_popups=True):
+                video_widget.setVolume(volume)
+                video_widget.applyDanmuSettings()
+        except Exception:
+            logging.exception("应用设置到播放窗口失败")
 
     def openGithub(self):
         QDesktopServices.openUrl(QUrl(r"https://github.com/BaoZiFly-233/DD_Monitor"))
