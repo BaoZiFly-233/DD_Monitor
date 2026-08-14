@@ -122,6 +122,19 @@ if __name__ == "__main__":
     progressText.setGeometry(0, 0, 170, 20)
     splash.show()
 
+    # 预热 qfluentwidgets 字体匹配（首次 setFont ~3s，在闪屏阶段完成，
+    # 避免 MainWindow 构造 16 个窗口时卡在字体初始化上；
+    # 需用带文本的控件触发字体度量/匹配，裸 QWidget 无效）
+    try:
+        from qfluentwidgets_pro.common.font import getFont
+        from PySide6.QtWidgets import QLineEdit as _FontWarmupEdit
+
+        _warmup = _FontWarmupEdit("字体预热")
+        _warmup.setFont(getFont(14))
+        del _warmup
+    except Exception:
+        pass
+
     # 主页面入口
     mainWindow = MainWindow(cacheFolder, progressBar, progressText)
     mainWindow.showMaximized()
