@@ -19,11 +19,13 @@ class Label(QLabel):
         self.setFont(QFont("微软雅黑", 13, QFont.Bold))
         self.setAlignment(Qt.AlignCenter)
         self._applyThemeColor()
-        # 跟随全局明暗主题刷新色块（primary 令牌色）
+        # 跟随全局明暗主题刷新色块（primary 令牌色 + 白字保证对比度）
         theme_changed().connect(self._applyThemeColor)
 
     def _applyThemeColor(self, dark=None):
-        self.setStyleSheet(f"background-color:{current_color('primary')}")
+        self.setStyleSheet(
+            f"background-color:{current_color('primary')};color:{current_color('on.primary')}"
+        )
 
 
 class LayoutWidget(QLabel):

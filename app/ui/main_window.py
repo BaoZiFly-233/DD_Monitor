@@ -175,10 +175,9 @@ class StartLiveWindow(QWidget):
         self._drag_pos = None
         self.tipLabel = QLabel()
         # 提醒横幅背景/文字取自主题令牌，随明暗主题变化
-        self.tipLabel.setStyleSheet(
-            f"background-color:{current_color('primary.subtle')};color:{current_color('primary')}"
-        )
         self.tipLabel.setFont(QFont("微软雅黑", 15, QFont.Bold))
+        self._applyTipTheme()
+        theme_changed().connect(self._applyTipTheme)
         layout = QGridLayout(self)
         layout.setContentsMargins(3, 3, 3, 3)
         layout.addWidget(self.tipLabel)
@@ -186,6 +185,11 @@ class StartLiveWindow(QWidget):
         self.hideTimer = QTimer(self)
         self.hideTimer.setInterval(10000)
         self.hideTimer.timeout.connect(self.hide)  # 10秒倒计时结束隐藏
+
+    def _applyTipTheme(self, *args):
+        self.tipLabel.setStyleSheet(
+            f"background-color:{current_color('primary.subtle')};color:{current_color('primary')}"
+        )
 
     def mousePressEvent(self, event):  # 点击的话就停止倒计时
         self.hideTimer.stop()
