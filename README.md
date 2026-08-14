@@ -553,8 +553,9 @@ python DD监控室.py
 
 ```bash
 ruff check .                        # lint（配置文件见 ruff.toml）
-python -m pytest tests/             # 测试（无头 Qt，全绿基线 86 项）
+python -m pytest tests/             # 测试（无头 Qt，全绿基线 92 项）
 python scripts/make_screenshots.py  # 重新生成 README 截图
+python scripts/stability_test_real.py  # 稳定性测试（真实直播流 + 真实弹幕，30 分钟长跑）
 ```
 
 ---

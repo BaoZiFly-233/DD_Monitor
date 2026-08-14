@@ -1,7 +1,7 @@
 # ruff 配置（独立文件，避免 pyproject.toml 自动发现不一致）
 line-length = 160
 target-version = "py311"
-exclude = ["blivedm", "__pycache__", "docs", "cache"]
+exclude = ["blivedm", "qfluentwidgets_pro", "__pycache__", "docs", "cache"]
 
 [lint]
 select = ["E", "F", "W"]
