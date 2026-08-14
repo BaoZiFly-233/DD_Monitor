@@ -29,6 +29,14 @@ DEFAULT_ROLLING_DANMU = {
     "fps": 60,
 }
 
+
+def _safe_int(value, default=0):
+    """安全转 int：None/非数字/异常值回退默认，避免损坏 config 崩溃"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
 DEFAULT_CONFIG = {
     "roomid": {},
     "layout": [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1)],
@@ -143,6 +151,17 @@ class ConfigManager(QObject):
                 if len(text_setting) > 9:
                     del text_setting[9:]
                 text_setting[0] = bool(text_setting[0])
+                # 数值字段范围校验（损坏/手改 config 越界会导致 ComboBox
+                # setCurrentIndex 越界显示异常）：
+                # [1]=透明度 7-100 [2]/[3]=占比 index 0-10 [4]=类型 0-2
+                # [6]=字号 index 0-20 [7]=礼物/进入 0-3
+                text_setting[1] = max(7, min(_safe_int(text_setting[1], 20), 100))
+                text_setting[2] = max(0, min(_safe_int(text_setting[2], 1), 10))
+                text_setting[3] = max(0, min(_safe_int(text_setting[3], 7), 10))
+                text_setting[4] = max(0, min(_safe_int(text_setting[4], 0), 2))
+                text_setting[5] = str(text_setting[5] or "【 [ {")
+                text_setting[6] = max(0, min(_safe_int(text_setting[6], 10), 20))
+                text_setting[7] = max(0, min(_safe_int(text_setting[7], 0), 3))
                 text_setting[8] = bool(text_setting[8])
 
         # 滚动弹幕默认值
