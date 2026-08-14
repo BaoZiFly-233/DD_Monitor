@@ -417,7 +417,7 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
             painter.setPen(QPen(QColor("#DFA616"), 2))
         else:
             painter.setPen(Qt.NoPen)
-        painter.setBrush(self.bgColorObject.color if hasattr(self, "bgColorObject") else self._normalBackgroundColor())
+        painter.setBrush(self.bgColorObject.backgroundColor if hasattr(self, "bgColorObject") else self._normalBackgroundColor())
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), radius, radius)
         painter.end()
         super().paintEvent(event)  # 画关键帧 pixmap
