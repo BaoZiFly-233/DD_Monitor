@@ -1655,15 +1655,19 @@ class MainWindow(WindowsFramelessMainWindow):
 
     def showEvent(self, e: QShowEvent) -> None:
         """主窗口显示：打开、最大化
-        显示开启的弹幕机
+
+        仅首次显示时弹开设了弹幕的弹幕机；后续每次 show（最小化恢复、
+        任务栏点击等）不再重复弹出 — 否则所有弹幕姬会突然蹦出来置顶。
         """
         logging.debug("主窗口已显示")
         if not hasattr(self, "videoWidgetList"):  # 无边框初始化期间可能提前触发
             return
-        self._applyDanmakuBaseViewport()
-        for index, videoWidget in enumerate(self.videoWidgetList):
-            if self.config["danmu"][index][0] and not videoWidget.isHidden():
-                videoWidget.showTextBrowser()
+        if not getattr(self, "_danmaku_initial_shown", False):
+            self._danmaku_initial_shown = True
+            self._applyDanmakuBaseViewport()
+            for index, videoWidget in enumerate(self.videoWidgetList):
+                if self.config["danmu"][index][0] and not videoWidget.isHidden():
+                    videoWidget.showTextBrowser()
 
     def closeEvent(self, event):
         self.hide()
