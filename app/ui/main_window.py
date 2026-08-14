@@ -1129,7 +1129,7 @@ class MainWindow(WindowsFramelessMainWindow):
             if not videoWidget.isHidden():
                 videoWidget.mediaReload()
 
-    def globalMediaMute(self):
+    def globalMediaMute(self, force=None):
         if self.globalMuteToken:
             force = 1
             self.volumeButton.setIcon(Icon(FluentIcon.VOLUME))
