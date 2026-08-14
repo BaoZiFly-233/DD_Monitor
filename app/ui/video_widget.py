@@ -1143,12 +1143,13 @@ class VideoWidget(FramelessWindowBase, QFrame):
             self.mediaStop()
 
     def leftMouseClicked(self):
+        # 空窗口（无房间）不参与拖拽交换：拖空窗口到有内容的窗口会把
+        # 对方房间清空（交换语义），通常是误操作
+        if self.top or self.roomID in ("0", ""):
+            return
         drag = QDrag(self)
         mimeData = QMimeData()
-        if self.top:
-            mimeData.setText("")
-        else:
-            mimeData.setText("exchange:%s:%s" % (self.id, self.roomID))
+        mimeData.setText("exchange:%s:%s" % (self.id, self.roomID))
         drag.setMimeData(mimeData)
         drag.exec()
 
@@ -1170,7 +1171,8 @@ class VideoWidget(FramelessWindowBase, QFrame):
             elif "exchange" in text:
                 fromID, fromRoomID = text.split(":")[1:]
                 fromID = int(fromID)
-                if fromID != self.id:
+                # 空窗口（无房间）不参与交换：会清空目标窗口的房间记录
+                if fromID != self.id and fromRoomID not in ("", "0"):
                     self.exchangeMedia.emit([fromID, fromRoomID, self.id, self.roomID])
 
     def rightMouseClicked(self, event):
