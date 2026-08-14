@@ -269,11 +269,14 @@ class WindowsWindowEffect:
 
     @staticmethod
     def addWindowAnimation(hWnd):
-        """ 启用最小化/最大化任务栏行为（纯 Qt 无边框模式）。
+        """ 启用最小化/最大化任务栏行为 + DWM 阴影（纯 Qt 无边框模式）。
 
-        仅注入 WS_MINIMIZEBOX/WS_MAXIMIZEBOX/WS_THICKFRAME 之外的最小集：
-        不注入 WS_CAPTION/WS_THICKFRAME，避免 DWM 渲染原生标题栏/边框层
-        （幽灵窗口）以及 WM_NCCALCSIZE 几何补偿造成的逐次偏移。
+        注入 WS_MINIMIZEBOX/WS_MAXIMIZEBOX/WS_THICKFRAME：
+        - WS_THICKFRAME 让 DWM 渲染窗口阴影（addShadowEffect 的
+          DwmExtendFrameIntoClientArea 只对带边框样式的窗口生效）
+        - 不注入 WS_CAPTION，避免 DWM 渲染原生标题栏层（幽灵窗口）
+        - 最大化几何由 WM_NCCALCSIZE 分支处理（返回 0 占满 + 任务栏避让），
+          无 8px 边框补偿偏移
         """
         hWnd = int(hWnd)
         style = win32gui.GetWindowLong(hWnd, win32con.GWL_STYLE)
@@ -282,7 +285,8 @@ class WindowsWindowEffect:
             win32con.GWL_STYLE,
             style
             | win32con.WS_MINIMIZEBOX
-            | win32con.WS_MAXIMIZEBOX,
+            | win32con.WS_MAXIMIZEBOX
+            | win32con.WS_THICKFRAME,
         )
 
     @staticmethod

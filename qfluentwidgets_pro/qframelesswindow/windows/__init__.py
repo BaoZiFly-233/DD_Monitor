@@ -45,10 +45,11 @@ class WindowsFramelessWindowBase:
         stayOnTop = Qt.WindowStaysOnTopHint if self.windowFlags() & Qt.WindowStaysOnTopHint else 0
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | stayOnTop)
 
-        # 纯 Qt 无边框：仅注入 WS_MINIMIZEBOX/WS_MAXIMIZEBOX（任务栏/快捷键行为），
-        # 不注入 WS_CAPTION/WS_THICKFRAME —— 原生样式 + WM_NCCALCSIZE 补偿会在
-        # 最大化/还原切换时反复引入非客户区，导致窗口几何逐次偏移（往左上角跳）
-        # 并出现 DWM 影子窗口。边缘缩放由 WM_NCHITTEST 消息驱动，无需原生样式。
+        # 纯 Qt 无边框：注入 WS_MINIMIZEBOX/WS_MAXIMIZEBOX/WS_THICKFRAME。
+        # - WS_THICKFRAME：DWM 阴影（addShadowEffect 的 DwmExtendFrameIntoClientArea
+        #   只对带边框样式的窗口生效）+ 边缘缩放
+        # - 不注入 WS_CAPTION：避免 DWM 渲染原生标题栏层（幽灵窗口）；
+        #   最大化几何由 WM_NCCALCSIZE 分支处理（返回 0 占满 + 任务栏避让）
         self.windowEffect.addWindowAnimation(self.winId())
         if not isinstance(self, AcrylicWindow):
             self.windowEffect.addShadowEffect(self.winId())

@@ -505,19 +505,19 @@ class MainWindow(WindowsFramelessMainWindow):
         # 导航项（图标+文字，主题自适应，点击切换页面）
         self.navigationInterface.addItem(
             routeKey="monitor", icon=FluentIcon.VIDEO, text="直播监控",
-            onClick=lambda: self.contentStack.setCurrentWidget(self.monitorPage),
+            onClick=lambda: self._switchPage(self.monitorPage),
         )
         self.navigationInterface.addItem(
             routeKey="danmaku", icon=FluentIcon.CHAT, text="弹幕机",
-            onClick=lambda: self.contentStack.setCurrentWidget(self.danmakuPage),
+            onClick=lambda: self._switchPage(self.danmakuPage),
         )
         self.navigationInterface.addItem(
             routeKey="cards", icon=FluentIcon.ALBUM, text="卡片面板",
-            onClick=lambda: self.contentStack.setCurrentWidget(self.cardPage),
+            onClick=lambda: self._switchPage(self.cardPage),
         )
         self.navigationInterface.addItem(
             routeKey="settings", icon=FluentIcon.SETTING, text="设置",
-            onClick=lambda: self.contentStack.setCurrentWidget(self.settingsPage),
+            onClick=lambda: self._switchPage(self.settingsPage),
         )
         # 导航右侧：账号/帮助/投喂（弹出保留的菜单对象）
         self.navigationInterface.addItem(
@@ -1033,6 +1033,24 @@ class MainWindow(WindowsFramelessMainWindow):
         for video_widget in self.videoWidgetList:
             video_widget.showTextBrowser()
         info(self, "弹幕机", "已打开全部弹幕机（可在各窗口右键/H 键控制）")
+
+    def _switchPage(self, page):
+        """导航页面切换：离开直播监控页时收起弹幕机（避免置顶窗口遮挡其他
+        页面），切回时恢复之前打开状态（弹幕线程不中断，仅隐藏窗口）。"""
+        if page is not self.monitorPage:
+            opened = [
+                vw for vw in self._iterVideoWidgets(include_popups=False)
+                if vw.textBrowser is not None and vw.textBrowser.isVisible()
+            ]
+            self._danmaku_before_hide = opened
+            for vw in opened:
+                vw.hideTextBrowser()
+        else:
+            for vw in getattr(self, "_danmaku_before_hide", []):
+                if vw.textBrowser is not None:
+                    vw.showTextBrowser()
+            self._danmaku_before_hide = []
+        self.contentStack.setCurrentWidget(page)
 
     def showAddButton(self, height):
         # 阈值 165：控制条内容（两行按钮 + 90px 添加按钮 + 边距 ≈ 160）
