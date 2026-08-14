@@ -354,10 +354,17 @@ class MainWindow(WindowsFramelessMainWindow):
         self.configManager = ConfigManager(get_application_path(), parent=self)
         self.config = self.configManager.load()
         # 应用配置的主题（明/暗）与配色，主界面全局 QSS 由 UIKit 主题驱动
-        from app.ui.uikit_bridge import set_theme, set_accent, set_menu_animation
+        from app.ui.uikit_bridge import set_theme, set_accent, set_menu_animation, ACCENT_NAMES
 
         set_theme(self.config.get("theme", "dark") == "dark")
-        set_accent(self.config.get("accent", "blue"))
+        accent = self.config.get("accent", "blue")
+        if accent not in ACCENT_NAMES:
+            # config.json 被手改/损坏/旧版本遗留非法配色时回退 blue，
+            # 否则 set_accent 抛 ValueError 导致启动崩溃
+            logging.warning("config 中的配色非法: %r，回退 blue", accent)
+            accent = "blue"
+            self.config["accent"] = accent
+        set_accent(accent)
         set_menu_animation(self.config.get("menuAnimation", True))
         self.credential = normalize_credential_data(
             self.config.get("credential", {}), sessdata=self.config["sessionData"]

@@ -228,7 +228,13 @@ class RecordThread(QThread):
             with self._lock:
                 self.recordToken = True
             self.downloadTime = 0
-            self.cacheVideo = open(self.savePath, "wb")
+            try:
+                self.cacheVideo = open(self.savePath, "wb")
+            except OSError:
+                # 保存路径不可写/目录不存在：录制静默失败会误导用户（状态显示"录制中"）
+                logging.exception("录制失败：无法写入保存路径 %s", self.savePath)
+                self.downloadError.emit(self.roomID)
+                return
             try:
                 for chunk in download.iter_content(chunk_size=1024 * 1024):  # 1MB 分块，减少磁盘 IO 次数
                     with self._lock:
