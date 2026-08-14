@@ -75,9 +75,14 @@ class SettingsDialog(FluentDialog):
         self.configManager = config_manager
         self._danmu_panel_fn = danmu_panel_fn
         self._layout_panel_fn = layout_panel_fn
-        self.resize(560, 520)
+        self._original_accent = config.get("accent", "blue")
+        self._settings_applied = False
+        self.resize(600, 560)
 
         tabs = TabWidget()
+        tabs.setMovable(False)
+        tabs.tabBar.setTabsClosable(False)
+        tabs.tabBar.setAddButtonVisible(False)
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(tabs)
 
@@ -348,9 +353,70 @@ class SettingsDialog(FluentDialog):
         layout.addStretch()
         return w
 
+    def _syncFromConfig(self):
+        """复用窗口时丢弃未应用改动，并按最新配置刷新全部控件。"""
+        cfg = self.config
+        self._settings_applied = False
+        self._original_accent = cfg.get("accent", "blue")
+        self.qualityCombo.setCurrentIndex(
+            {10000: 0, 400: 1, 250: 2, 80: 3, -1: 4}.get(cfg.get("quality", [80])[0], 3)
+        )
+        self.decodeCombo.setCurrentIndex(0 if cfg.get("hardwareDecode", True) else 1)
+        self.audioCombo.setCurrentIndex(0 if cfg.get("audioChannel", [0])[0] == 0 else 1)
+        self.volumeSlider.setValue(cfg.get("globalVolume", 30))
+
+        danmu = cfg.get("danmu", [[True, 50, 1, 7, 0, "", 10, 0, True]])[0]
+        self.browserOpacity.setValue(danmu[1])
+        self.browserHori.setCurrentIndex(danmu[2])
+        self.browserVert.setCurrentIndex(danmu[3])
+        self.browserType.setCurrentIndex(danmu[4])
+        self.browserFilter.setText(danmu[5])
+        self.browserFont.setCurrentIndex(danmu[6])
+        self.browserMsgs.setCurrentIndex(danmu[7])
+
+        rolling = cfg.get("rollingDanmu", {})
+        self.rollingOpacity.setValue(rolling.get("opacity", 50))
+        self.rollingArea.setCurrentIndex(rolling.get("display_area", 7))
+        self.rollingFont.setCurrentIndex(rolling.get("font_size", 10))
+        self.rollingSpeed.setValue(rolling.get("speed_percent", 85))
+        self.rollingStroke.setValue(rolling.get("stroke_width", 30))
+        self.rollingShadow.setChecked(rolling.get("shadow_enabled", False))
+        self.rollingTop.setChecked(rolling.get("top_enabled", True))
+        self.rollingBottom.setChecked(rolling.get("bottom_enabled", True))
+        self.rollingFps.setCurrentText(str(rolling.get("fps", 60)))
+
+        self.cacheSize.setText(str(max(1, cfg.get("maxCacheSize", 2048000) // 1024000)))
+        self.cachePath.setText(cfg.get("saveCachePath", ""))
+        self.startDanmu.setChecked(cfg.get("startWithDanmu", True))
+        self.startLive.setChecked(cfg.get("showStartLive", True))
+        self.checkUpdate.setChecked(cfg.get("checkUpdate", True))
+        self.menuAnimation.setChecked(cfg.get("menuAnimation", True))
+        self.themeCombo.setCurrentIndex(0 if cfg.get("theme", "dark") == "dark" else 1)
+        accent = cfg.get("accent", "blue")
+        self.accentCombo.setCurrentIndex(ACCENT_NAMES.index(accent) if accent in ACCENT_NAMES else 0)
+
+    def showEvent(self, event):
+        self._original_accent = self.config.get("accent", "blue")
+        self._settings_applied = False
+        self._syncFromConfig()
+        super().showEvent(event)
+
     def _previewAccent(self, index):
         """切换配色下拉框时立即应用配色（预览），应用按钮负责保存配置。"""
         set_accent(ACCENT_NAMES[index])
+
+    def _restorePreview(self):
+        if not self._settings_applied:
+            set_accent(self._original_accent)
+
+    def reject(self):
+        """取消或关闭窗口时撤销尚未应用的配色预览。"""
+        self._restorePreview()
+        super().reject()
+
+    def closeEvent(self, event):
+        self._restorePreview()
+        super().closeEvent(event)
 
     # ---- 应用 ----
 
@@ -411,6 +477,7 @@ class SettingsDialog(FluentDialog):
         set_theme(theme == "dark")
         set_accent(cfg["accent"])
 
+        self._settings_applied = True
         self.configManager.save()
         self.applied.emit()
         self.accept()

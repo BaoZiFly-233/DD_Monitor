@@ -5,7 +5,7 @@ import json
 import logging
 import struct
 import zlib
-from typing import *
+from typing import Callable, NamedTuple, Optional, Union
 
 import aiohttp
 import brotli
@@ -94,7 +94,9 @@ class WebSocketClientBase:
         else:
             self._session = session
             self._own_session = False
-            assert self._session.loop is asyncio.get_event_loop()  # noqa
+            session_loop = getattr(self._session, "_loop", None)
+            if session_loop is not None and session_loop is not asyncio.get_event_loop():
+                raise ValueError("aiohttp 会话与弹幕客户端必须使用同一事件循环")
 
         self._heartbeat_interval = heartbeat_interval
 

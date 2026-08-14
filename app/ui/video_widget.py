@@ -9,27 +9,40 @@ import sys
 import time
 from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QWidget
 from PySide6.QtGui import QDesktopServices, QDrag, QFont, QCursor
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
-from bilibili_api import live, sync
-from app.core.bili_credential import build_credential, normalize_credential_data
-from app.ui.common_widget import Slider
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QTimer, QUrl, Signal
+from app.core.bili_credential import normalize_credential_data
 from app.ui.title_bar import AppTitleBar, FramelessWindowBase, TITLE_BAR_HEIGHT, apply_fullscreen_style
 from app.media.remote import DanmakuEvent, remoteThread
+from app.media.stream import FetchRoomInfo, GetStreamURL, StreamResult, is_valid_stream_url
 from app.core.constants import DISPLAY_RATIOS
 from app.danmaku.settings import DanmakuSettings
 from app.ui.danmu import TextBrowser
 from app.danmaku.renderer import DanmakuRenderer
 from app.media.mpv_gl_widget import MpvGLWidget
-from qfluentwidgets_pro import FluentIcon, Icon, RoundMenu
+from qfluentwidgets_pro import FluentIcon, Icon, RoundMenu, Slider as FluentSlider
 from app.ui.uikit_bridge import current_color, theme_changed
 import logging
 import warnings
 from datetime import datetime
-from urllib.parse import urlsplit
 from app.core import http_utils
 
 _MPV_DLL_HANDLES = []
 _MPV_MODULE = None
+
+# DD_Monitor supplies its own Qt controls, shortcuts, settings and danmaku
+# overlay. Loading mpv's built-in Lua/JS UI scripts is therefore redundant.
+# The bundled Windows libmpv build raises LuaJIT SEH exceptions while those
+# scripts initialize, which is unsafe when many players start concurrently.
+MPV_EMBEDDED_SCRIPT_OPTIONS = {
+    "load_scripts": False,
+    "load_stats_overlay": False,
+    "load_console": False,
+    "load_commands": False,
+    "load_auto_profiles": False,
+    "load_select": False,
+    "load_context_menu": False,
+    "load_positioning": False,
+}
 
 
 def prepare_mpv_runtime():
@@ -91,14 +104,6 @@ def load_mpv_module():
 header = http_utils.DEFAULT_HEADERS
 
 
-def _is_valid_stream_url(url):
-    value = str(url or "").strip()
-    if not value:
-        return False
-    parsed = urlsplit(value)
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-
-
 class PushButton(QPushButton):
     """文字/图标按钮"""
 
@@ -111,155 +116,6 @@ class PushButton(QPushButton):
             self.setIcon(icon)
         elif text:
             self.setText(text)
-
-
-class GetStreamURL(QThread):
-    """获取直播流地址
-    MPV 版本不再下载 FLV 到本地，只获取流地址后直接交给 MPV 播放
-    """
-
-    streamUrl = Signal(object)
-    downloadError = Signal()
-
-    def __init__(self, sessionData=""):
-        super(GetStreamURL, self).__init__()
-        self.roomID = "0"
-        self.quality = 250
-        self.sessionData = sessionData if sessionData else ""
-        self.credential = normalize_credential_data(sessdata=self.sessionData)
-        self.recordToken = False
-        self._stream_candidates = []  # 切换 CDN 菜单的候选流列表，播放前为空
-        self._preferredCdnHost = ""  # CDN 优选：记录上次稳定播放的 CDN
-
-    def markCdnGood(self, url):
-        """标记当前 CDN 为好用的，下次优先使用"""
-        from urllib.parse import urlparse
-
-        host = urlparse(str(url)).hostname
-        if host:
-            self._preferredCdnHost = host
-
-    def setConfig(self, roomID, quality, sessionData, credential=None):
-        self.roomID = roomID
-        self.quality = quality
-        self.sessionData = sessionData if sessionData else ""
-        self.credential = normalize_credential_data(credential, sessdata=self.sessionData)
-        # 每次准备获取流时放行发射（mediaStop 会置 False 阻止迟到流）
-        self.recordToken = True
-
-    def getStreamUrl(self):
-        onlyAudio = self.quality < 0
-        qn_mapping = {
-            10000: live.ScreenResolution.ORIGINAL,
-            400: live.ScreenResolution.BLU_RAY,
-            250: live.ScreenResolution.ULTRA_HD,
-            150: live.ScreenResolution.HD,
-            80: live.ScreenResolution.FLUENCY,
-        }
-        room = live.LiveRoom(int(self.roomID), credential=build_credential(self.credential, sessdata=self.sessionData))
-        qn = qn_mapping.get(abs(self.quality), live.ScreenResolution.ORIGINAL)
-        play_info = sync(room.get_room_play_info_v2(live_qn=qn))
-        stream = play_info["playurl_info"]["playurl"]["stream"][0]
-        format_info = stream["format"][0]
-        codec_info = format_info["codec"][0]
-        media_info = codec_info["audio_codecs"][0] if onlyAudio and codec_info.get("audio_codecs") else codec_info
-        base_url = media_info["base_url"]
-        stream_urls = []
-        invalid_count = 0
-        for url_info in media_info.get("url_info", []):
-            stream_url = f"{url_info.get('host', '')}{base_url}{url_info.get('extra', '')}"
-            if _is_valid_stream_url(stream_url) and stream_url not in stream_urls:
-                stream_urls.append(stream_url)
-            else:
-                invalid_count += 1
-        if not stream_urls:
-            raise RuntimeError("未获取到可用直播流地址")
-        # CDN 优选：上次好用的 CDN host 排前面
-        from urllib.parse import urlparse
-
-        preferred_host = self._preferredCdnHost
-        if preferred_host:
-            preferred = [u for u in stream_urls if urlparse(u).hostname == preferred_host]
-            others = [u for u in stream_urls if urlparse(u).hostname != preferred_host]
-            stream_urls = preferred + others
-        if invalid_count > 0:
-            logging.warning(f"房间 {self.roomID} 过滤掉 {invalid_count} 条无效流地址")
-        self.streamUrlCandidates = stream_urls
-        return stream_urls
-
-    def run(self):
-        try:
-            if not self.recordToken:
-                return
-            # 快照本次请求的房间号，setMedia 据此校验结果是否过期（防止旧房间流串台）
-            self._fetch_room_id = str(self.roomID)
-            urls = self.getStreamUrl()
-            if not self.recordToken:
-                logging.info("停止请求已发出，丢弃获取到的流地址")
-                return
-            self.streamUrl.emit(urls)
-        except Exception as e:
-            logging.error(str(e))
-            logging.exception("直播地址获取失败")
-            self.downloadError.emit()
-
-
-class FetchRoomInfo(QThread):
-    """后台获取房间信息，避免阻塞主线程"""
-
-    roomInfo = Signal(dict)
-
-    def __init__(self):
-        super().__init__()
-        self.roomID = "0"
-        self.sessionData = ""
-
-    def setConfig(self, roomID, sessionData=""):
-        self.roomID = roomID
-        self.sessionData = sessionData
-
-    def run(self):
-        if self.roomID == "0":
-            self.roomInfo.emit({"roomID": self.roomID, "error": "no_room"})
-            return
-        params = {"req_biz": "web_room_componet", "room_ids": [str(self.roomID)]}
-        cookies = {}
-        if self.sessionData:
-            cookies["SESSDATA"] = self.sessionData
-        try:
-            r = http_utils.get(
-                "https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomBaseInfo",
-                params=params,
-                headers=header,
-                cookies=cookies,
-            )
-            data = r.json()
-            result = {"roomID": self.roomID}
-            if data["message"] == "房间已加密":
-                result["title"] = "房间已加密"
-                result["uname"] = "房号: %s" % self.roomID
-                result["live_status"] = 0
-            elif not data["data"]:
-                result["title"] = "房间好像不见了-_-？"
-                result["uname"] = "未定义"
-                result["live_status"] = 0
-            else:
-                info = data["data"]["by_room_ids"][str(self.roomID)]
-                result["live_status"] = info["live_status"]
-                result["live_time"] = info["live_time"]
-                result["title"] = info["title"]
-                result["uname"] = info["uname"]
-            self.roomInfo.emit(result)
-        except Exception as e:
-            logging.error(str(e))
-            self.roomInfo.emit(
-                {
-                    "roomID": self.roomID,
-                    "title": "获取信息失败",
-                    "uname": "房号: %s" % self.roomID,
-                    "live_status": 0,
-                }
-            )
 
 
 class VideoFrame(MpvGLWidget):
@@ -424,6 +280,12 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.videoFrame.doubleClicked.connect(self.doubleClick)
         layout.addWidget(self.videoFrame, 0, 0, 12, 12)
 
+        self.emptyStateLabel = QLabel(f"窗口 {self.id + 1}\n未加载直播间")
+        self.emptyStateLabel.setAlignment(Qt.AlignCenter)
+        self.emptyStateLabel.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.emptyStateLabel.setFont(QFont("Microsoft YaHei", 10))
+        layout.addWidget(self.emptyStateLabel, 0, 0, 12, 12)
+
         # 直播间标题
         self.topLabel = QLabel()
         self.topLabel.setFixedHeight(30)
@@ -465,9 +327,11 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.volumeButton = PushButton(Icon(FluentIcon.VOLUME))
         self.volumeButton.clicked.connect(lambda: self.mediaMute())
         frameLayout.addWidget(self.volumeButton)
-        self.slider = Slider()
-        self.slider.setStyleSheet("background-color:#00000000")
-        self.slider.sliderValue.connect(self.setVolume)
+        self.slider = FluentSlider(Qt.Horizontal)
+        self.slider.setRange(0, 100)
+        self.slider.setFixedWidth(112)
+        self.slider.setValue(self.volume)
+        self.slider.valueChanged.connect(self.setVolume)
         frameLayout.addWidget(self.slider)
         self.danmuButton = PushButton(text="弹")
         self.danmuButton.clicked.connect(lambda: self.cycleDanmuDisplayMode())
@@ -536,10 +400,16 @@ class VideoWidget(FramelessWindowBase, QFrame):
         theme_changed().connect(self._applyThemeColors)
 
     def _applyThemeColors(self, dark=None):
-        """按当前主题刷新控制条 / 标题栏背景色（浮层观感跟随主题）。"""
+        """按当前主题刷新控制条、标题栏与空状态颜色。"""
         bg = current_color("bg.elevated")
         self.topLabel.setStyleSheet(f"background-color:{bg}")
         self.frame.setStyleSheet(f"background-color:{bg}")
+        self.emptyStateLabel.setStyleSheet(
+            f"background-color:transparent;color:{current_color('text.tertiary')};"
+        )
+
+    def _updateEmptyState(self):
+        self.emptyStateLabel.setVisible(self.roomID in ("", "0"))
 
     def ensureTextBrowser(self):
         if self.textBrowser is not None:
@@ -854,6 +724,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
                 idle="yes",
                 osc="no",
                 ytdl=False,
+                **MPV_EMBEDDED_SCRIPT_OPTIONS,
                 http_header_fields=f"User-Agent: {header['User-Agent']},Referer: https://live.bilibili.com/",
                 hwdec=hwdec_mode,
                 gpu_hwdec_interop="no",
@@ -958,7 +829,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
             self._stream_candidate_index += 1
             next_url = self._stream_candidates[self._stream_candidate_index]
             tried += 1
-            if not _is_valid_stream_url(next_url):
+            if not is_valid_stream_url(next_url):
                 logging.warning(f"{self.name_str} 跳过无效流地址: {next_url}")
                 continue
             try:
@@ -1375,6 +1246,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
     def mediaStop(self, deleteMedia=True):
         self.oldTitle, self.oldUname = "", ""
         self.roomID = "0"
+        self._updateEmptyState()
         self.topLabel.setText(("    窗口%s  未定义的直播间" % (self.id + 1))[:20])
         self.titleLabel.setText("未定义")
         self.liveStartTime = 0
@@ -1431,29 +1303,48 @@ class VideoWidget(FramelessWindowBase, QFrame):
     def reloadDanmu(self):
         self._restartDanmu()
 
-    def setMedia(self, url):
-        """接收直播流 - MPV 播放 URL 入口"""
-        # 停止后迟到的流地址直接丢弃：mediaStop 置 roomID="0" 且 recordToken=False，
-        # 但 getMediaURL 线程不响应中断（阻塞在 HTTP 请求中），完成后仍会 emit
+    def setMedia(self, result):
+        """接收直播流 - MPV 播放 URL 入口。"""
+        # 停止后迟到的流地址直接丢弃：mediaStop 置 roomID="0" 且 recordToken=False。
         if self.roomID == "0" or not self.getMediaURL.recordToken:
             logging.info("%s 已停止，忽略迟到的流地址", self.name_str)
             return
-        # 竞态防护：取流线程在旧房间的请求未完成时被复用于新房间，
-        # 其 roomID 已由 setConfig 更新，这里校验结果与当前房间一致，避免串台
-        if str(getattr(self.getMediaURL, "_fetch_room_id", "")) != str(self.roomID):
+
+        if isinstance(result, StreamResult):
+            request_id = result.request_id
+            request_room_id = result.room_id
+            request_quality = result.quality
+            stream_candidates = result.urls
+        else:
+            # 兼容测试和旧调用点直接传 URL / URL 列表。
+            request_id = self.getMediaURL._request_id
+            request_room_id = str(self.roomID)
+            request_quality = self.quality
+            stream_candidates = result if isinstance(result, (list, tuple)) else [result]
+
+        is_stale = (
+            request_id != self.getMediaURL._request_id
+            or request_room_id != str(self.roomID)
+            or request_quality != self.quality
+        )
+        if is_stale:
             logging.warning(
-                "%s 收到过期流地址 (req=%s cur=%s)，丢弃并重新取流",
+                "%s 收到过期流地址 (req=%s/%s/%s cur=%s/%s/%s)，丢弃并重新取流",
                 self.name_str,
-                getattr(self.getMediaURL, "_fetch_room_id", ""),
+                request_id,
+                request_room_id,
+                request_quality,
+                self.getMediaURL._request_id,
                 self.roomID,
+                self.quality,
             )
-            self._restartStreamFetch()
+            if request_id == self.getMediaURL._request_id:
+                self._restartStreamFetch()
             return
-        stream_candidates = url if isinstance(url, (list, tuple)) else [url]
         self._stream_candidates = [
             stream.strip()
             for stream in stream_candidates
-            if isinstance(stream, str) and _is_valid_stream_url(stream.strip())
+            if isinstance(stream, str) and is_valid_stream_url(stream.strip())
         ]
         self._stream_candidate_index = -1
         if not self._stream_candidates:
@@ -1507,8 +1398,8 @@ class VideoWidget(FramelessWindowBase, QFrame):
 
         skip_mpv=True：跳过 MPV 的 free/terminate —— Windows 上 libmpv 的
         render context / core 销毁在播放中有已知死锁/崩溃（mpv#8509 /
-        iina#5031，本机实测播放 lavfi 无限源时 free/terminate 死锁；用户
-        环境表现为 0xe24c4a02）。入口已在 closeEvent 后 TerminateProcess
+        iina#5031，本机实测播放 lavfi 无限源时 free/terminate 死锁）。
+        入口已在 closeEvent 后 TerminateProcess
         硬退出，由 OS 直接回收进程，无需（也不能安全地）同步销毁 MPV。
         """
         try:
@@ -1535,7 +1426,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.videoFrame.setPlaybackActive(False)
         if self._mpv:
             # 先停止播放：mpv_render_context_free / mpv_terminate_destroy
-            # 在播放中销毁会与活跃的事件线程竞争，触发 0xe24c4a02
+            # 在播放中销毁会与活跃的事件线程竞争，触发原生访问冲突。
             try:
                 self._mpv.stop()
             except Exception:
@@ -1549,6 +1440,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
 
     def setTitle(self):
         """异步获取房间信息（不阻塞主线程）"""
+        self._updateEmptyState()
         if self.title != "未定义的直播间":
             self.oldTitle = self.title
         if self.uname != "未定义":
@@ -1558,11 +1450,11 @@ class VideoWidget(FramelessWindowBase, QFrame):
             self.uname = "未定义"
             self._updateTitleLabels()
         else:
-            self.fetchRoomInfo.setConfig(self.roomID, self.sessionData)
             if self.fetchRoomInfo.isRunning():
-                # 线程还在跑旧房间，标记待处理，结束后由 finished 回调补发
+                # 不改写运行中请求的配置，结束后再提交最新房间。
                 self._roomInfoPending = True
             else:
+                self.fetchRoomInfo.setConfig(self.roomID, self.sessionData)
                 self.fetchRoomInfo.start()
 
     def _onRoomInfoFetchFinished(self):
@@ -1603,11 +1495,12 @@ class VideoWidget(FramelessWindowBase, QFrame):
             self.timestampLabel.setText("0:00:00")
 
     def _startStreamFetch(self):
-        """启动取流线程；若线程正在运行则标记待处理，结束后补发"""
-        self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData, self.credential)
+        """启动取流线程；若线程正在运行则标记待处理，结束后补发。"""
         if self.getMediaURL.isRunning():
+            # 保留运行中请求的配置，避免旧响应被错误标记成新房间或新画质。
             self._streamFetchPending = True
         else:
+            self.getMediaURL.setConfig(self.roomID, self.quality, self.sessionData, self.credential)
             self.getMediaURL.start()
 
     def _onStreamFetchFinished(self):

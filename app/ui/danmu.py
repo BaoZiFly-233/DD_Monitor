@@ -21,6 +21,7 @@ from qfluentwidgets_pro import (
     Icon,
     LineEdit,
     Slider as FluentSlider,
+    SmoothScrollArea,
     TabWidget,
 )
 from qfluentwidgets_pro.components.material.acrylic_widget import AcrylicWidget
@@ -83,18 +84,25 @@ class ToolButton(QToolButton):
         self.setIcon(Icon(_DANMU_ICONS.get(icon_name, FluentIcon.INFO)))
 
 
-class TextOption(FluentWindow):
-    """弹幕机选项 - 弹出式窗口（SettingCard 卡片化）"""
+class BrowserOptionWidget(QWidget):
+    """浏览器弹幕设置页，可嵌入全局设置或独立弹窗。"""
 
-    def __init__(self, setting=None):
-        super(TextOption, self).__init__(title="弹幕窗设置")
+    CONTROL_NAMES = (
+        "fontSizeCombox",
+        "opacitySlider",
+        "horizontalCombobox",
+        "verticalCombobox",
+        "translateCombobox",
+        "translateFitler",
+        "showEnterRoom",
+    )
+
+    def __init__(self, setting=None, parent=None):
+        super().__init__(parent)
         if setting is None:
             setting = [50, 1, 7, 0, "【 [ {", 10, 0]
-        setting = list(setting)  # 防御：避免外部修改影响默认值
-        self.resize(380, 460)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
+        setting = list(setting)
 
-        # ---- SettingCard 布局 ----
         from qfluentwidgets_pro.components.settings.setting_card import SettingCard
         from qfluentwidgets_pro.components.settings.setting_card_group import SettingCardGroup
 
@@ -106,43 +114,36 @@ class TextOption(FluentWindow):
             card.hBoxLayout.addSpacing(12)
             group.addSettingCard(card)
 
-        # 字体大小
         self.fontSizeCombox = ComboBox()
         self.fontSizeCombox.addItems([str(i) for i in range(5, 26)])
         self.fontSizeCombox.setCurrentIndex(setting[5])
         _card(FluentIcon.FONT, "字体大小", "弹幕文字字号", self.fontSizeCombox)
 
-        # 窗体透明度
         self.opacitySlider = Slider()
         self.opacitySlider.setValue(setting[0])
         _card(FluentIcon.ALBUM, "窗体透明度", "弹幕窗整体透明度", self.opacitySlider)
 
-        # 窗体横向占比
         self.horizontalCombobox = ComboBox()
         self.horizontalCombobox.addItems(["%d" % x + "%" for x in range(10, 110, 10)])
         self.horizontalCombobox.setCurrentIndex(setting[1])
         _card(FluentIcon.ALIGNMENT, "窗体横向占比", "弹幕窗宽度占屏幕比例", self.horizontalCombobox)
 
-        # 窗体纵向占比
         self.verticalCombobox = ComboBox()
         self.verticalCombobox.addItems(["%d" % x + "%" for x in range(10, 110, 10)])
         self.verticalCombobox.setCurrentIndex(setting[2])
         _card(FluentIcon.ALIGNMENT, "窗体纵向占比", "弹幕窗高度占屏幕比例", self.verticalCombobox)
 
-        # 弹幕窗类型
         self.translateCombobox = ComboBox()
         self.translateCombobox.addItems(["弹幕和同传", "只显示弹幕", "只显示同传"])
         self.translateCombobox.setCurrentIndex(setting[3])
         _card(FluentIcon.CHAT, "弹幕窗类型", "弹幕与同传的显示方式", self.translateCombobox)
 
-        # 同传过滤字符
         self.translateFitler = LineEdit()
         self.translateFitler.setText(setting[4])
         self.translateFitler.setFixedWidth(120)
         self.translateFitler.setPlaceholderText("空格分隔关键词")
         _card(FluentIcon.FILTER, "同传过滤字符", "命中关键词的同传将被过滤", self.translateFitler)
 
-        # 礼物和进入信息
         self.showEnterRoom = ComboBox()
         self.showEnterRoom.addItems(["显示礼物和进入信息", "只显示礼物", "只显示进入信息", "隐藏窗口"])
         self.showEnterRoom.setCurrentIndex(setting[6])
@@ -152,6 +153,21 @@ class TextOption(FluentWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.addWidget(group)
         layout.addStretch()
+
+
+class TextOption(FluentWindow):
+    """弹幕机选项独立窗口。"""
+
+    def __init__(self, setting=None):
+        super().__init__(title="弹幕窗设置")
+        self.resize(380, 460)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
+        self.optionPage = BrowserOptionWidget(setting, self)
+        for name in BrowserOptionWidget.CONTROL_NAMES:
+            setattr(self, name, getattr(self.optionPage, name))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.optionPage)
 
 
 class TextBrowser(AcrylicWidget, QWidget):
@@ -357,9 +373,12 @@ class GlobalDanmuOption(FluentWindow):
     def __init__(self, danmu_config_list, rolling_config_dict):
         super().__init__(title="全局弹幕设置")
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
-        self.resize(400, 550)
+        self.resize(560, 640)
 
         tabs = TabWidget()
+        tabs.setMovable(False)
+        tabs.tabBar.setTabsClosable(False)
+        tabs.tabBar.setAddButtonVisible(False)
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(tabs)
@@ -368,11 +387,21 @@ class GlobalDanmuOption(FluentWindow):
         # TextOption 期望 7 项 [opacity, horiz, vert, translate, filter, font_size, show_enter]
         # 必须跳过 enabled(索引0) 取 [1:8]，否则错位导致 setCurrentIndex(str) TypeError 崩溃
         setting = list(danmu_config_list[1:8]) if isinstance(danmu_config_list, list) else [50, 1, 7, 0, "【 [ {", 10, 0]
-        self.browserOptionWidget = TextOption(setting)
-        tabs.addTab(self.browserOptionWidget, "弹幕窗")
+        self.browserOptionWidget = BrowserOptionWidget(setting)
+        tabs.addTab(self._scrollPage(self.browserOptionWidget), "弹幕窗")
 
         self.rollingOptionWidget = RollingOptionWidget(rolling_config_dict)
-        tabs.addTab(self.rollingOptionWidget, "滚动弹幕")
+        tabs.addTab(self._scrollPage(self.rollingOptionWidget), "滚动弹幕")
+
+    @staticmethod
+    def _scrollPage(page):
+        scroll = SmoothScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background:transparent;border:none;")
+        page.setStyleSheet("background:transparent;")
+        scroll.setWidget(page)
+        return scroll
 
     def syncBrowserSetting(self, danmu_config_list):
         if isinstance(danmu_config_list, list):

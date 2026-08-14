@@ -105,10 +105,17 @@ class DownloadImage(QThread):
             logging.error(str(e))
 
     def _onImageReady(self, qimage, w, h, hasOrigin):
-        """主线程回调：将 QImage 转换为 QPixmap"""
+        """主线程回调：拒绝空图后再转换、缩放，避免 Qt 空 Pixmap 警告。"""
+        if qimage.isNull():
+            return
         pixmap = QPixmap.fromImage(qimage)
+        if pixmap.isNull():
+            return
         if w > 0 and h > 0:
-            self.img.emit(pixmap.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
+            scaled = pixmap.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            if scaled.isNull():
+                return
+            self.img.emit(scaled)
         else:
             self.img.emit(pixmap)
         if hasOrigin:

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QDockWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +37,7 @@ from app.core.config_manager import ConfigManager, MAX_WINDOWS, WINDOW_CARD_WIDT
 from app.core.bili_credential import normalize_credential_data, build_credential, credential_to_dict
 
 from qfluentwidgets_pro import (
+    CaptionLabel,
     FluentIcon,
     Icon,
     LineEdit,
@@ -44,6 +46,7 @@ from qfluentwidgets_pro import (
     RoundMenu,
     Slider as FluentSlider,
     SmoothScrollArea,
+    StrongBodyLabel,
 )
 from qfluentwidgets_pro.qframelesswindow.windows import WindowsFramelessMainWindow
 from app.ui.uikit_bridge import confirm, info, current_color, theme_changed
@@ -159,6 +162,20 @@ class ScrollArea(SmoothScrollArea):
         if multiple and multiple != self.multiple:  # 按卡片长度的倍数调整且不为0
             self.multiple = multiple
             self.multipleTimes.emit(multiple)
+
+
+class DockWidget(QDockWidget):
+    """可自由停靠的工作面板，保留 Qt 原生拖动、浮动与关闭行为。"""
+
+    def __init__(self, title, parent=None):
+        super().__init__(title, parent)
+        self.setObjectName(f"dock-{title}")
+        self.setAllowedAreas(Qt.AllDockWidgetAreas)
+        self.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
 
 
 class StartLiveWindow(QWidget):
@@ -371,155 +388,63 @@ class MainWindow(WindowsFramelessMainWindow):
         self.config["sessionData"] = self.sessionData
         self.danmuSettingPanel = None
 
-        # ---- 主窗体控件 ----
+        # ---- 主工作区：播放台为中央区域，控制台/卡片槽使用可停靠面板 ----
         mainWidget = QWidget()
-        # Grid 布局（16 宫格内容区，控制条/卡片面板迁入子页面后仍由 mainLayout 管理）
+        self.monitorPage = mainWidget  # 兼容外部脚本对监控区域的引用
         self.mainLayout = QGridLayout(mainWidget)
         self.mainLayout.setSpacing(0)
         self.mainLayout.setContentsMargins(0, 0, 0, 0)
+        self.setDockNestingEnabled(True)
 
-        # ---- 标准 Fluent 结构：顶部导航 + StackedWidget 内容区 ----
         from qfluentwidgets_pro.components.navigation import (
             TopNavigationInterface,
             TopNavigationItemPosition,
         )
-        from qfluentwidgets_pro.components.widgets.stacked_widget import PopUpAniStackedWidget as StackedWidget
 
         self.navigationInterface = TopNavigationInterface(self)
-        self.contentStack = StackedWidget(self)
-
-        # 页面0：直播监控（控制条 + 16 宫格）
-        self.monitorPage = QWidget()
-        self.monitorPageLayout = QHBoxLayout(self.monitorPage)
-        self.monitorPageLayout.setContentsMargins(0, 0, 0, 0)
-        self.monitorPageLayout.setSpacing(0)
-        # 控制条容器（原 controlDock 178px 宽度，H 键可显示/隐藏）
-        self.controlContainer = QWidget()
-        self.controlContainer.setFixedWidth(178)
-        self.monitorPageLayout.addWidget(self.controlContainer)
-        self.monitorPageLayout.addWidget(mainWidget, 1)
-
-        # 页面1：弹幕机（控制台，Batch5 深化）
-        self.danmakuPage = QWidget()
-        self.danmakuPageLayout = QVBoxLayout(self.danmakuPage)
-        self.danmakuPageLayout.setContentsMargins(24, 24, 24, 24)
-        self.danmakuPageLayout.setSpacing(12)
-        _danmu_tip = QLabel("弹幕机控制台\n\n每个播放窗口的弹幕机是独立悬浮窗，可拖动位置、设置透明度/字体/过滤词。")
-        _danmu_tip.setWordWrap(True)
-        self.danmakuPageLayout.addWidget(_danmu_tip)
-        _danmu_btn_row = QHBoxLayout()
-        _open_all = FPrimaryPushButton("打开全部弹幕机")
-        _open_all.clicked.connect(self._openAllDanmakuMachines)
-        _danmu_btn_row.addWidget(_open_all)
-        _global_danmu = FPushButton("全局弹幕设置")
-        _global_danmu.clicked.connect(self.openGlobalDanmuSetting)
-        _danmu_btn_row.addWidget(_global_danmu)
-        _danmu_btn_row.addStretch()
-        self.danmakuPageLayout.addLayout(_danmu_btn_row)
-        self.danmakuPageLayout.addStretch()
-
-        # 页面2：卡片面板（原 cardDock 内容迁入）
-        self.cardPage = QWidget()
-        self.cardPageLayout = QVBoxLayout(self.cardPage)
-        self.cardPageLayout.setContentsMargins(0, 0, 0, 0)
-        self.cardPageLayout.setSpacing(0)
-        self.scrollArea = ScrollArea()
-        self.scrollArea.setStyleSheet("border-width:0px")
-        self.scrollArea.setWidgetResizable(True)
-        self.cardPageLayout.addWidget(self.scrollArea)
-
-        # 页面3：设置（内嵌常用设置 SettingCard 组 + 完整设置入口）
-        self.settingsPage = QWidget()
-        self.settingsPageLayout = QVBoxLayout(self.settingsPage)
-        self.settingsPageLayout.setContentsMargins(24, 24, 24, 24)
-        self.settingsPageLayout.setSpacing(12)
-
-        from qfluentwidgets_pro.components.settings.setting_card import SettingCard
-        from qfluentwidgets_pro.components.settings.setting_card_group import SettingCardGroup
-        from qfluentwidgets_pro.components.widgets.combo_box import ComboBox as _FCombo
-
-        self.settingsPageGroup = SettingCardGroup("常用设置", self.settingsPage)
-
-        def _card(icon, title, content, widget):
-            card = SettingCard(icon, title, content, self.settingsPage)
-            card.hBoxLayout.addWidget(widget, 0, Qt.AlignRight)
-            card.hBoxLayout.addSpacing(12)
-            self.settingsPageGroup.addSettingCard(card)
-
-        # 全局画质
-        self.settingsQuality = _FCombo()
-        self.settingsQuality.addItems(["原画", "蓝光", "超清", "流畅", "仅音频"])
-        _qmap = {10000: 0, 400: 1, 250: 2, 80: 3, -1: 4}
-        self.settingsQuality.setCurrentIndex(_qmap.get(self.config.get("quality", [80])[0], 2))
-        self.settingsQuality.currentIndexChanged.connect(
-            lambda idx: self.globalQuality([10000, 400, 250, 80, -1][idx])
-        )
-        _card(FluentIcon.VIDEO, "全局画质", "所有窗口的默认画质", self.settingsQuality)
-
-        # 解码方案
-        self.settingsDecode = _FCombo()
-        self.settingsDecode.addItems(["硬解", "软解"])
-        self.settingsDecode.setCurrentIndex(0 if self.config.get("hardwareDecode", True) else 1)
-        self.settingsDecode.currentIndexChanged.connect(lambda idx: self.setDecode(idx == 0))
-        _card(FluentIcon.SETTING, "解码方案", "硬解优先使用显卡，软解兼容性更好", self.settingsDecode)
-
-        # 全局音量
-        from qfluentwidgets_pro import Slider as _FSlider
-
-        self.settingsVolume = _FSlider(Qt.Horizontal)
-        self.settingsVolume.setRange(0, 100)
-        self.settingsVolume.setValue(self.config.get("globalVolume", 30))
-        self.settingsVolume.valueChanged.connect(self.globalSetVolume)
-        _card(FluentIcon.VOLUME, "全局音量", "默认播放音量", self.settingsVolume)
-
-        # 主题
-        self.settingsTheme = _FCombo()
-        self.settingsTheme.addItems(["深色", "浅色"])
-        self.settingsTheme.setCurrentIndex(0 if self.config.get("theme", "dark") == "dark" else 1)
-        self.settingsTheme.currentIndexChanged.connect(
-            lambda idx: self._applySettingsPageTheme(idx)
-        )
-        _card(FluentIcon.PALETTE, "主题模式", "深浅色切换（立即生效）", self.settingsTheme)
-
-        self.settingsPageLayout.addWidget(self.settingsPageGroup)
-        _settings_btn = FPrimaryPushButton("打开完整设置面板…")
-        _settings_btn.clicked.connect(self.openSettingsDialog)
-        self.settingsPageLayout.addWidget(_settings_btn, alignment=Qt.AlignLeft)
-        self.settingsPageLayout.addStretch()
-
-        # 组装内容区 + 导航
-        self.contentStack.addWidget(self.monitorPage)
-        self.contentStack.addWidget(self.danmakuPage)
-        self.contentStack.addWidget(self.cardPage)
-        self.contentStack.addWidget(self.settingsPage)
-        self.contentStack.setCurrentWidget(self.monitorPage)  # 启动默认直播监控页
-
         rootWidget = QWidget()
         self.setCentralWidget(rootWidget)
         self.rootLayout = QVBoxLayout(rootWidget)
         self.rootLayout.setContentsMargins(0, 0, 0, 0)
         self.rootLayout.setSpacing(0)
         self.rootLayout.addWidget(self.navigationInterface)
-        self.rootLayout.addWidget(self.contentStack, 1)
+        self.rootLayout.addWidget(mainWidget, 1)
 
-        # 导航项（图标+文字，主题自适应，点击切换页面）
+        # 顶栏是命令入口，不再用整页承载单个按钮。
         self.navigationInterface.addItem(
-            routeKey="monitor", icon=FluentIcon.VIDEO, text="直播监控",
-            onClick=lambda: self._switchPage(self.monitorPage),
+            routeKey="monitor",
+            icon=FluentIcon.VIDEO,
+            text="播放台",
+            onClick=lambda: None,
         )
         self.navigationInterface.addItem(
-            routeKey="danmaku", icon=FluentIcon.CHAT, text="弹幕机",
-            onClick=lambda: self._switchPage(self.danmakuPage),
+            routeKey="control",
+            icon=FluentIcon.COMMAND_PROMPT,
+            text="控制台",
+            onClick=lambda: self._toggleDock(self.controlDock),
+            selectable=False,
         )
         self.navigationInterface.addItem(
-            routeKey="cards", icon=FluentIcon.ALBUM, text="卡片面板",
-            onClick=lambda: self._switchPage(self.cardPage),
+            routeKey="cards",
+            icon=FluentIcon.ALBUM,
+            text="卡片面板",
+            onClick=lambda: self._toggleDock(self.cardDock),
+            selectable=False,
         )
         self.navigationInterface.addItem(
-            routeKey="settings", icon=FluentIcon.SETTING, text="设置",
-            onClick=lambda: self._switchPage(self.settingsPage),
+            routeKey="danmaku",
+            icon=FluentIcon.CHAT,
+            text="弹幕设置",
+            onClick=self.openGlobalDanmuSetting,
+            selectable=False,
         )
-        # 导航右侧：账号/帮助/投喂（弹出保留的菜单对象）
+        self.navigationInterface.addItem(
+            routeKey="settings",
+            icon=FluentIcon.SETTING,
+            text="设置",
+            onClick=self.openSettingsDialog,
+            selectable=False,
+        )
         self.navigationInterface.addItem(
             routeKey="account", icon=FluentIcon.PEOPLE, text="账号",
             onClick=lambda: self.loginMenu.popup(QCursor.pos()),
@@ -535,7 +460,8 @@ class MainWindow(WindowsFramelessMainWindow):
             onClick=lambda: self.payMenu.popup(QCursor.pos()),
             selectable=False, position=TopNavigationItemPosition.RIGHT,
         )
-        # 原生 menuBar 隐藏（菜单对象保留，由导航按钮弹出）
+        self.navigationInterface.expand(useAni=False)
+        self.navigationInterface.setCurrentItem("monitor")
         self.menuBar().hide()
         self.layoutSettingPanel = LayoutSettingPanel()
         self.layoutSettingPanel.layoutConfig.connect(self.changeLayout)
@@ -595,22 +521,24 @@ class MainWindow(WindowsFramelessMainWindow):
         # 延迟创建 OpenGL 上下文，避免 16 个同时初始化导致栈溢出
         QTimer.singleShot(0, self.setPlayer)
 
-        # 控制条（原 controlDock 迁入直播监控页左侧容器，CommandBar 化）
+        # 可停靠控制台：可拖动到任意边缘，也可浮动成独立工具窗。
+        self.controlDock = DockWidget("控制台", self)
+        self.controlDock.setMinimumWidth(196)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.controlDock)
         self.controlWidget = ControlWidget()
         self.controlWidget.heightValue.connect(self.showAddButton)
-        self.controlContainerLayout = QVBoxLayout(self.controlContainer)
-        self.controlContainerLayout.setContentsMargins(0, 0, 0, 0)
-        self.controlContainerLayout.setSpacing(0)
-        self.controlContainerLayout.addWidget(self.controlWidget)
+        self.controlDock.setWidget(self.controlWidget)
         self.controlBarLayout = QVBoxLayout(self.controlWidget)
-        self.controlBarLayout.setContentsMargins(4, 4, 4, 4)
-        self.controlBarLayout.setSpacing(6)
+        self.controlBarLayout.setContentsMargins(12, 14, 12, 12)
+        self.controlBarLayout.setSpacing(10)
+        self.controlBarLayout.addWidget(StrongBodyLabel("全局控制"))
 
         # CommandBar：播放/刷新/停止/弹幕设置/静音（Fluent 命令栏）
         from qfluentwidgets_pro.components.widgets.command_bar import CommandBar
 
         self.commandBar = CommandBar(self.controlWidget)
-        self.commandBar.setIconSize(QSize(16, 16))
+        self.commandBar.setIconSize(QSize(18, 18))
+        self.commandBar.setButtonTight(True)
         self.globalPlayToken = True
         self.play = QAction(Icon(FluentIcon.PAUSE), "播放/暂停", self)
         self.play.setToolTip("全局暂停/播放")
@@ -638,27 +566,37 @@ class MainWindow(WindowsFramelessMainWindow):
         self.controlBarLayout.addWidget(self.commandBar)
 
         # 全局音量滑条
+        volumeHeader = QHBoxLayout()
+        volumeHeader.setContentsMargins(0, 0, 0, 0)
+        volumeHeader.addWidget(CaptionLabel("音量"))
+        volumeHeader.addStretch()
+        self.volumeValueLabel = CaptionLabel(f'{self.config["globalVolume"]}%')
+        volumeHeader.addWidget(self.volumeValueLabel)
+        self.controlBarLayout.addLayout(volumeHeader)
         self.slider = FluentSlider(Qt.Horizontal)
+        self.slider.setRange(0, 100)
         self.slider.setValue(self.config["globalVolume"])
         self.slider.valueChanged.connect(self.globalSetVolume)
+        self.slider.valueChanged.connect(lambda value: self.volumeValueLabel.setText(f"{value}%"))
         self.controlBarLayout.addWidget(self.slider)
         progressText.setText("设置播放器控制...")
 
-        # 添加主播按钮
-        # UIKit 虚线按钮；内联 QSS 覆盖 UIKit 默认的 md 高度（32px），
-        # 保持 160x90 的拖放区尺寸与虚线描边
-        self.addButton = FPushButton("+")
-        self.addButton.setFixedSize(160, 90)
-        self._applyAddButtonTheme()
-        theme_changed().connect(self._applyAddButtonTheme)
-        self.addButton.setFont(QFont("Arial", 24, QFont.Bold))
+        self.addButton = FPushButton(FluentIcon.ADD, "添加直播间")
+        self.addButton.setFixedSize(172, 40)
         progressText.setText("设置添加控制...")
         self.controlBarLayout.addWidget(self.addButton)
         self.controlBarLayout.addStretch()
         progressText.setText("设置全局控制...")
 
-        # 卡片面板（原 cardDock 迁入卡片面板页）
-        self.cardPageLayout.addWidget(self.scrollArea)
+        # 可停靠卡片槽：默认位于右侧，关闭后可从顶栏重新显示。
+        self.scrollArea = ScrollArea()
+        self.scrollArea.setStyleSheet("border-width:0px")
+        self.scrollArea.setWidgetResizable(True)
+        self.cardDock = DockWidget("卡片面板", self)
+        self.cardDock.setMinimumWidth(190)
+        self.cardDock.setWidget(self.scrollArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.cardDock)
+        self.resizeDocks([self.controlDock, self.cardDock], [220, 380], Qt.Horizontal)
 
         # 主播添加窗口
         self.liverPanel = LiverPanel(self.config["roomid"], get_application_path())
@@ -717,7 +655,7 @@ class MainWindow(WindowsFramelessMainWindow):
         self.optionMenu.addAction(cacheSizeSetting)
         danmuSettingAction = QAction("弹幕设置", self, triggered=self.openGlobalDanmuSetting)
         self.optionMenu.addAction(danmuSettingAction)
-        controlPanelAction = QAction("显示 / 隐藏控制条(H)", self, triggered=self.openControlPanel)
+        controlPanelAction = QAction("显示 / 隐藏工作面板(H)", self, triggered=self.openControlPanel)
         self.optionMenu.addAction(controlPanelAction)
         self.fullScreenAction = QAction("全屏(F) / 退出(Esc)", self, triggered=self.fullScreen)
         self.optionMenu.addAction(self.fullScreenAction)
@@ -975,7 +913,6 @@ class MainWindow(WindowsFramelessMainWindow):
         """打开全局弹幕设置（缓存复用，避免反复创建/销毁顶层窗口）"""
         if not hasattr(self, "_globalDanmuPanel") or self._globalDanmuPanel is None:
             panel = GlobalDanmuOption(self.config["danmu"][0], self.config["rollingDanmu"])
-            panel.setAttribute(Qt.WA_DeleteOnClose)
             panel.syncBrowserSetting(self.config["danmu"][0])
             panel.syncRollingSetting(self.config["rollingDanmu"])
             # 连接信号
@@ -998,8 +935,10 @@ class MainWindow(WindowsFramelessMainWindow):
             rolling.shadowStrengthSlider.valueChanged.connect(self.setGlobalRollingDanmuShadowStrength)
             rolling.topEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuTopEnabled)
             rolling.bottomEnabledCheckBox.toggled.connect(self.setGlobalRollingDanmuBottomEnabled)
-            panel.destroyed.connect(lambda: setattr(self, "_globalDanmuPanel", None))
             self._globalDanmuPanel = panel
+        else:
+            self._globalDanmuPanel.syncBrowserSetting(self.config["danmu"][0])
+            self._globalDanmuPanel.syncRollingSetting(self.config["rollingDanmu"])
         self._globalDanmuPanel.show()
         self._globalDanmuPanel.raise_()
         self._globalDanmuPanel.activateWindow()
@@ -1008,54 +947,14 @@ class MainWindow(WindowsFramelessMainWindow):
         """"弹幕设置" 按钮图标用 Fluent 设置图标，随全局明暗主题自动适配。"""
         self.danmuAction.setIcon(Icon(FluentIcon.SETTING))
 
-    def _applyAddButtonTheme(self, dark=None):
-        """"+" 添加主播按钮：虚线描边取主题令牌，随全局明暗主题刷新。"""
-        border = current_color("text.tertiary")
-        hover = current_color("primary")
-        self.addButton.setStyleSheet(
-            f'background-color:transparent;'
-            f'border:3px dotted {border};border-radius:8px;color:{border};'
-            f'min-height:84px;max-height:84px;'
-            f'QPushButton:hover{{border-color:{hover};color:{hover};}}'
-        )
-
-    def _applySettingsPageTheme(self, index):
-        """设置页主题切换：立即生效并保存"""
-        from app.ui.uikit_bridge import set_theme as _set_theme
-
-        theme = "dark" if index == 0 else "light"
-        self.config["theme"] = theme
-        _set_theme(theme == "dark")
-        self.configManager.save()
-
     def _openAllDanmakuMachines(self):
         """弹幕机控制台：打开所有窗口的弹幕机"""
         for video_widget in self.videoWidgetList:
             video_widget.showTextBrowser()
         info(self, "弹幕机", "已打开全部弹幕机（可在各窗口右键/H 键控制）")
 
-    def _switchPage(self, page):
-        """导航页面切换：离开直播监控页时收起弹幕机（避免置顶窗口遮挡其他
-        页面），切回时恢复之前打开状态（弹幕线程不中断，仅隐藏窗口）。"""
-        if page is not self.monitorPage:
-            opened = [
-                vw for vw in self._iterVideoWidgets(include_popups=False)
-                if vw.textBrowser is not None and vw.textBrowser.isVisible()
-            ]
-            self._danmaku_before_hide = opened
-            for vw in opened:
-                vw.hideTextBrowser()
-        else:
-            for vw in getattr(self, "_danmaku_before_hide", []):
-                if vw.textBrowser is not None:
-                    vw.showTextBrowser()
-            self._danmaku_before_hide = []
-        self.contentStack.setCurrentWidget(page)
-
     def showAddButton(self, height):
-        # 阈值 165：控制条内容（两行按钮 + 90px 添加按钮 + 边距 ≈ 160）
-        # 高度不足时才隐藏；原阈值 181 太敏感，布局微调（±1px）就误藏
-        if height < 165:
+        if height < 150:
             self.addButton.hide()
         else:
             self.addButton.show()
@@ -1294,14 +1193,23 @@ class MainWindow(WindowsFramelessMainWindow):
         self.config["showStartLive"] = token
         self.configManager.save()
 
-    def openControlPanel(self):
-        # 控制条已迁入直播监控页左侧容器（H 键显示/隐藏）
-        if self.controlContainer.isHidden():
-            self.controlContainer.show()
+    @staticmethod
+    def _toggleDock(dock):
+        if dock.isVisible():
+            dock.hide()
         else:
-            self.controlContainer.hide()
-        self.controlBarLayoutToken = self.controlContainer.isHidden()
-        self.configManager.save()
+            dock.show()
+            dock.raise_()
+
+    def openControlPanel(self):
+        """H 键同时显示或隐藏控制台与卡片面板。"""
+        should_show = not (self.controlDock.isVisible() and self.cardDock.isVisible())
+        self.controlDock.setVisible(should_show)
+        self.cardDock.setVisible(should_show)
+        if should_show:
+            self.controlDock.raise_()
+            self.cardDock.raise_()
+        self.controlBarLayoutToken = should_show
 
     def openVersion(self):
         version_window = self._getVersionWindow()
@@ -1318,8 +1226,6 @@ class MainWindow(WindowsFramelessMainWindow):
                 danmu_panel_fn=self.openGlobalDanmuSetting,
                 layout_panel_fn=self.openLayoutSetting,
             )
-            self._settingsDialog.setAttribute(Qt.WA_DeleteOnClose)
-            self._settingsDialog.destroyed.connect(lambda: setattr(self, "_settingsDialog", None))
             self._settingsDialog.applied.connect(self._applySettingsToWindows)
         self._settingsDialog.show()
         self._settingsDialog.raise_()
@@ -1690,7 +1596,7 @@ class MainWindow(WindowsFramelessMainWindow):
     def closeEvent(self, event):
         self.hide()
         self.layoutSettingPanel.close()
-        self.liverPanel.addLiverRoomWidget.close()
+        self.liverPanel.closeAddLiverRoomWidget()
         # 等待轮询线程退出后再继续 — 否则进程退出时线程阻塞在 HTTP 请求中
         # 会被强杀，触发原生 access violation 崩溃（FlClash 代理下尤为常见）
         self.liverPanel.collectLiverInfo.stop()
@@ -1758,28 +1664,32 @@ class MainWindow(WindowsFramelessMainWindow):
         pass
 
     def fullScreen(self):
-        if self.isFullScreen():  # 退出全屏
+        if self.isFullScreen():
             if self.maximumToken:
                 self.showMaximized()
             else:
                 self.showNormal()
-            # 恢复阴影与原生样式（内部轮询，等待 Qt 异步状态应用完成）
             apply_fullscreen_style(self, False)
             self.optionMenu.menuAction().setVisible(True)
             self.versionMenu.menuAction().setVisible(True)
             self.payMenu.menuAction().setVisible(True)
-            if self.controlBarLayoutToken:
-                self.controlContainer.show()
-        else:  # 全屏
-            apply_fullscreen_style(self, True)  # 移除阴影与 WS_CAPTION，防 DWM 幽灵标题栏
+            control_visible, cards_visible = getattr(self, "_dockVisibilityBeforeFullscreen", (True, True))
+            self.controlDock.setVisible(control_visible)
+            self.cardDock.setVisible(cards_visible)
             for videoWidget in self.videoWidgetList:
-                videoWidget.fullScreen = True
+                videoWidget.fullScreen = False
+        else:
+            self._dockVisibilityBeforeFullscreen = (
+                self.controlDock.isVisible(),
+                self.cardDock.isVisible(),
+            )
+            self.controlDock.hide()
+            self.cardDock.hide()
+            apply_fullscreen_style(self, True)
             self.maximumToken = self.isMaximized()
             self.optionMenu.menuAction().setVisible(False)
             self.versionMenu.menuAction().setVisible(False)
             self.payMenu.menuAction().setVisible(False)
-            if self.controlBarLayoutToken:
-                self.controlContainer.hide()
             for videoWidget in self.videoWidgetList:
                 videoWidget.fullScreen = True
             self.showFullScreen()
@@ -1795,7 +1705,10 @@ class MainWindow(WindowsFramelessMainWindow):
             self.restoreGeometry(geometry)
         if "windowState" in self.config:
             windowState = QByteArray().fromBase64(self.config["windowState"].encode("ASCII"))
-            self.restoreState(windowState)
+            restored = self.restoreState(windowState)
+            if not restored:
+                logging.warning("旧窗口布局不兼容，使用默认停靠位置")
+        self.controlBarLayoutToken = self.controlDock.isVisible() or self.cardDock.isVisible()
         logging.info("restore Window layout.")
 
     def exportConfig(self):

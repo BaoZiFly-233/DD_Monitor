@@ -6,6 +6,7 @@ DD监控室主界面上方的控制条里的ScrollArea里面的卡片模块
 import json
 import logging
 import os
+import re
 import threading
 import time
 from bilibili_api import live_area, user, sync
@@ -14,53 +15,44 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QFileDialog,
-    QFrame,
-    QGraphicsDropShadowEffect,
     QGridLayout,
-    QLabel,
-    QPushButton,
     QTableWidgetItem,
     QToolTip,
     QWidget,
 )
 from PySide6.QtGui import (
-    QBrush,
     QColor,
     QDesktopServices,
     QDrag,
     QFont,
-    QFontMetrics,
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
 )
 from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, QUrl, Signal
 from app.core import http_utils
 from app.ui.common_widget import DownloadImage  # 公共图片下载线程
-from qfluentwidgets_pro import FlowLayout, PrimaryPushButton, ProgressBar, RoundMenu, TableWidget, TabWidget, LineEdit
-from qfluentwidgets_pro.components.widgets.info_badge import InfoBadge, InfoLevel
-from qfluentwidgets_pro.common.animation import BackgroundAnimationWidget
-from app.ui.uikit_bridge import current_color, info as uikit_info, is_dark, theme_changed
+from qfluentwidgets_pro import (
+    BodyLabel,
+    CaptionLabel,
+    CardWidget,
+    FlowLayout,
+    FluentIcon,
+    LineEdit,
+    PillPushButton,
+    PrimaryPushButton,
+    ProgressBar,
+    PushButton,
+    RoundMenu,
+    TableWidget,
+    TabWidget,
+)
+from app.ui.title_bar import FluentWindow
+from app.ui.uikit_bridge import current_color, info as uikit_info, theme_changed
 
 
 header = http_utils.DEFAULT_HEADERS
-
-#: 卡片标题字体候选：华康少女文字在部分系统未安装，缺字时会回退微软雅黑
-_FANCY_FONT_CANDIDATES = ("华康少女文字W5(P)", "DFGirlW5", "华康少女文字")
-_fancy_font = None
-
-
-def _fancy_font_family():
-    """返回可用的卡片标题字体（华康少女文字缺装时回退微软雅黑）。"""
-    global _fancy_font
-    if _fancy_font is None:
-        from PySide6.QtGui import QFontDatabase
-
-        available = set(QFontDatabase.families())
-        _fancy_font = next((f for f in _FANCY_FONT_CANDIDATES if f in available), "微软雅黑")
-        if _fancy_font != _FANCY_FONT_CANDIDATES[0]:
-            logging.info("华康少女文字字体未安装，卡片字体回退为: %s", _fancy_font)
-    return _fancy_font
 
 # 全局提示框字体只需设置一次（CoverLabel 每次构造都调用属于无效开销）
 QToolTip.setFont(QFont("微软雅黑", 16, QFont.Bold))
@@ -71,101 +63,67 @@ def _chunked(items, size):
         yield items[index : index + size]
 
 
-class CardLabel(QLabel):
-    def __init__(self, text="NA", fontColor="#f1fefb", size=11):
-        super(CardLabel, self).__init__()
-        # self.setFont(QFont('微软雅黑', size, QFont.Bold))
-        self.setFont(QFont(_fancy_font_family(), size, QFont.Bold))
-        self.setStyleSheet("color:%s;background-color:#00000000" % fontColor)
-        self.setText(text)
-
-    def setBrush(self, fontColor):
-        self.setStyleSheet("color:%s;background-color:#00000000" % fontColor)
+_ROOM_SEPARATOR_RE = re.compile(r"[\s,，;；]+")
 
 
-class OutlinedLabel(QLabel):
-    def __init__(self, text="NA", fontColor="#FFFFFF", outColor="#222222", size=11):
-        super().__init__()
-        # self.setFont(QFont('微软雅黑', size, QFont.Bold))
-        self.setFont(QFont(_fancy_font_family(), size, QFont.Bold))
-        self.setStyleSheet("background-color:#00000000")
-        self.setText(text)
-        self.setBrush(fontColor)
-        self.setPen(outColor)
-        self.w = self.font().pointSize() / 15
-        self.metrics = QFontMetrics(self.font())
+def parse_room_ids(text):
+    """解析、去重房号并保留输入顺序。"""
+    room_ids = []
+    seen = set()
+    for token in _ROOM_SEPARATOR_RE.split(str(text or "").strip()):
+        if token.isascii() and token.isdecimal() and token not in seen:
+            room_ids.append(token)
+            seen.add(token)
+    return room_ids
 
-    def setBrush(self, brush):
-        brush = QColor(brush)
-        if not isinstance(brush, QBrush):
-            brush = QBrush(brush)
-        self.brush = brush
 
-    def setPen(self, pen):
-        pen = QColor(pen)
-        if not isinstance(pen, QPen):
-            pen = QPen(pen)
-        pen.setJoinStyle(Qt.RoundJoin)
-        self.pen = pen
-
-    def paintEvent(self, event):
-        rect = self.rect()
-        text = self.text()
-        if not text:  # 空文本（API 返回空 uname 等）：跳过绘制，避免 text()[0] IndexError
-            return
-        indent = self.indent()
-        x = rect.left() + indent - min(self.metrics.leftBearing(text[0]), 0)
-        y = (rect.height() + self.metrics.ascent() - self.metrics.descent()) / 2
-        path = QPainterPath()
-        path.addText(x, y, self.font(), text)
-        qp = QPainter(self)
-        qp.setRenderHint(QPainter.Antialiasing)
-        self.pen.setWidthF(self.w * 2)
-        qp.strokePath(path, self.pen)
-        qp.fillPath(path, self.brush)
+def merge_room_id(text, room_id):
+    """向输入文本追加完整房号，避免使用子串判断造成误判。"""
+    room_ids = parse_room_ids(text)
+    room_id = str(room_id or "").strip()
+    if room_id.isascii() and room_id.isdecimal() and room_id not in room_ids:
+        room_ids.append(room_id)
+    return " ".join(room_ids)
 
 
 class CircleImage(QWidget):
-    """圆形头像框"""
+    """抗锯齿圆形头像。"""
 
     def __init__(self, parent=None):
-        super(CircleImage, self).__init__(parent)
-        self.setFixedSize(60, 60)
-        self.circle_image = None
+        super().__init__(parent)
+        self.setFixedSize(34, 34)
+        self.circle_image = QPixmap()
 
     def set_image(self, image):
-        self.circle_image = image
+        self.circle_image = QPixmap(image)
         self.update()
 
     def paintEvent(self, event):
-        if self.circle_image:
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            pen = Qt.NoPen
-            painter.setPen(pen)
-            brush = QBrush(self.circle_image)
-            painter.setBrush(brush)
-            painter.drawRoundedRect(self.rect(), self.width() / 2, self.height() / 2)
-
-
-class TextButton(QPushButton):
-    """分类胶囊按钮（选中态 pushToken：选中=主题色，未选中=弱化色）"""
-
-    def __init__(self, name, pushToken=False):
-        super().__init__(name)
-        self.pushToken = pushToken
-        self._applyTheme()
-        theme_changed().connect(self._applyTheme)
-
-    def _applyTheme(self, *args):
-        # 胶囊圆角；选中态用主题主色 + 白字，未选中用弱化底色 + 主题文字色
-        if self.pushToken:
-            color, text = current_color("primary"), "white"
-        else:
-            color, text = current_color("bg.muted"), current_color("text.primary")
-        self.setStyleSheet(
-            f"background-color:{color};color:{text};border:none;border-radius:13px;padding:4px 12px;"
+        if self.circle_image.isNull():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        clip = QPainterPath()
+        clip.addEllipse(self.rect().adjusted(1, 1, -1, -1))
+        painter.setClipPath(clip)
+        pixmap = self.circle_image.scaled(
+            self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
         )
+        x = (self.width() - pixmap.width()) // 2
+        y = (self.height() - pixmap.height()) // 2
+        painter.drawPixmap(x, y, pixmap)
+        painter.setClipping(False)
+        painter.setPen(QPen(QColor(current_color("border.strong")), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
+
+
+def _category_button(name, selected=False):
+    """构造带业务选中标记的 Fluent 胶囊按钮。"""
+    button = PillPushButton(name)
+    button.pushToken = bool(selected)
+    button.setChecked(button.pushToken)
+    return button
 
 
 class RecordThread(QThread):
@@ -255,8 +213,8 @@ class RecordThread(QThread):
             logging.exception("下载视频到缓存失败")
 
 
-class CoverLabel(BackgroundAnimationWidget, QLabel):
-    """关注卡片 — CardWidget 风格：悬停背景动画 + 状态角标 + 圆角"""
+class CoverLabel(CardWidget):
+    """直播卡片：Fluent 圆角容器、封面与语义状态。"""
 
     addToWindow = Signal(list)
     deleteCover = Signal(str)
@@ -272,37 +230,30 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
         self.roomTitle = ""  # 这里才是真的存放房间名的地方
         self.recordState = 0  # 0 无录制任务  1 录制中  2 等待开播录制
         self.savePath = ""
-        self.setFixedSize(160, 90)
+        self.setFixedSize(168, 96)
         self.setObjectName("cover")
-        self.setFrameShape(QFrame.NoFrame)
-        self._applyRoundedMask()
-        # Fluent 卡片阴影：悬停时柔和投影（提升卡片浮起感）
-        self._shadowEffect = QGraphicsDropShadowEffect(self)
-        self._shadowEffect.setBlurRadius(18)
-        self._shadowEffect.setOffset(0, 4)
-        self._shadowEffect.setColor(QColor(0, 0, 0, 90))
-        self._shadowEffect.setEnabled(False)
-        self.setGraphicsEffect(self._shadowEffect)
-        # Fluent 状态角标（右上角：直播红 / 录制蓝 / 等待橙）
-        self.stateBadge = InfoBadge(parent=self)
-        self.stateBadge.setVisible(False)
+        self.setBorderRadius(8)
+        self.setClickEnabled(True)
+        self._coverPixmap = QPixmap()
         self.firstUpdateToken = True
         self.layout = QGridLayout(self)
-        self.layout.setContentsMargins(6, 6, 6, 6)
-        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(10, 9, 9, 9)
+        self.layout.setHorizontalSpacing(6)
+        self.layout.setVerticalSpacing(6)
+        self.titleLabel = BodyLabel("检测中")
+        self.titleLabel.setFont(QFont("Microsoft YaHei UI", 10, QFont.DemiBold))
+        self.titleLabel.setMaximumWidth(108)
+        self.layout.addWidget(self.titleLabel, 0, 0, 1, 1)
         self.profile = CircleImage()
-        self.layout.addWidget(self.profile, 0, 4, 2, 2)
-        self.titleLabel = OutlinedLabel()
-        # self.titleLabel = CardLabel()
-        self.layout.addWidget(self.titleLabel, 0, 0, 1, 6)
-        # self.roomIDLabel = OutlinedLabel(roomID, fontColor=brush)
-        # self.roomIDLabel = CardLabel(roomID, fontColor=brush)
-        # self.layout.addWidget(self.roomIDLabel, 1, 0, 1, 6)
-        self.stateLabel = OutlinedLabel(size=13)
-        # self.stateLabel = CardLabel(size=13)
-        self.stateLabel.setText("检测中")
+        self.layout.addWidget(self.profile, 0, 1, 2, 1, Qt.AlignTop | Qt.AlignRight)
+        self.stateLabel = CaptionLabel("检测中")
+        self.stateLabel.setFont(QFont("Microsoft YaHei UI", 9, QFont.DemiBold))
+        self.stateLabel.setMaximumWidth(112)
+        self.layout.addWidget(self.stateLabel, 1, 0, 1, 1, Qt.AlignLeft | Qt.AlignBottom)
+        self.layout.setColumnStretch(0, 1)
         self.liveState = 0  # 0 未开播  1 直播中  2 投稿视频   -1 错误
-        self.layout.addWidget(self.stateLabel, 1, 0, 1, 6)
+        self._stateColorToken = "text.secondary"
+        self._stateBackgroundToken = "bg.muted"
         self.downloadFace = DownloadImage(60, 60)
         self.downloadFace.img.connect(self.updateProfile)
         self.downloadKeyFrame = DownloadImage(160, 90, True)
@@ -317,49 +268,28 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
         self._applyTheme()
         theme_changed().connect(self._applyTheme)
 
-    def _applyRoundedMask(self):
-        """圆角蒙版：让卡片底色与关键帧图片均呈现圆角（卡片尺寸固定，构造时算一次）。"""
-        from PySide6.QtGui import QBitmap
-        from PySide6.QtCore import QRectF
+    def _setTitleText(self, text):
+        text = str(text or "未知主播")
+        self.titleLabel.setText(self.titleLabel.fontMetrics().elidedText(text, Qt.ElideRight, 108))
 
-        radius = 6
-        mask = QBitmap(self.size())
-        mask.fill(Qt.color0)
-        painter = QPainter(mask)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setBrush(Qt.color1)
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
-        painter.end()
-        self.setMask(mask)
+    def _setState(self, text, color_token, background_token):
+        self.stateLabel.setText(text)
+        self._stateColorToken = color_token
+        self._stateBackgroundToken = background_token
+        self._applyTheme()
 
     def _applyTheme(self, *args):
-        """按当前明暗主题刷新卡片底色与标题色（播放红/置顶金等语义色保留）。
-
-        标题描边沿用默认深色，亮色下标题文字切换为深灰保证可读。
-        """
-        if is_dark():
-            title_brush = "#f1fefb"
-            top_brush = "#FFC125"
-        else:
-            title_brush = current_color("text.secondary")
-            top_brush = "#B8860B"  # 亮色下置顶金加深，避免浅底上金色看不清
-        self.titleLabel.setBrush(top_brush if self.topToken else title_brush)
+        has_cover = not self._coverPixmap.isNull()
+        title_color = "#FFFFFF" if has_cover else current_color("text.primary")
+        if self.topToken and not has_cover:
+            title_color = current_color("warning")
+        self.titleLabel.setStyleSheet(f"color:{title_color};background:transparent;")
+        self.stateLabel.setStyleSheet(
+            f"color:{current_color(self._stateColorToken)};"
+            f"background-color:{current_color(self._stateBackgroundToken)};"
+            "border-radius:5px;padding:2px 6px;"
+        )
         self.update()
-
-    # ---- CardWidget 风格：悬停背景色动画（组件库 BackgroundAnimationWidget）----
-
-    def _normalBackgroundColor(self):
-        return QColor(255, 255, 255, 13 if is_dark() else 170)
-
-    def _hoverBackgroundColor(self):
-        return QColor(255, 255, 255, 26 if is_dark() else 230)
-
-    def _pressedBackgroundColor(self):
-        return QColor(255, 255, 255, 8 if is_dark() else 200)
-
-    def _disabledBackgroundColor(self):
-        return self._normalBackgroundColor()
 
     def updateLabel(self, info):
         if not info[0]:  # 用户或直播间不存在
@@ -367,14 +297,11 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
             self.roomTitle = ""
             self.setToolTip(self.roomTitle)
             if info[2]:
-                self.titleLabel.setText(info[2])
-                self.stateLabel.setText("房间可能被封")
+                self._setTitleText(info[2])
+                self._setState("房间可能被封", "danger", "danger.subtle")
             else:
-                self.titleLabel.setText(info[1])
-                self.stateLabel.setText("无该房间或已加密")
-            self.stateBadge.setLevel(InfoLevel.ERROR)
-            self.stateBadge.show()
-            self.update()
+                self._setTitleText(info[1])
+                self._setState("房间不可用", "danger", "danger.subtle")
         else:
             if self.firstUpdateToken:  # 初始化
                 avatar_url = str(info[3] or "").strip()
@@ -384,7 +311,7 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
                     if not self.downloadFace.isRunning():
                         self.downloadFace.start()
                 # self.roomIDLabel.setText(info[1])  # 房间号
-                self.titleLabel.setText(info[2])  # 名字
+                self._setTitleText(info[2])  # 名字
                 self.title = info[2]
             if info[4] == 1:  # 直播中
                 self.liveState = 1
@@ -407,51 +334,54 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
             self.refreshStateLabel()
 
     def paintEvent(self, event):
-        # 圆角背景（悬停动画色）+ 状态边框（播放红/置顶金）
+        super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        radius = 6
+        card_rect = self.rect().adjusted(1, 1, -1, -1)
+        clip = QPainterPath()
+        clip.addRoundedRect(card_rect, 8, 8)
+        painter.setClipPath(clip)
+        if not self._coverPixmap.isNull():
+            cover = self._coverPixmap.scaled(
+                card_rect.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            )
+            x = card_rect.x() + (card_rect.width() - cover.width()) // 2
+            y = card_rect.y() + (card_rect.height() - cover.height()) // 2
+            painter.drawPixmap(x, y, cover)
+            painter.fillRect(card_rect, QColor(0, 0, 0, 78))
+        painter.setClipping(False)
+        border_color = current_color("border")
+        border_width = 1
         if self.isPlaying:
-            painter.setPen(QPen(QColor("#E81123"), 2))
+            border_color = current_color("primary")
+            border_width = 2
         elif self.topToken:
-            painter.setPen(QPen(QColor("#DFA616"), 2))
-        else:
-            painter.setPen(Qt.NoPen)
-        painter.setBrush(self.bgColorObject.backgroundColor if hasattr(self, "bgColorObject") else self._normalBackgroundColor())
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), radius, radius)
-        painter.end()
-        super().paintEvent(event)  # 画关键帧 pixmap
+            border_color = current_color("warning")
+            border_width = 2
+        painter.setPen(QPen(QColor(border_color), border_width))
+        painter.setBrush(Qt.NoBrush)
+        inset = 1 if border_width == 1 else 2
+        painter.drawRoundedRect(self.rect().adjusted(inset, inset, -inset, -inset), 8, 8)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # 状态角标跟随右上角
-        self.stateBadge.move(self.width() - 14, 5)
+    def clear(self):
+        self._coverPixmap = QPixmap()
+        self._applyTheme()
+
+    def setPixmap(self, pixmap):
+        self._coverPixmap = QPixmap(pixmap)
+        self._applyTheme()
 
     def refreshStateLabel(self, downloadTime=""):
         if self.liveState == 1:
-            if self.recordState == 1:  # 录制中为蓝色字体 + 蓝角标
-                self.stateLabel.setBrush("#87CEFA")
-                self.stateBadge.setLevel(InfoLevel.INFOAMTION)
-                self.stateBadge.show()
-                if downloadTime:
-                    self.stateLabel.setText("· 录制中 %s" % downloadTime)
-                else:
-                    self.stateLabel.setText("· 录制中")
+            if self.recordState == 1:
+                text = f"录制中 {downloadTime}" if downloadTime else "录制中"
+                self._setState(text, "primary", "primary.subtle")
             else:
-                self.stateLabel.setBrush("#7FFFD4")  # 直播中为绿色字体 + 红角标
-                self.stateLabel.setText("· 直播中")
-                self.stateBadge.setLevel(InfoLevel.ERROR)
-                self.stateBadge.show()
+                self._setState("直播中", "success", "success.subtle")
+        elif self.recordState == 2:
+            self._setState("等待开播", "warning", "warning.subtle")
         else:
-            if self.recordState == 2:  # 待录制为橙色字体 + 橙角标
-                self.stateLabel.setBrush("#FFA500")
-                self.stateLabel.setText("· 等待开播")
-                self.stateBadge.setLevel(InfoLevel.ATTENTION)
-                self.stateBadge.show()
-            else:
-                self.stateLabel.setBrush("#FF6A6A")  # 未开播为红色字体，无角标
-                self.stateLabel.setText("· 未开播")
-                self.stateBadge.hide()
+            self._setState("未开播", "text.secondary", "bg.muted")
 
     def recordError(self, roomID):
         self.recordThread.checkTimer.stop()
@@ -459,12 +389,16 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
         uikit_info(self, "录制中止", "%s %s 录制结束 请检查网络或主播是否掉线" % (self.title, roomID), level="error")
 
     def updateProfile(self, img):
-        self.profile.set_image(img)
+        if not img.isNull():
+            self.profile.set_image(img)
 
     def updateKeyFrame(self, img):
-        self.setPixmap(img)
+        if not img.isNull():
+            self.setPixmap(img)
 
     def setToolTipKeyFrame(self, img):
+        if img.isNull():
+            return
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
         img.save(buffer, "PNG", quality=100)
@@ -474,15 +408,6 @@ class CoverLabel(BackgroundAnimationWidget, QLabel):
 
     def dragEnterEvent(self, QDragEnterEvent):
         QDragEnterEvent.acceptProposedAction()
-
-    def enterEvent(self, event):
-        # 悬停浮起阴影（QGraphicsEffect 仅在悬停时启用，避免常驻渲染开销）
-        self._shadowEffect.setEnabled(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self._shadowEffect.setEnabled(False)
-        super().leaveEvent(event)
 
     def mousePressEvent(self, QMouseEvent):  # 设置drag事件 发送拖动封面的房间号
         if QMouseEvent.button() == Qt.LeftButton:
@@ -660,8 +585,12 @@ class GetHotLiver(QThread):
             except Exception:
                 logging.exception("热门分区数据预加载失败，继续使用旧缓存")
             for page_index, area in enumerate([9, 2, 3, 6, 1]):
+                if self.isInterruptionRequested():
+                    return
                 pageSummary = []
                 for page in range(1, 6):
+                    if self.isInterruptionRequested():
+                        return
                     data = self._fetch_area_page(area, page)
                     room_list = (data or {}).get("list", [])
                     if not room_list:
@@ -674,12 +603,15 @@ class GetHotLiver(QThread):
                                 str(info.get("roomid", "")),
                             ]
                         )
+                    if self.isInterruptionRequested():
+                        return
                     self.areaLoaded.emit(page_index, list(pageSummary))
-                    time.sleep(0.1)
+                    self.msleep(100)
                 roomInfoSummary.append(pageSummary)
         except Exception:
             logging.exception("热门列表加载失败")
-        self.roomInfoSummary.emit(roomInfoSummary)
+        if not self.isInterruptionRequested():
+            self.roomInfoSummary.emit(roomInfoSummary)
 
 
 class GetFollows(QThread):
@@ -764,6 +696,8 @@ class GetFollows(QThread):
             logging.exception("通过 bilibili-api-python 获取关注列表失败，回退至 HTTP API")
             try:
                 for p in range(1, 11):
+                    if self.isInterruptionRequested():
+                        return
                     url = f"https://api.bilibili.com/x/relation/followings?vmid={self.uid}&pn={p}&ps=50&order=desc"
                     r = http_utils.get(url, headers=req_headers, cookies=cookies)
                     resp_data = r.json()
@@ -774,7 +708,7 @@ class GetFollows(QThread):
                     if not followList:
                         break
                     followsIDs.update(self._extract_follow_ids(followList))
-                    time.sleep(0.2)
+                    self.msleep(200)
             except Exception as e2:
                 network_error = e2
                 logging.exception("关注列表添加失败")
@@ -791,6 +725,8 @@ class GetFollows(QThread):
             return
 
         for chunk in _chunked(followsIDs, 100):
+            if self.isInterruptionRequested():
+                return
             try:
                 response = http_utils.post(
                     "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids",
@@ -809,8 +745,9 @@ class GetFollows(QThread):
                     self.roomInfoChunk.emit(room_chunk)
             except Exception:
                 logging.exception("直播间状态查询失败")
-            time.sleep(0.1)
-        self.roomInfoSummary.emit(roomIDList)
+            self.msleep(100)
+        if not self.isInterruptionRequested():
+            self.roomInfoSummary.emit(roomIDList)
 
 
 class DownloadVTBList(QThread):
@@ -833,6 +770,8 @@ class DownloadVTBList(QThread):
             # raw URL 返回纯 CSV 文本（每行: 主播名,房号,所属），
             # 旧解析按 blob 页面 HTML 行号标记 split(">")，对 raw 内容永不命中 -> 名单恒空
             for line in r.text.split("\n"):
+                if self.isInterruptionRequested():
+                    return
                 line = line.strip()
                 if not line:
                     continue
@@ -843,7 +782,8 @@ class DownloadVTBList(QThread):
             logging.exception("vtbs 列表获取失败")
         # 无论成功失败都发射信号：空列表让 UI 走"更新失败"并恢复按钮，
         # 避免信号永不发射导致"更新中..."按钮永久卡死且 clicked 断开
-        self.vtbList.emit(vtbList)
+        if not self.isInterruptionRequested():
+            self.vtbList.emit(vtbList)
 
 
 class HotLiverTable(TableWidget):
@@ -873,91 +813,105 @@ class HotLiverTable(TableWidget):
         self.addToWindow.emit([win - 1, text])
 
 
-class AddLiverRoomWidget(QWidget):
-    """添加直播间 - 独立弹窗"""
+class AddLiverRoomWidget(FluentWindow):
+    """添加直播间 - Fluent 独立窗口。"""
 
     roomList = Signal(dict)
 
     def __init__(self, application_path):
-        super(AddLiverRoomWidget, self).__init__()
+        super().__init__(title="添加直播间")
         self.application_path = application_path
-        self.resize(600, 900)
-        self.setWindowTitle("添加直播间（房号太多的话尽量分批次添加 避免卡死）")
+        self.resize(680, 760)
+        self.setMinimumSize(560, 520)
         self.hotLiverDict = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
         self.followLiverList = []
         self.followRoomInfo = []
         layout = QGridLayout(self)
-        layout.addWidget(QLabel("请输入B站直播间房号 多个房号之间用空格隔开"), 0, 0, 1, 4)
-        self.roomEditText = ""
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(12)
         self.roomEdit = LineEdit()
-        # self.roomEdit.textChanged.connect(self.editChange)  # 手感不好 还是取消了
-        layout.addWidget(self.roomEdit, 1, 0, 1, 5)
-        confirm = PrimaryPushButton("完成")
-        confirm.setFixedHeight(28)
+        self.roomEdit.setClearButtonEnabled(True)
+        self.roomEdit.setPlaceholderText("输入直播间房号，多个房号用空格分隔")
+        self.roomEdit.returnPressed.connect(self.sendSelectedRoom)
+        layout.addWidget(self.roomEdit, 0, 0, 1, 4)
+        confirm = PrimaryPushButton(FluentIcon.ADD, "添加")
+        confirm.setFixedHeight(32)
         confirm.clicked.connect(self.sendSelectedRoom)
         layout.addWidget(confirm, 0, 4, 1, 1)
 
         self.tabWidget = TabWidget()
+        self.tabWidget.setMovable(False)
+        self.tabWidget.tabBar.setTabsClosable(False)
+        self.tabWidget.tabBar.setAddButtonVisible(False)
         self.tabWidget.currentChanged.connect(self._onTabChanged)
-        layout.addWidget(self.tabWidget, 2, 0, 5, 5)
+        layout.addWidget(self.tabWidget, 1, 0, 5, 5)
 
         hotLiverPage = QWidget()
         hotLiverLayout = QGridLayout(hotLiverPage)
         hotLiverLayout.setContentsMargins(1, 1, 1, 1)
 
-        self.virtual = TextButton("虚拟主播", True)
+        self.virtual = _category_button("虚拟主播", True)
         self.virtual.clicked.connect(lambda: self.switchHotLiver(0))
         hotLiverLayout.addWidget(self.virtual, 0, 0, 1, 1)
-        self.onlineGame = TextButton("网游")
+        self.onlineGame = _category_button("网游")
         self.onlineGame.clicked.connect(lambda: self.switchHotLiver(1))
         hotLiverLayout.addWidget(self.onlineGame, 0, 1, 1, 1)
-        self.mobileGame = TextButton("手游")
+        self.mobileGame = _category_button("手游")
         self.mobileGame.clicked.connect(lambda: self.switchHotLiver(2))
         hotLiverLayout.addWidget(self.mobileGame, 0, 2, 1, 1)
-        self.consoleGame = TextButton("单机")
+        self.consoleGame = _category_button("单机")
         self.consoleGame.clicked.connect(lambda: self.switchHotLiver(3))
         hotLiverLayout.addWidget(self.consoleGame, 0, 3, 1, 1)
-        self.entertainment = TextButton("娱乐")
+        self.entertainment = _category_button("娱乐")
         self.entertainment.clicked.connect(lambda: self.switchHotLiver(4))
         hotLiverLayout.addWidget(self.entertainment, 0, 4, 1, 1)
         self.buttonList = [self.virtual, self.onlineGame, self.mobileGame, self.consoleGame, self.entertainment]
         self.currentPage = 0
+        self._shuttingDown = False
+        self._hotRefreshTimer = QTimer(self)
+        self._hotRefreshTimer.setSingleShot(True)
+        self._hotRefreshTimer.setInterval(35)
+        self._hotRefreshTimer.timeout.connect(self._flushHotLiverTable)
+        self._followRefreshTimer = QTimer(self)
+        self._followRefreshTimer.setSingleShot(True)
+        self._followRefreshTimer.setInterval(35)
+        self._followRefreshTimer.timeout.connect(self._flushFollowTable)
 
-        self.progressBar = ProgressBar(parent=self)
-        self.progressBar.setGeometry(0, 0, self.width(), 20)
+        self.progressBar = ProgressBar()
         self.progressBar.setRange(0, 0)
         self.progressBar.hide()
+        hotLiverLayout.addWidget(self.progressBar, 1, 0, 1, 5)
+        self.hotStatusLabel = CaptionLabel("暂无直播数据")
+        hotLiverLayout.addWidget(self.hotStatusLabel, 2, 0, 1, 5)
 
         self.hotLiverTable = HotLiverTable()
         self.hotLiverTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.hotLiverTable.verticalScrollBar().installEventFilter(self)
         self.hotLiverTable.verticalHeader().sectionClicked.connect(self.hotLiverAdd)
         self.hotLiverTable.setColumnCount(3)
-        self.hotLiverTable.setRowCount(100)
-        self.hotLiverTable.setVerticalHeaderLabels(["添加"] * 100)
-        for i in range(100):
-            self.hotLiverTable.setRowHeight(i, 40)
+        self.hotLiverTable.setRowCount(0)
+        self.hotLiverTable.verticalHeader().setDefaultSectionSize(40)
         self.hotLiverTable.setHorizontalHeaderLabels(["主播名", "直播间标题", "直播间房号"])
-        self.hotLiverTable.setColumnWidth(0, 130)
-        self.hotLiverTable.setColumnWidth(1, 240)
-        self.hotLiverTable.setColumnWidth(2, 130)
-        self.hotLiverTable.setEnabled(False)  # 启动时暂时禁用table
-        hotLiverLayout.addWidget(self.hotLiverTable, 1, 0, 1, 5)
+        self.hotLiverTable.horizontalHeader().setStretchLastSection(True)
+        self.hotLiverTable.setColumnWidth(0, 150)
+        self.hotLiverTable.setColumnWidth(1, 300)
+        self.hotLiverTable.setEnabled(False)
+        hotLiverLayout.addWidget(self.hotLiverTable, 3, 0, 1, 5)
         self.getHotLiver = GetHotLiver()
         self.getHotLiver.roomInfoSummary.connect(self.collectHotLiverInfo)
         self.getHotLiver.areaLoaded.connect(self.collectHotLiverChunk)
+        self.getHotLiver.finished.connect(self._onHotLiverFinished)
 
         followsPage = QWidget()
         followsLayout = QGridLayout(followsPage)
         followsLayout.setContentsMargins(0, 0, 0, 0)
-        followsLayout.addWidget(QLabel(), 0, 2, 1, 1)
-        followsLayout.addWidget(QLabel("自动添加你关注的up直播间 （只能拉取最近关注的500名）"), 0, 3, 1, 3)
         self.uidEdit = LineEdit()
-        self.uidEdit.setPlaceholderText("请输入你的uid")
+        self.uidEdit.setPlaceholderText("用户 UID")
         self.uidEdit.setMinimumWidth(120)
         self.uidEdit.setMaximumWidth(300)
         followsLayout.addWidget(self.uidEdit, 0, 0, 1, 1)
-        uidCheckButton = PrimaryPushButton("查询")
+        uidCheckButton = PrimaryPushButton(FluentIcon.SEARCH, "查询")
         uidCheckButton.setFixedHeight(28)
         uidCheckButton.clicked.connect(self.checkFollows)  # 查询关注
         followsLayout.addWidget(uidCheckButton, 0, 1, 1, 1)
@@ -966,14 +920,12 @@ class AddLiverRoomWidget(QWidget):
         self.followsTable.verticalScrollBar().installEventFilter(self)
         self.followsTable.verticalHeader().sectionClicked.connect(self.followLiverAdd)
         self.followsTable.setColumnCount(3)
-        self.followsTable.setRowCount(500)
-        self.followsTable.setVerticalHeaderLabels(["添加"] * 500)
-        for i in range(500):
-            self.followsTable.setRowHeight(i, 40)
+        self.followsTable.setRowCount(0)
+        self.followsTable.verticalHeader().setDefaultSectionSize(40)
         self.followsTable.setHorizontalHeaderLabels(["主播名", "直播间标题", "直播间房号"])
-        self.followsTable.setColumnWidth(0, 130)
-        self.followsTable.setColumnWidth(1, 240)
-        self.followsTable.setColumnWidth(2, 130)
+        self.followsTable.horizontalHeader().setStretchLastSection(True)
+        self.followsTable.setColumnWidth(0, 150)
+        self.followsTable.setColumnWidth(1, 300)
         followsLayout.addWidget(self.followsTable, 1, 0, 6, 6)
         self.getFollows = GetFollows()
         self.getFollows.roomInfoSummary.connect(self.collectFollowLiverInfo)
@@ -982,10 +934,10 @@ class AddLiverRoomWidget(QWidget):
         hacoPage = QWidget()  # 添加内置的vtb列表
         hacoLayout = QGridLayout(hacoPage)
         hacoLayout.setContentsMargins(1, 1, 1, 1)
-        self.refreshButton = TextButton("更新名单")
+        self.refreshButton = PushButton(FluentIcon.UPDATE, "更新名单")
         self.refreshButton.clicked.connect(self.refreshHacoList)
         hacoLayout.addWidget(self.refreshButton, 0, 0, 1, 1)
-        self.vtbSearchButton = TextButton("查询VUP")
+        self.vtbSearchButton = PushButton(FluentIcon.SEARCH, "查询 VUP")
         self.vtbSearchButton.clicked.connect(self.vtbSearch)
         hacoLayout.addWidget(self.vtbSearchButton, 0, 1, 1, 1)
         self.hacoTable = TableWidget()
@@ -1007,9 +959,8 @@ class AddLiverRoomWidget(QWidget):
                     else:
                         self.vtbList.append(["", "", ""])
             self.hacoTable.setRowCount(len(self.vtbList))
-            self.hacoTable.setVerticalHeaderLabels(["添加"] * len(self.vtbList))
-            for i in range(len(self.vtbList)):
-                self.hacoTable.setRowHeight(i, 40)
+            self.hacoTable.verticalHeader().setDefaultSectionSize(40)
+            self.hacoTable.setVerticalHeaderLabels(["+"] * len(self.vtbList))
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
                     self.hacoTable.setItem(y, x, QTableWidgetItem(line[x]))
@@ -1029,46 +980,49 @@ class AddLiverRoomWidget(QWidget):
         self.tabWidget.addTab(hacoPage, "个人势/箱")
         self.tabWidget.addTab(followsPage, "关注添加")
 
-    def editChange(self):  # 提取输入文本中的数字
-        if len(self.roomEdit.text()) > len(self.roomEditText):
-            roomEditText = ""
-            roomIDList = self.roomEdit.text().split(" ")
-            for roomID in roomIDList:
-                strList = map(lambda x: x if x.isdigit() else "", roomID)
-                roomID = ""
-                digitToken = False
-                for s in strList:
-                    if s:
-                        roomID += s
-                        digitToken = True
-                    elif digitToken:
-                        roomID += " "
-                        if roomID not in roomEditText:
-                            roomEditText += roomID
-                        roomID = ""
-                        digitToken = False
-                if roomID:
-                    roomID += " "
-                    if roomID not in roomEditText:
-                        roomEditText += roomID
-            self.roomEdit.setText(roomEditText)
-            self.roomEditText = roomEditText
-
     def closeEvent(self, event):
-        if self.getHotLiver.isRunning():
-            self.getHotLiver.quit()
-            self.getHotLiver.wait(2000)
-        if self.getFollows.isRunning():
-            self.getFollows.quit()
-            self.getFollows.wait(2000)
-        if getattr(self, "downloadVTBList", None) and self.downloadVTBList.isRunning():
-            self.downloadVTBList.wait(2000)  # 等待 VTB 名单下载线程退出，避免析构崩溃
+        # 工具窗口普通关闭只隐藏；网络线程继续安全收尾，避免 GUI 线程卡 2-6 秒。
+        if not self._shuttingDown:
+            event.ignore()
+            self.hide()
+            return
+        event.accept()
+
+    def shutdown(self):
+        """应用退出时请求后台任务停止并等待；普通关闭不调用。"""
+        self._shuttingDown = True
+        self._hotRefreshTimer.stop()
+        self._followRefreshTimer.stop()
+        workers = (self.getHotLiver, self.getFollows, self.downloadVTBList)
+        for worker in workers:
+            if worker.isRunning():
+                worker.requestInterruption()
+        for worker in workers:
+            if worker.isRunning():
+                worker.wait(3000)
+        self.hide()
+
+    def _scheduleHotLiverTable(self):
+        if not self._shuttingDown:
+            self._hotRefreshTimer.start()
+
+    def _flushHotLiverTable(self):
+        if not self._shuttingDown and self.isVisible() and self.tabWidget.currentIndex() == 0:
+            self._fillHotLiverTable(self.currentPage)
+
+    def _scheduleFollowTable(self):
+        if not self._shuttingDown:
+            self._followRefreshTimer.start()
+
+    def _flushFollowTable(self):
+        if not self._shuttingDown and self.isVisible() and self.tabWidget.currentIndex() == 2:
+            self._fillFollowTable()
 
     def collectHotLiverChunk(self, page, hotLiverList):
         self.hotLiverDict[page] = hotLiverList
         if self.tabWidget.currentIndex() == 0 and self.currentPage == page:
             self.hotLiverTable.setEnabled(True)
-            self._fillHotLiverTable(page)
+            self._scheduleHotLiverTable()
 
     def collectHotLiverInfo(self, info):
         self.hotLiverDict = {}
@@ -1077,42 +1031,46 @@ class AddLiverRoomWidget(QWidget):
         for page, hotLiverList in enumerate(info):
             self.hotLiverDict[page] = hotLiverList
         if self.tabWidget.currentIndex() == 0:
-            self._fillHotLiverTable(self.currentPage)
+            self._scheduleHotLiverTable()
+
+    def _onHotLiverFinished(self):
+        self.progressBar.hide()
+        self.hotLiverTable.setEnabled(True)
+        if self.tabWidget.currentIndex() == 0:
+            self._scheduleHotLiverTable()
 
     def _onTabChanged(self, index):
         if index == 0:
-            self._fillHotLiverTable(self.currentPage)
+            self._scheduleHotLiverTable()
         elif index == 2:
-            self._fillFollowTable()
+            self._scheduleFollowTable()
 
     def switchHotLiver(self, index):
         if not self.buttonList[index].pushToken:
             self.currentPage = index
-            for cnt, button in enumerate(self.buttonList):
-                button.pushToken = cnt == index
-                button._applyTheme()
-            self._fillHotLiverTable(index)
+            for count, button in enumerate(self.buttonList):
+                button.pushToken = count == index
+                button.setChecked(button.pushToken)
+            self._scheduleHotLiverTable()
 
     def _fillHotLiverTable(self, index):
-        """填充热门直播表格数据"""
+        """按实际数据行数填充热门直播表，避免预建空白行。"""
         hotLiverList = self.hotLiverDict.get(index, [])
-        rowCount = max(len(hotLiverList), 30)
-        self.hotLiverTable.clearContents()
-        self.hotLiverTable.setColumnCount(3)
-        self.hotLiverTable.setRowCount(rowCount)
-        self.hotLiverTable.setVerticalHeaderLabels(["添加"] * rowCount)
-        for i in range(rowCount):
-            self.hotLiverTable.setRowHeight(i, 40)
-        self.hotLiverTable.setHorizontalHeaderLabels(["主播名", "直播间标题", "直播间房号"])
-        self.hotLiverTable.setColumnWidth(0, 130)
-        self.hotLiverTable.setColumnWidth(1, 240)
-        self.hotLiverTable.setColumnWidth(2, 130)
-        for y, line in enumerate(hotLiverList):
-            for x, txt in enumerate(line):
-                try:
-                    self.hotLiverTable.setItem(y, x, QTableWidgetItem(txt))
-                except Exception:
-                    logging.exception("热门直播表填充失败")
+        row_count = len(hotLiverList)
+        self.hotLiverTable.setUpdatesEnabled(False)
+        try:
+            self.hotLiverTable.clearContents()
+            self.hotLiverTable.setRowCount(row_count)
+            if row_count:
+                self.hotLiverTable.setVerticalHeaderLabels(["+"] * row_count)
+            for row, line in enumerate(hotLiverList):
+                for column, text in enumerate(line[:3]):
+                    self.hotLiverTable.setItem(row, column, QTableWidgetItem(str(text)))
+        finally:
+            self.hotLiverTable.setUpdatesEnabled(True)
+        self.hotStatusLabel.setVisible(not hotLiverList)
+        if not hotLiverList:
+            self.hotStatusLabel.setText("正在加载直播列表..." if self.getHotLiver.isRunning() else "当前分类暂无直播")
 
     def refreshHacoList(self):
         if self.refreshButton.text() == "更新中...":
@@ -1137,9 +1095,7 @@ class AddLiverRoomWidget(QWidget):
                 self.vtbList.append(line.split(","))
             self.hacoTable.clear()
             self.hacoTable.setRowCount(len(self.vtbList))
-            self.hacoTable.setVerticalHeaderLabels(["添加"] * len(self.vtbList))
-            for i in range(len(self.vtbList)):
-                self.hacoTable.setRowHeight(i, 40)
+            self.hacoTable.setVerticalHeaderLabels(["+"] * len(self.vtbList))
             self.hacoTable.setHorizontalHeaderLabels(["主播名", "直播间房号", "所属"])
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
@@ -1154,36 +1110,26 @@ class AddLiverRoomWidget(QWidget):
             self.refreshButton.clicked.connect(self.refreshHacoList)
 
     def sendSelectedRoom(self):
-        self.closeEvent(None)
-        tmpList = self.roomEdit.text().strip().replace("\t", " ").split(" ")
-        roomList = {}
-        for i in tmpList:
-            if i.isnumeric():
-                roomList[i] = False  # 全部统一为字符串格式的roomid
-        self.roomList.emit(roomList)
+        room_list = {room_id: False for room_id in parse_room_ids(self.roomEdit.text())}
+        self.roomList.emit(room_list)
         self.roomEdit.clear()
         self.hide()
 
+    def _appendRoomID(self, room_id):
+        merged_text = merge_room_id(self.roomEdit.text(), room_id)
+        if merged_text != self.roomEdit.text().strip():
+            self.roomEdit.setText(merged_text)
+
     def hotLiverAdd(self, row):
         try:
-            hotLiverList = self.hotLiverDict[self.currentPage]
-            roomID = hotLiverList[row][2]
-            addedRoomID = self.roomEdit.text()
-            if roomID not in addedRoomID:
-                addedRoomID += " %s" % roomID
-                self.roomEdit.setText(addedRoomID)
-        except Exception:
+            self._appendRoomID(self.hotLiverDict[self.currentPage][row][2])
+        except (IndexError, KeyError, TypeError):
             logging.exception("热门主播添加失败")
 
     def hacoAdd(self, row):
         try:
-            roomID = self.vtbList[row][1]
-            if roomID:
-                addedRoomID = self.roomEdit.text()
-                if roomID not in addedRoomID:
-                    addedRoomID += " %s" % roomID
-                    self.roomEdit.setText(addedRoomID)
-        except Exception:
+            self._appendRoomID(self.vtbList[row][1])
+        except (IndexError, TypeError):
             logging.exception("hacoAdd 失败")
 
     def setSessionData(self, sessionData):
@@ -1217,7 +1163,7 @@ class AddLiverRoomWidget(QWidget):
             return
         self.followRoomInfo.extend(info)
         if self.tabWidget.currentIndex() == 2:
-            self._fillFollowTable()
+            self._scheduleFollowTable()
 
     def _fillFollowTable(self):
         """填充关注表格。
@@ -1227,17 +1173,12 @@ class AddLiverRoomWidget(QWidget):
         """
         sorted_info = sorted(self.followRoomInfo, key=lambda x: x[3] if len(x) > 3 else 0, reverse=True)
         self.followLiverList = []
-        row_count = max(len(sorted_info), 30)
+        row_count = len(sorted_info)
+        self.followsTable.setUpdatesEnabled(False)
         self.followsTable.clearContents()
-        self.followsTable.setColumnCount(3)
         self.followsTable.setRowCount(row_count)
-        self.followsTable.setVerticalHeaderLabels(["添加"] * row_count)
-        for i in range(row_count):
-            self.followsTable.setRowHeight(i, 40)
-        self.followsTable.setHorizontalHeaderLabels(["主播名", "直播间标题", "直播间房号"])
-        self.followsTable.setColumnWidth(0, 130)
-        self.followsTable.setColumnWidth(1, 240)
-        self.followsTable.setColumnWidth(2, 130)
+        if row_count:
+            self.followsTable.setVerticalHeaderLabels(["+"] * row_count)
         for y, line in enumerate(sorted_info):
             room_id = str(line[2]) if len(line) > 2 else ""
             self.followLiverList.append(room_id)
@@ -1252,19 +1193,16 @@ class AddLiverRoomWidget(QWidget):
                     self.followsTable.setItem(y, x, item)
                 except Exception:
                     logging.exception("关注列表添加失败")
+        self.followsTable.setUpdatesEnabled(True)
 
     def collectFollowLiverInfo(self, info):
         self.followRoomInfo = list(info)
-        self._fillFollowTable()
+        self._scheduleFollowTable()
 
     def followLiverAdd(self, row):
         try:
-            roomID = self.followLiverList[row]
-            addedRoomID = self.roomEdit.text()
-            if roomID not in addedRoomID:
-                addedRoomID += " %s" % roomID
-                self.roomEdit.setText(addedRoomID)
-        except Exception:
+            self._appendRoomID(self.followLiverList[row])
+        except IndexError:
             logging.exception("关注列表添加失败")
 
 
@@ -1504,9 +1442,10 @@ class LiverPanel(QWidget):
         self.application_path = app_path
         self.refreshCount = 0
         self.oldLiveStatus = {}
-        self.addLiverRoomWidget = AddLiverRoomWidget(self.application_path)
-        self.addLiverRoomWidget.roomList.connect(self.addLiverRoomList)
-        self.addLiverRoomWidget.hotLiverTable.addToWindow.connect(self.addCoverToPlayer)
+        self._addLiverRoomWidget = None
+        self._sessionData = ""
+        self._credential = {}
+        self._displayOrder = []
         # Fluent FlowLayout：卡片流式自动换行，随容器宽度自适应列数
         self.layout = FlowLayout(self, needAni=False)
         self.layout.setSpacing(12)
@@ -1525,9 +1464,29 @@ class LiverPanel(QWidget):
         for cover in self.coverList:  # 再添加普通卡片
             if not cover.topToken:
                 self.layout.addWidget(cover)
+        self.refreshPanel()
         self.collectLiverInfo = CollectLiverInfo(self._buildRoomIDListForCollector())
         self.collectLiverInfo.liverInfo.connect(self.refreshRoomPanel)
         self.collectLiverInfo.start()
+
+    @property
+    def addLiverRoomWidget(self):
+        """兼容旧调用点，并在首次需要时构造添加窗口。"""
+        return self._ensureAddLiverRoomWidget()
+
+    def _ensureAddLiverRoomWidget(self):
+        if self._addLiverRoomWidget is None:
+            widget = AddLiverRoomWidget(self.application_path)
+            widget.roomList.connect(self.addLiverRoomList)
+            widget.hotLiverTable.addToWindow.connect(self.addCoverToPlayer)
+            widget.setSessionData(self._sessionData)
+            widget.setCredential(self._credential)
+            self._addLiverRoomWidget = widget
+        return self._addLiverRoomWidget
+
+    def closeAddLiverRoomWidget(self):
+        if self._addLiverRoomWidget is not None:
+            self._addLiverRoomWidget.shutdown()
 
     @staticmethod
     def _normalize_room_id(room_id):
@@ -1564,30 +1523,35 @@ class LiverPanel(QWidget):
             self.dumpConfig.emit()
 
     def setSessionData(self, sessionData):
-        """接收登录凭据，传递给 AddLiverRoomWidget"""
-        self.addLiverRoomWidget.setSessionData(sessionData)
-        self._sessionData = sessionData
+        """保存登录凭据，并在添加窗口已创建时同步。"""
+        self._sessionData = sessionData or ""
+        if self._addLiverRoomWidget is not None:
+            self._addLiverRoomWidget.setSessionData(self._sessionData)
 
     def setCredential(self, credential):
-        self.addLiverRoomWidget.setCredential(credential)
-        self._credential = credential
+        self._credential = credential or {}
+        if self._addLiverRoomWidget is not None:
+            self._addLiverRoomWidget.setCredential(self._credential)
 
     def autoFetchFollows(self, uid):
-        """自动获取关注列表并添加到面板（登录后自动触发）"""
-        sessdata = getattr(self.addLiverRoomWidget, "sessionData", "")
-        self.addLiverRoomWidget.getFollows.setUID(uid)
-        self.addLiverRoomWidget.getFollows.setSessionData(sessdata)
-        self.addLiverRoomWidget.getFollows.setCredential(getattr(self.addLiverRoomWidget, "credential", {}))
-        if not self.addLiverRoomWidget.getFollows.isRunning():
-            logging.info(f"自动获取 UID={uid} 的关注列表 (sessdata={'有' if sessdata else '无'})")
-            self.addLiverRoomWidget.getFollows.start()
+        """自动获取关注列表并添加到面板（登录后自动触发）。"""
+        widget = self._ensureAddLiverRoomWidget()
+        widget.getFollows.setUID(uid)
+        widget.getFollows.setSessionData(self._sessionData)
+        widget.getFollows.setCredential(self._credential)
+        if not widget.getFollows.isRunning():
+            logging.info(f"自动获取 UID={uid} 的关注列表 (sessdata={'有' if self._sessionData else '无'})")
+            widget.getFollows.start()
 
     def openLiverRoomPanel(self):
-        self.addLiverRoomWidget._fillHotLiverTable(self.addLiverRoomWidget.currentPage)
-        if not self.addLiverRoomWidget.getHotLiver.isRunning():
-            self.addLiverRoomWidget.getHotLiver.start()
-        self.addLiverRoomWidget.hide()
-        self.addLiverRoomWidget.show()
+        widget = self._ensureAddLiverRoomWidget()
+        if not widget.getHotLiver.isRunning():
+            widget.progressBar.show()
+            widget.getHotLiver.start()
+        widget._fillHotLiverTable(widget.currentPage)
+        widget.show()
+        widget.raise_()
+        widget.activateWindow()
 
     def addLiverRoomList(self, roomDict):
         logging.debug("接收到新的主播列表")
@@ -1619,6 +1583,7 @@ class LiverPanel(QWidget):
             self.coverList[-1].addToWindow.connect(self.addCoverToPlayer)  # 添加至播放窗口
             self.coverList[-1].deleteCover.connect(self.deleteCover)
             self.coverList[-1].changeTopToken.connect(self.changeTop)
+            self.coverList[-1]._liverPanel = self
             self.roomIDDict[roomID] = bool(topToken)
         self._applyRoomListMutation(request_refresh=True, refresh_panel=True, dump_config=True)
 
@@ -1768,27 +1733,40 @@ class LiverPanel(QWidget):
                 cover._applyTheme()
 
     def refreshPanel(self):
-        for i in reversed(range(self.layout.count())):
-            item = self.layout.itemAt(i)
+        """仅在显示顺序变化时重排卡片，状态刷新不触发布局抖动。"""
+        state_order = {1: 0, 0: 1, -1: 2}
+        indexed_covers = [
+            (index, cover)
+            for index, cover in enumerate(self.coverList)
+            if cover.roomID != "0"
+        ]
+        ordered_covers = [
+            cover
+            for _, cover in sorted(
+                indexed_covers,
+                key=lambda item: (
+                    not item[1].topToken,
+                    state_order.get(item[1].liveState, 3),
+                    item[0],
+                ),
+            )
+        ]
+        if ordered_covers == self._displayOrder:
+            return
+
+        for index in reversed(range(self.layout.count())):
+            item = self.layout.itemAt(index)
             widget = item.widget() if item is not None else None
             if widget is not None:
                 self.layout.removeWidget(widget)
 
         for cover in self.coverList:
             cover.hide()
-
-        tmpList = []
-        for topToken in [True, False]:
-            for liveState in [1, 0, -1]:  # 按顺序添加正在直播的 没在直播的 还有错误的卡片
-                for cover in self.coverList:
-                    if (
-                        cover.liveState == liveState and cover.topToken == topToken and cover.roomID != "0"
-                    ):  # 符合条件的卡片
-                        tmpList.append(cover)
-
-        for cnt, cover in enumerate(tmpList):
+        for cover in ordered_covers:
             self.layout.addWidget(cover)
             cover.show()
+
+        self._displayOrder = ordered_covers
         self.adjustSize()
 
     def getFirstRoomID(self):

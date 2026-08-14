@@ -306,7 +306,12 @@ class LoginDialog(FluentDialog):
             img.save(buf, "PNG")
             qimg = QImage.fromData(buf.getvalue())
         pm = QPixmap.fromImage(qimg)
-        self._qrLabel.setPixmap(pm.scaled(self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        if pm.isNull():
+            self._qrStatus.setText("二维码生成失败，请重试")
+            return
+        scaled = pm.scaled(self._qrLabel.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if not scaled.isNull():
+            self._qrLabel.setPixmap(scaled)
 
     def _doPollLogin(self):
         """定时器回调：启动后台轮询线程（不阻塞主线程）"""

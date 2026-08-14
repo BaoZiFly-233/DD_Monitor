@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """pytest 公共配置 — 无头 GUI 环境。"""
 
+import asyncio
 import os
 import sys
 
@@ -22,3 +23,13 @@ def qapp():
 
     app = QApplication.instance() or QApplication(sys.argv)
     yield app
+
+
+def pytest_sessionfinish():
+    """为 bilibili_api 的 atexit 清理保留可用事件循环。"""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None or loop.is_closed():
+        asyncio.set_event_loop(asyncio.new_event_loop())

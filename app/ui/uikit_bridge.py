@@ -46,21 +46,21 @@ _current_accent = "blue"
 
 #: 基础令牌表（自 InstructionX_UIKit tokens 迁移，供自绘控件取色）
 _DARK = {
-    "color.bg.base": "#15181E",
-    "color.bg.subtle": "#1B1F27",
-    "color.bg.muted": "#232936",
-    "color.bg.elevated": "#1F242E",
-    "color.border": "#2C333F",
-    "color.border.strong": "#3D4654",
-    "color.text.primary": "#E7EAF0",
-    "color.text.secondary": "#A6AEBB",
-    "color.text.tertiary": "#6E7684",
-    "color.text.disabled": "#4A515C",
-    "color.primary": "#7C98C4",
-    "color.primary.hover": "#93AAD1",
-    "color.primary.pressed": "#A9BDDD",
-    "color.primary.subtle": "#26324A",
-    "color.on.primary": "#15181E",
+    "color.bg.base": "#17181B",
+    "color.bg.subtle": "#1C1E22",
+    "color.bg.muted": "#24262B",
+    "color.bg.elevated": "#202226",
+    "color.border": "#30333A",
+    "color.border.strong": "#444850",
+    "color.text.primary": "#F1F2F4",
+    "color.text.secondary": "#B4B7BD",
+    "color.text.tertiary": "#7C8088",
+    "color.text.disabled": "#545860",
+    "color.primary": "#6D9BD2",
+    "color.primary.hover": "#85ABDA",
+    "color.primary.pressed": "#9EBCE2",
+    "color.primary.subtle": "#253246",
+    "color.on.primary": "#141518",
     "color.success": "#6BA98A",
     "color.success.subtle": "#22362D",
     "color.warning": "#D2A668",
@@ -294,6 +294,23 @@ QMenuBar::item {{
 QMenuBar::item:selected {{ background-color: {c("bg.muted")}; }}
 QMenuBar::item:pressed {{ background-color: {c("primary.subtle")}; }}
 
+/* ===== 可停靠工作面板 ===== */
+QDockWidget {{
+    color: {c("text.primary")}; background-color: {c("bg.subtle")};
+    border: 1px solid {c("border")}; font: 600 13px "Microsoft YaHei UI";
+}}
+QDockWidget::title {{
+    background-color: {c("bg.elevated")}; color: {c("text.primary")};
+    border-bottom: 1px solid {c("border")}; padding: 7px 8px;
+    text-align: left;
+}}
+QDockWidget::close-button, QDockWidget::float-button {{
+    border: none; background: transparent; padding: 2px;
+}}
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {{
+    background-color: {c("bg.muted")}; border-radius: 4px;
+}}
+
 /* ===== 滚动条（Fluent 细圆条；剩余原生滚动区域：弹幕机/更新说明等） ===== */
 QScrollBar:vertical {{
     background: transparent; width: 8px; margin: 2px 2px 2px 0;
@@ -424,6 +441,8 @@ def set_accent(name: str) -> None:
     global _current_accent
     if name not in _ACCENT_PRESETS:
         raise ValueError(f"未知配色: {name!r}，可用: {ACCENT_NAMES}")
+    if name == _current_accent:
+        return
     _current_accent = name
     _apply_accent_color()
     _apply_native_qss()

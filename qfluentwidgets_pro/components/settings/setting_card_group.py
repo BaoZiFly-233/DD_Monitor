@@ -30,7 +30,6 @@ class SettingCardGroup(QWidget):
 
         FluentStyleSheet.SETTING_CARD_GROUP.apply(self)
         setFont(self.titleLabel, 20)
-        self.titleLabel.adjustSize()
 
     def addSettingCard(self, card: QWidget):
         """ add setting card to group """

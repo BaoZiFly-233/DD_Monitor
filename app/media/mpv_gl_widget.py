@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QMetaObject, QPoint, Qt, QTimer, Signal, 
 from PySide6.QtGui import QColor, QOpenGLContext, QPainter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication
-from app.ui.uikit_bridge import current_color, is_dark, theme_changed
+from app.ui.uikit_bridge import current_color, theme_changed
 
 
 class MpvGLWidget(QOpenGLWidget):
@@ -59,7 +59,7 @@ class MpvGLWidget(QOpenGLWidget):
             return
         # mpv_render_context_free 要求调用线程持有有效 GL 上下文；
         # makeCurrent 失败（窗口隐藏/上下文失效）时跳过 C 层释放，
-        # 避免 libmpv 内部 GL 调用触发致命异常（0xe24c4a02）
+        # 避免 libmpv 内部 GL 调用触发原生访问冲突。
         gl_ok = False
         try:
             gl_ok = self.makeCurrent()
@@ -135,13 +135,9 @@ class MpvGLWidget(QOpenGLWidget):
         if current_context is not None:
             funcs = current_context.functions()
             if self._render_context is None or not self._playback_active:
-                if is_dark():
-                    # 暗色下用中灰蓝占位（略亮于背景，可辨识为视频区）
-                    funcs.glClearColor(0.3529, 0.3882, 0.4274, 1.0)  # #5a636d
-                else:
-                    # 亮色下用浅灰占位（bg.muted，随配色微染），避免"黑灰"突兀
-                    c = QColor(current_color("bg.muted"))
-                    funcs.glClearColor(c.redF(), c.greenF(), c.blueF(), 1.0)
+                # 空播放器使用中性背景令牌，主题色只用于可操作控件和状态强调。
+                color = QColor(current_color("bg.muted"))
+                funcs.glClearColor(color.redF(), color.greenF(), color.blueF(), 1.0)
             else:
                 funcs.glClearColor(0.0, 0.0, 0.0, 1.0)
             funcs.glClear(0x00004000)

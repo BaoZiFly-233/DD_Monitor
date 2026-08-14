@@ -6,43 +6,42 @@ import pytest
 pytest.importorskip("PySide6")
 
 
-def test_outlined_label_empty_text_no_crash(qapp):
-    """空文本绘制不崩溃（text()[0] IndexError 回归防护）"""
-    from app.ui.liver_select import OutlinedLabel
+def test_cover_card_rounding_and_empty_text_are_safe(qapp):
+    """新直播卡片使用抗锯齿圆角，空标题和空封面均可安全绘制。"""
+    from PySide6.QtGui import QImage, QPixmap
+    from app.ui.liver_select import CoverLabel
 
-    label = OutlinedLabel("")
-    label.resize(160, 40)
-    label.show()
+    card = CoverLabel("1")
+    card._setTitleText("")
+    card.updateKeyFrame(QPixmap())
+    card.updateProfile(QImage())
+    card.show()
     qapp.processEvents()
-    label.repaint()  # 触发 paintEvent
+    card.repaint()
     qapp.processEvents()
-    label.close()
+
+    assert card.getBorderRadius() == 8
+    assert card.titleLabel.text() == "未知主播"
+    assert card._coverPixmap.isNull()
+    card.close()
 
 
-def test_outlined_label_normal_text(qapp):
-    """正常文本绘制正常"""
-    from app.ui.liver_select import OutlinedLabel
+def test_global_danmaku_panel_uses_scrollable_embedded_pages(qapp):
+    from qfluentwidgets_pro import SmoothScrollArea
 
-    label = OutlinedLabel("测试标题")
-    label.resize(160, 40)
-    label.show()
+    from app.core.config_manager import DEFAULT_CONFIG
+    from app.ui.danmu import BrowserOptionWidget, GlobalDanmuOption
+
+    panel = GlobalDanmuOption(DEFAULT_CONFIG["danmu"][0], DEFAULT_CONFIG["rollingDanmu"])
+    panel.show()
     qapp.processEvents()
-    label.repaint()
-    qapp.processEvents()
-    label.close()
 
-
-def test_outlined_label_multi_char_left_bearing(qapp):
-    """首字符有 leftBearing 的文本（标点开头）绘制正常"""
-    from app.ui.liver_select import OutlinedLabel
-
-    label = OutlinedLabel("· 直播中")
-    label.resize(160, 40)
-    label.show()
-    qapp.processEvents()
-    label.repaint()
-    qapp.processEvents()
-    label.close()
+    pages = panel.findChildren(SmoothScrollArea)
+    assert len(pages) == 2
+    assert isinstance(panel.browserOptionWidget, BrowserOptionWidget)
+    assert any(page.verticalScrollBar().maximum() > 0 for page in pages)
+    panel.close()
+    panel.deleteLater()
 
 
 def test_danmaku_settings_roundtrip():

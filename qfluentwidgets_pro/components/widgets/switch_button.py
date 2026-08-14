@@ -284,7 +284,6 @@ class SwitchButton(QWidget):
 
     def _updateText(self):
         self.setText(self.onText if self.isChecked() else self.offText)
-        self.adjustSize()
 
     def getText(self):
         return self._text
@@ -292,7 +291,7 @@ class SwitchButton(QWidget):
     def setText(self, text):
         self._text = text
         self.label.setText(text)
-        self.adjustSize()
+        self.updateGeometry()
 
     def getSpacing(self):
         return self.__spacing

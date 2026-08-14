@@ -113,8 +113,6 @@ def on_danmu(msg):
 real_danmu_thread.message.connect(on_danmu)
 real_danmu_thread.start()
 
-pages = [win.monitorPage, win.danmakuPage, win.cardPage, win.settingsPage]
-page_i = [0]
 cycle = [0]
 t0 = time.monotonic()
 rss_peak = [0]
@@ -136,9 +134,15 @@ def mock_danmu():
 def do_cycle():
     cycle[0] += 1
     c = cycle[0]
-    # 1. 页面切换（触发 monitorPage 隐藏 → MpvGLWidget 挂起渲染）
-    page_i[0] = (page_i[0] + 1) % len(pages)
-    win.contentStack.setCurrentWidget(pages[page_i[0]])
+    # 1. 可停靠工作面板切换/浮动
+    if c % 4 == 0:
+        win.controlDock.setVisible(not win.controlDock.isVisible())
+    if c % 6 == 0:
+        win.cardDock.setFloating(not win.cardDock.isFloating())
+        win.cardDock.show()
+    if c % 10 == 0:
+        win.openSettingsDialog()
+        QTimer.singleShot(100, win._settingsDialog.close)
     # 2. 模拟弹幕注入
     mock_danmu()
     # 3. 音量/静音
