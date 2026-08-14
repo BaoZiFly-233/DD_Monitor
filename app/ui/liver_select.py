@@ -108,11 +108,14 @@ class OutlinedLabel(QLabel):
 
     def paintEvent(self, event):
         rect = self.rect()
+        text = self.text()
+        if not text:  # 空文本（API 返回空 uname 等）：跳过绘制，避免 text()[0] IndexError
+            return
         indent = self.indent()
-        x = rect.left() + indent - min(self.metrics.leftBearing(self.text()[0]), 0)
+        x = rect.left() + indent - min(self.metrics.leftBearing(text[0]), 0)
         y = (rect.height() + self.metrics.ascent() - self.metrics.descent()) / 2
         path = QPainterPath()
-        path.addText(x, y, self.font(), self.text())
+        path.addText(x, y, self.font(), text)
         qp = QPainter(self)
         qp.setRenderHint(QPainter.Antialiasing)
         self.pen.setWidthF(self.w * 2)
