@@ -1160,8 +1160,12 @@ class VideoWidget(FramelessWindowBase, QFrame):
         if QDropEvent.mimeData().hasText():
             text = QDropEvent.mimeData().text()
             if "roomID" in text:
+                parts = text.split(":")
+                room_id = parts[1] if len(parts) > 1 else ""
+                if room_id in ("", "0"):  # 空房号拖拽（异常数据）直接忽略
+                    return
                 self.stopDanmuMessage()
-                self.roomID = text.split(":")[1]
+                self.roomID = room_id
                 self.addMedia.emit([self.id, self.roomID])
                 self.mediaReload()
                 if self.textBrowser is not None:
@@ -1169,7 +1173,10 @@ class VideoWidget(FramelessWindowBase, QFrame):
                     self.textBrowser.transBrowser.clear()
                     self.textBrowser.msgsBrowser.clear()
             elif "exchange" in text:
-                fromID, fromRoomID = text.split(":")[1:]
+                parts = text.split(":")
+                if len(parts) < 3:  # 数据格式异常
+                    return
+                fromID, fromRoomID = parts[1:3]
                 fromID = int(fromID)
                 # 空窗口（无房间）不参与交换：会清空目标窗口的房间记录
                 if fromID != self.id and fromRoomID not in ("", "0"):
