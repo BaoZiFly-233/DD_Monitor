@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QTextBrowser,
     QGridLayout,
+    QVBoxLayout,
     QFrame,
 )
 from PySide6.QtGui import QFont, QPainterPath
@@ -83,58 +84,74 @@ class ToolButton(QToolButton):
 
 
 class TextOption(FluentWindow):
-    """弹幕机选项 - 弹出式窗口"""
+    """弹幕机选项 - 弹出式窗口（SettingCard 卡片化）"""
 
     def __init__(self, setting=None):
         super(TextOption, self).__init__(title="弹幕窗设置")
         if setting is None:
             setting = [50, 1, 7, 0, "【 [ {", 10, 0]
         setting = list(setting)  # 防御：避免外部修改影响默认值
-        self.resize(300, 300)
+        self.resize(380, 460)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
-        # ---- 窗体布局 ----
-        layout = QGridLayout(self)
-        layout.addWidget(QLabel("字体大小"), 0, 0, 1, 1)
+        # ---- SettingCard 布局 ----
+        from qfluentwidgets_pro.components.settings.setting_card import SettingCard
+        from qfluentwidgets_pro.components.settings.setting_card_group import SettingCardGroup
+
+        group = SettingCardGroup("弹幕窗", self)
+
+        def _card(icon, title, content, widget):
+            card = SettingCard(icon, title, content, self)
+            card.hBoxLayout.addWidget(widget, 0, Qt.AlignRight)
+            card.hBoxLayout.addSpacing(12)
+            group.addSettingCard(card)
+
+        # 字体大小
         self.fontSizeCombox = ComboBox()
         self.fontSizeCombox.addItems([str(i) for i in range(5, 26)])
         self.fontSizeCombox.setCurrentIndex(setting[5])
-        layout.addWidget(self.fontSizeCombox, 0, 1, 1, 1)
+        _card(FluentIcon.FONT, "字体大小", "弹幕文字字号", self.fontSizeCombox)
 
-        layout.addWidget(QLabel("窗体透明度"), 1, 0, 1, 1)
+        # 窗体透明度
         self.opacitySlider = Slider()
         self.opacitySlider.setValue(setting[0])
-        layout.addWidget(self.opacitySlider, 1, 1, 1, 1)
+        _card(FluentIcon.ALBUM, "窗体透明度", "弹幕窗整体透明度", self.opacitySlider)
 
-        layout.addWidget(QLabel("窗体横向占比"), 2, 0, 1, 1)
+        # 窗体横向占比
         self.horizontalCombobox = ComboBox()
         self.horizontalCombobox.addItems(["%d" % x + "%" for x in range(10, 110, 10)])
         self.horizontalCombobox.setCurrentIndex(setting[1])
-        layout.addWidget(self.horizontalCombobox, 2, 1, 1, 1)
+        _card(FluentIcon.ALIGNMENT, "窗体横向占比", "弹幕窗宽度占屏幕比例", self.horizontalCombobox)
 
-        layout.addWidget(QLabel("窗体纵向占比"), 3, 0, 1, 1)
+        # 窗体纵向占比
         self.verticalCombobox = ComboBox()
         self.verticalCombobox.addItems(["%d" % x + "%" for x in range(10, 110, 10)])
         self.verticalCombobox.setCurrentIndex(setting[2])
-        layout.addWidget(self.verticalCombobox, 3, 1, 1, 1)
+        _card(FluentIcon.ALIGNMENT, "窗体纵向占比", "弹幕窗高度占屏幕比例", self.verticalCombobox)
 
-        layout.addWidget(QLabel("弹幕窗类型"), 4, 0, 1, 1)
+        # 弹幕窗类型
         self.translateCombobox = ComboBox()
         self.translateCombobox.addItems(["弹幕和同传", "只显示弹幕", "只显示同传"])
         self.translateCombobox.setCurrentIndex(setting[3])
-        layout.addWidget(self.translateCombobox, 4, 1, 1, 1)
+        _card(FluentIcon.CHAT, "弹幕窗类型", "弹幕与同传的显示方式", self.translateCombobox)
 
-        layout.addWidget(QLabel("同传过滤字符 (空格隔开)"), 5, 0, 1, 1)
+        # 同传过滤字符
         self.translateFitler = LineEdit()
         self.translateFitler.setText(setting[4])
-        self.translateFitler.setFixedWidth(100)
-        layout.addWidget(self.translateFitler, 5, 1, 1, 1)
+        self.translateFitler.setFixedWidth(120)
+        self.translateFitler.setPlaceholderText("空格分隔关键词")
+        _card(FluentIcon.FILTER, "同传过滤字符", "命中关键词的同传将被过滤", self.translateFitler)
 
-        layout.addWidget(QLabel("礼物和进入信息"), 6, 0, 1, 1)
+        # 礼物和进入信息
         self.showEnterRoom = ComboBox()
         self.showEnterRoom.addItems(["显示礼物和进入信息", "只显示礼物", "只显示进入信息", "隐藏窗口"])
         self.showEnterRoom.setCurrentIndex(setting[6])
-        layout.addWidget(self.showEnterRoom, 6, 1, 1, 1)
+        _card(FluentIcon.HEART, "礼物和进入信息", "信息区显示策略", self.showEnterRoom)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.addWidget(group)
+        layout.addStretch()
 
 
 class TextBrowser(AcrylicWidget, QWidget):
@@ -233,32 +250,42 @@ class TextBrowser(AcrylicWidget, QWidget):
 
 
 class RollingOptionWidget(QWidget):
-    """滚动弹幕设置面板"""
+    """滚动弹幕设置面板（SettingCard 卡片化）"""
 
     def __init__(self, settings_dict=None):
         super().__init__()
         if settings_dict is None:
             settings_dict = {}
-        layout = QGridLayout(self)
 
-        layout.addWidget(QLabel("弹幕透明度"), 0, 0, 1, 1)
+        from qfluentwidgets_pro.components.settings.setting_card import SettingCard
+        from qfluentwidgets_pro.components.settings.setting_card_group import SettingCardGroup
+
+        group = SettingCardGroup("滚动弹幕", self)
+
+        def _card(icon, title, content, widget):
+            card = SettingCard(icon, title, content, self)
+            card.hBoxLayout.addWidget(widget, 0, Qt.AlignRight)
+            card.hBoxLayout.addSpacing(12)
+            group.addSettingCard(card)
+
+        # 弹幕透明度
         self.opacitySlider = Slider()
         self.opacitySlider.setValue(int(settings_dict.get("opacity", 50)))
-        layout.addWidget(self.opacitySlider, 0, 1, 1, 1)
+        _card(FluentIcon.ALBUM, "弹幕透明度", "滚动弹幕整体透明度", self.opacitySlider)
 
-        layout.addWidget(QLabel("显示区域"), 1, 0, 1, 1)
+        # 显示区域
         self.displayAreaCombobox = ComboBox()
         self.displayAreaCombobox.addItems([f"{x}%" for x in range(10, 110, 10)])
         self.displayAreaCombobox.setCurrentIndex(int(settings_dict.get("display_area", 7)))
-        layout.addWidget(self.displayAreaCombobox, 1, 1, 1, 1)
+        _card(FluentIcon.ALIGNMENT, "显示区域", "滚动弹幕显示区域占比", self.displayAreaCombobox)
 
-        layout.addWidget(QLabel("字体大小"), 2, 0, 1, 1)
+        # 字体大小
         self.fontSizeCombox = ComboBox()
         self.fontSizeCombox.addItems([str(i) for i in range(5, 26)])
         self.fontSizeCombox.setCurrentIndex(int(settings_dict.get("font_size", 10)))
-        layout.addWidget(self.fontSizeCombox, 2, 1, 1, 1)
+        _card(FluentIcon.FONT, "字体大小", "滚动弹幕字体大小", self.fontSizeCombox)
 
-        layout.addWidget(QLabel("字体"), 3, 0, 1, 1)
+        # 字体
         self.fontFamilyCombobox = EditableComboBox()
         self.fontFamilyCombobox.addItems(
             ["Microsoft YaHei", "SimHei", "Microsoft JhengHei", "Arial", "Noto Sans SC", "PingFang SC"]
@@ -268,40 +295,45 @@ class RollingOptionWidget(QWidget):
         if idx >= 0:
             self.fontFamilyCombobox.setCurrentIndex(idx)
         self.fontFamilyCombobox.setText(current_family)
-        layout.addWidget(self.fontFamilyCombobox, 3, 1, 1, 1)
+        _card(FluentIcon.FONT, "字体", "弹幕文字字体族", self.fontFamilyCombobox)
 
-        layout.addWidget(QLabel("弹幕速度"), 4, 0, 1, 1)
+        # 弹幕速度
         self.speedSlider = FluentSlider(Qt.Horizontal)
         self.speedSlider.setRange(50, 200)
         self.speedSlider.setValue(int(settings_dict.get("speed_percent", 85)))
-        layout.addWidget(self.speedSlider, 4, 1, 1, 1)
+        _card(FluentIcon.PLAY, "弹幕速度", "滚动速度（50-200%）", self.speedSlider)
 
-        layout.addWidget(QLabel("描边粗细"), 5, 0, 1, 1)
+        # 描边粗细
         self.strokeWidthSlider = FluentSlider(Qt.Horizontal)
         self.strokeWidthSlider.setRange(0, 60)
         self.strokeWidthSlider.setValue(int(settings_dict.get("stroke_width", 30)))
-        layout.addWidget(self.strokeWidthSlider, 5, 1, 1, 1)
+        _card(FluentIcon.EDIT, "描边粗细", "文字描边宽度", self.strokeWidthSlider)
 
-        layout.addWidget(QLabel("阴影效果"), 6, 0, 1, 1)
+        # 阴影效果
         self.shadowEnabledCheckBox = CheckBox()
         self.shadowEnabledCheckBox.setChecked(bool(settings_dict.get("shadow_enabled", False)))
-        layout.addWidget(self.shadowEnabledCheckBox, 6, 1, 1, 1)
+        _card(FluentIcon.COMPLETED, "阴影效果", "弹幕文字投影", self.shadowEnabledCheckBox)
 
-        layout.addWidget(QLabel("阴影强度"), 7, 0, 1, 1)
+        # 阴影强度
         self.shadowStrengthSlider = FluentSlider(Qt.Horizontal)
         self.shadowStrengthSlider.setRange(0, 100)
         self.shadowStrengthSlider.setValue(int(settings_dict.get("shadow_strength", 35)))
-        layout.addWidget(self.shadowStrengthSlider, 7, 1, 1, 1)
+        _card(FluentIcon.EDIT, "阴影强度", "投影强度", self.shadowStrengthSlider)
 
-        layout.addWidget(QLabel("允许顶部弹幕"), 8, 0, 1, 1)
+        # 允许顶部弹幕
         self.topEnabledCheckBox = CheckBox()
         self.topEnabledCheckBox.setChecked(bool(settings_dict.get("top_enabled", True)))
-        layout.addWidget(self.topEnabledCheckBox, 8, 1, 1, 1)
+        _card(FluentIcon.UP, "允许顶部弹幕", "顶部固定弹幕开关", self.topEnabledCheckBox)
 
-        layout.addWidget(QLabel("允许底部弹幕"), 9, 0, 1, 1)
+        # 允许底部弹幕
         self.bottomEnabledCheckBox = CheckBox()
         self.bottomEnabledCheckBox.setChecked(bool(settings_dict.get("bottom_enabled", True)))
-        layout.addWidget(self.bottomEnabledCheckBox, 9, 1, 1, 1)
+        _card(FluentIcon.DOWN, "允许底部弹幕", "底部固定弹幕开关", self.bottomEnabledCheckBox)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(group)
+        layout.addStretch()
 
     def sync_from_dict(self, settings_dict):
         self.opacitySlider.setValue(int(settings_dict.get("opacity", 50)))

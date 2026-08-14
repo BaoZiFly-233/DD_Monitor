@@ -44,7 +44,6 @@ from qfluentwidgets_pro import (
     RoundMenu,
     Slider as FluentSlider,
     SmoothScrollArea,
-    ToolButton,
 )
 from qfluentwidgets_pro.qframelesswindow.windows import WindowsFramelessMainWindow
 from app.ui.uikit_bridge import confirm, info, current_color, theme_changed
@@ -546,56 +545,53 @@ class MainWindow(WindowsFramelessMainWindow):
         # 延迟创建 OpenGL 上下文，避免 16 个同时初始化导致栈溢出
         QTimer.singleShot(0, self.setPlayer)
 
-        # 控制条（原 controlDock 迁入直播监控页左侧容器）
+        # 控制条（原 controlDock 迁入直播监控页左侧容器，CommandBar 化）
         self.controlWidget = ControlWidget()
         self.controlWidget.heightValue.connect(self.showAddButton)
         self.controlContainerLayout = QVBoxLayout(self.controlContainer)
         self.controlContainerLayout.setContentsMargins(0, 0, 0, 0)
         self.controlContainerLayout.setSpacing(0)
         self.controlContainerLayout.addWidget(self.controlWidget)
-        self.controlBarLayout = QGridLayout(self.controlWidget)
+        self.controlBarLayout = QVBoxLayout(self.controlWidget)
+        self.controlBarLayout.setContentsMargins(4, 4, 4, 4)
+        self.controlBarLayout.setSpacing(6)
+
+        # CommandBar：播放/刷新/停止/弹幕设置/静音（Fluent 命令栏）
+        from qfluentwidgets_pro.components.widgets.command_bar import CommandBar
+
+        self.commandBar = CommandBar(self.controlWidget)
+        self.commandBar.setIconSize(QSize(16, 16))
         self.globalPlayToken = True
-        self.play = ToolButton(FluentIcon.PAUSE, self)
-        self.play.setFixedSize(30, 30)
-        self.play.setIconSize(QSize(16, 16))
+        self.play = QAction(Icon(FluentIcon.PAUSE), "播放/暂停", self)
         self.play.setToolTip("全局暂停/播放")
-        self.play.clicked.connect(self.globalMediaPlay)
-        self.controlBarLayout.addWidget(self.play, 0, 0, 1, 1)
-        self.reload = ToolButton(FluentIcon.SYNC, self)
-        self.reload.setFixedSize(30, 30)
-        self.reload.setIconSize(QSize(16, 16))
+        self.play.triggered.connect(self.globalMediaPlay)
+        self.commandBar.addAction(self.play)
+        self.reload = QAction(Icon(FluentIcon.SYNC), "刷新", self)
         self.reload.setToolTip("全局刷新")
-        self.reload.clicked.connect(self.globalMediaReload)
-        self.controlBarLayout.addWidget(self.reload, 0, 1, 1, 1)
-        self.stop = ToolButton(FluentIcon.CANCEL, self)
-        self.stop.setFixedSize(30, 30)
-        self.stop.setIconSize(QSize(16, 16))
+        self.reload.triggered.connect(self.globalMediaReload)
+        self.commandBar.addAction(self.reload)
+        self.stop = QAction(Icon(FluentIcon.CANCEL), "停止", self)
         self.stop.setToolTip("全局停止")
-        self.stop.clicked.connect(self.globalMediaStop)
-        self.controlBarLayout.addWidget(self.stop, 0, 2, 1, 1)
-
+        self.stop.triggered.connect(self.globalMediaStop)
+        self.commandBar.addAction(self.stop)
         # 全局弹幕设置（Fluent 齿轮图标）
-        self.danmuButton = ToolButton(FluentIcon.SETTING, self)
-        self.danmuButton.setFixedSize(30, 30)
-        self.danmuButton.setIconSize(QSize(16, 16))
-        self.danmuButton.setToolTip("弹幕设置")
-        self.danmuButton.clicked.connect(self.openGlobalDanmuSetting)
-        theme_changed().connect(self._applyDanmuIconTheme)
-        self.controlBarLayout.addWidget(self.danmuButton, 0, 3, 1, 1)
-
+        self.danmuAction = QAction(Icon(FluentIcon.SETTING), "弹幕设置", self)
+        self.danmuAction.setToolTip("全局弹幕设置")
+        self.danmuAction.triggered.connect(self.openGlobalDanmuSetting)
+        self.commandBar.addAction(self.danmuAction)
         # 全局静音
         self.globalMuteToken = False
-        self.volumeButton = ToolButton(FluentIcon.VOLUME, self)
-        self.volumeButton.setFixedSize(30, 30)
-        self.volumeButton.setIconSize(QSize(16, 16))
+        self.volumeButton = QAction(Icon(FluentIcon.VOLUME), "静音", self)
         self.volumeButton.setToolTip("全局静音")
-        self.volumeButton.clicked.connect(self.globalMediaMute)
-        self.controlBarLayout.addWidget(self.volumeButton, 1, 0, 1, 1)
+        self.volumeButton.triggered.connect(self.globalMediaMute)
+        self.commandBar.addAction(self.volumeButton)
+        self.controlBarLayout.addWidget(self.commandBar)
+
         # 全局音量滑条
         self.slider = FluentSlider(Qt.Horizontal)
         self.slider.setValue(self.config["globalVolume"])
         self.slider.valueChanged.connect(self.globalSetVolume)
-        self.controlBarLayout.addWidget(self.slider, 1, 1, 1, 3)
+        self.controlBarLayout.addWidget(self.slider)
         progressText.setText("设置播放器控制...")
 
         # 添加主播按钮
@@ -607,7 +603,8 @@ class MainWindow(WindowsFramelessMainWindow):
         theme_changed().connect(self._applyAddButtonTheme)
         self.addButton.setFont(QFont("Arial", 24, QFont.Bold))
         progressText.setText("设置添加控制...")
-        self.controlBarLayout.addWidget(self.addButton, 2, 0, 1, 4)
+        self.controlBarLayout.addWidget(self.addButton)
+        self.controlBarLayout.addStretch()
         progressText.setText("设置全局控制...")
 
         # 卡片面板（原 cardDock 迁入卡片面板页）
@@ -959,7 +956,7 @@ class MainWindow(WindowsFramelessMainWindow):
 
     def _applyDanmuIconTheme(self, dark=None):
         """"弹幕设置" 按钮图标用 Fluent 设置图标，随全局明暗主题自动适配。"""
-        self.danmuButton.setIcon(Icon(FluentIcon.SETTING))
+        self.danmuAction.setIcon(Icon(FluentIcon.SETTING))
 
     def _applyAddButtonTheme(self, dark=None):
         """"+" 添加主播按钮：虚线描边取主题令牌，随全局明暗主题刷新。"""
