@@ -210,6 +210,9 @@ class SettingsDialog(FluentDialog):
 
         self.rollingSpeed = Slider(Qt.Horizontal)
         self.rollingSpeed.setFixedWidth(_SLIDER_W)
+        # 速度合法范围 50-200%（config_manager 同款 clamp）；不设范围时
+        # QSlider 默认 0-100，>100 的配置被 setValue 静默截断且无法调高
+        self.rollingSpeed.setRange(50, 200)
         self.rollingSpeed.setValue(rd.get("speed_percent", 85))
         rolling_group.addSettingCard(_setting_card(FluentIcon.PLAY, "弹幕速度", "滚动速度（50-200%）", self.rollingSpeed, content))
 
