@@ -38,6 +38,8 @@ from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, Q
 from app.core import http_utils
 from app.ui.common_widget import DownloadImage  # 公共图片下载线程
 from qfluentwidgets_pro import FlowLayout, PrimaryPushButton, ProgressBar, RoundMenu, TableWidget, TabWidget, LineEdit
+from qfluentwidgets_pro.components.widgets.info_badge import InfoBadge, InfoLevel
+from qfluentwidgets_pro.common.animation import BackgroundAnimationWidget
 from app.ui.uikit_bridge import current_color, info as uikit_info, is_dark, theme_changed
 
 
@@ -253,8 +255,8 @@ class RecordThread(QThread):
             logging.exception("下载视频到缓存失败")
 
 
-class CoverLabel(QLabel):
-    """封面的文字"""
+class CoverLabel(BackgroundAnimationWidget, QLabel):
+    """关注卡片 — CardWidget 风格：悬停背景动画 + 状态角标 + 圆角"""
 
     addToWindow = Signal(list)
     deleteCover = Signal(str)
@@ -272,7 +274,7 @@ class CoverLabel(QLabel):
         self.savePath = ""
         self.setFixedSize(160, 90)
         self.setObjectName("cover")
-        self.setFrameShape(QFrame.Box)
+        self.setFrameShape(QFrame.NoFrame)
         self._applyRoundedMask()
         # Fluent 卡片阴影：悬停时柔和投影（提升卡片浮起感）
         self._shadowEffect = QGraphicsDropShadowEffect(self)
@@ -281,8 +283,13 @@ class CoverLabel(QLabel):
         self._shadowEffect.setColor(QColor(0, 0, 0, 90))
         self._shadowEffect.setEnabled(False)
         self.setGraphicsEffect(self._shadowEffect)
+        # Fluent 状态角标（右上角：直播红 / 录制蓝 / 等待橙）
+        self.stateBadge = InfoBadge(parent=self)
+        self.stateBadge.setVisible(False)
         self.firstUpdateToken = True
         self.layout = QGridLayout(self)
+        self.layout.setContentsMargins(6, 6, 6, 6)
+        self.layout.setSpacing(0)
         self.profile = CircleImage()
         self.layout.addWidget(self.profile, 0, 4, 2, 2)
         self.titleLabel = OutlinedLabel()
@@ -332,22 +339,27 @@ class CoverLabel(QLabel):
         标题描边沿用默认深色，亮色下标题文字切换为深灰保证可读。
         """
         if is_dark():
-            bg = "#5a636d"
             title_brush = "#f1fefb"
             top_brush = "#FFC125"
         else:
-            bg = current_color("bg.muted")
             title_brush = current_color("text.secondary")
             top_brush = "#B8860B"  # 亮色下置顶金加深，避免浅底上金色看不清
-        radius = "border-radius:6px;"
-        if self.isPlaying:
-            style = "#cover{%sborder-width:3px;border-style:solid;border-color:red;background-color:%s}" % (radius, bg)
-        elif self.topToken:
-            style = "#cover{%sborder-width:3px;border-style:solid;border-color:#dfa616;background-color:%s}" % (radius, bg)
-        else:
-            style = "#cover{%sbackground-color:%s}" % (radius, bg)
-        self.setStyleSheet(style)
         self.titleLabel.setBrush(top_brush if self.topToken else title_brush)
+        self.update()
+
+    # ---- CardWidget 风格：悬停背景色动画（组件库 BackgroundAnimationWidget）----
+
+    def _normalBackgroundColor(self):
+        return QColor(255, 255, 255, 13 if is_dark() else 170)
+
+    def _hoverBackgroundColor(self):
+        return QColor(255, 255, 255, 26 if is_dark() else 230)
+
+    def _pressedBackgroundColor(self):
+        return QColor(255, 255, 255, 8 if is_dark() else 200)
+
+    def _disabledBackgroundColor(self):
+        return self._normalBackgroundColor()
 
     def updateLabel(self, info):
         if not info[0]:  # 用户或直播间不存在
@@ -360,10 +372,9 @@ class CoverLabel(QLabel):
             else:
                 self.titleLabel.setText(info[1])
                 self.stateLabel.setText("无该房间或已加密")
-            # 保持圆角与悬停阴影的主题 QSS，仅叠加封禁红底
-            self.setStyleSheet(
-                "#cover{border-radius:6px;background-color:#8B3A3A}"
-            )
+            self.stateBadge.setLevel(InfoLevel.ERROR)
+            self.stateBadge.show()
+            self.update()
         else:
             if self.firstUpdateToken:  # 初始化
                 avatar_url = str(info[3] or "").strip()
@@ -393,25 +404,54 @@ class CoverLabel(QLabel):
                 self.roomTitle = ""  # 房间直播标题
                 self.setToolTip(self.roomTitle)
                 self.clear()
-                self._applyTheme()
             self.refreshStateLabel()
+
+    def paintEvent(self, event):
+        # 圆角背景（悬停动画色）+ 状态边框（播放红/置顶金）
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        radius = 6
+        if self.isPlaying:
+            painter.setPen(QPen(QColor("#E81123"), 2))
+        elif self.topToken:
+            painter.setPen(QPen(QColor("#DFA616"), 2))
+        else:
+            painter.setPen(Qt.NoPen)
+        painter.setBrush(self.bgColorObject.color if hasattr(self, "bgColorObject") else self._normalBackgroundColor())
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), radius, radius)
+        painter.end()
+        super().paintEvent(event)  # 画关键帧 pixmap
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 状态角标跟随右上角
+        self.stateBadge.move(self.width() - 14, 5)
 
     def refreshStateLabel(self, downloadTime=""):
         if self.liveState == 1:
-            if self.recordState == 1:  # 录制中
-                self.stateLabel.setBrush("#87CEFA")  # 录制中为蓝色字体
+            if self.recordState == 1:  # 录制中为蓝色字体 + 蓝角标
+                self.stateLabel.setBrush("#87CEFA")
+                self.stateBadge.setLevel(InfoLevel.INFOAMTION)
+                self.stateBadge.show()
                 if downloadTime:
                     self.stateLabel.setText("· 录制中 %s" % downloadTime)
+                else:
+                    self.stateLabel.setText("· 录制中")
             else:
-                self.stateLabel.setBrush("#7FFFD4")  # 直播中为绿色字体
+                self.stateLabel.setBrush("#7FFFD4")  # 直播中为绿色字体 + 红角标
                 self.stateLabel.setText("· 直播中")
+                self.stateBadge.setLevel(InfoLevel.ERROR)
+                self.stateBadge.show()
         else:
-            if self.recordState == 2:  # 等待录制
-                self.stateLabel.setBrush("#FFA500")  # 待录制为橙色字体
+            if self.recordState == 2:  # 待录制为橙色字体 + 橙角标
+                self.stateLabel.setBrush("#FFA500")
                 self.stateLabel.setText("· 等待开播")
+                self.stateBadge.setLevel(InfoLevel.ATTENTION)
+                self.stateBadge.show()
             else:
-                self.stateLabel.setBrush("#FF6A6A")  # 未开播为红色字体
+                self.stateLabel.setBrush("#FF6A6A")  # 未开播为红色字体，无角标
                 self.stateLabel.setText("· 未开播")
+                self.stateBadge.hide()
 
     def recordError(self, roomID):
         self.recordThread.checkTimer.stop()
@@ -1469,7 +1509,7 @@ class LiverPanel(QWidget):
         self.addLiverRoomWidget.hotLiverTable.addToWindow.connect(self.addCoverToPlayer)
         # Fluent FlowLayout：卡片流式自动换行，随容器宽度自适应列数
         self.layout = FlowLayout(self, needAni=False)
-        self.layout.setSpacing(9)
+        self.layout.setSpacing(12)
         self.layout.setContentsMargins(7, 7, 7, 7)
         self.coverList = []
         self.roomIDDict = self._normalize_room_dict(roomIDDict)
