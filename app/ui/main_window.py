@@ -428,15 +428,61 @@ class MainWindow(WindowsFramelessMainWindow):
         self.scrollArea.setWidgetResizable(True)
         self.cardPageLayout.addWidget(self.scrollArea)
 
-        # 页面3：设置（Batch5 内嵌 SettingCard 页，先用引导页）
+        # 页面3：设置（内嵌常用设置 SettingCard 组 + 完整设置入口）
         self.settingsPage = QWidget()
         self.settingsPageLayout = QVBoxLayout(self.settingsPage)
         self.settingsPageLayout.setContentsMargins(24, 24, 24, 24)
         self.settingsPageLayout.setSpacing(12)
-        _settings_tip = QLabel("设置\n\n所有设置项已整合到统一设置面板（播放/弹幕/缓存/布局/通用）。")
-        _settings_tip.setWordWrap(True)
-        self.settingsPageLayout.addWidget(_settings_tip)
-        _settings_btn = FPrimaryPushButton("打开设置面板")
+
+        from qfluentwidgets_pro.components.settings.setting_card import SettingCard
+        from qfluentwidgets_pro.components.settings.setting_card_group import SettingCardGroup
+        from qfluentwidgets_pro.components.widgets.combo_box import ComboBox as _FCombo
+
+        self.settingsPageGroup = SettingCardGroup("常用设置", self.settingsPage)
+
+        def _card(icon, title, content, widget):
+            card = SettingCard(icon, title, content, self.settingsPage)
+            card.hBoxLayout.addWidget(widget, 0, Qt.AlignRight)
+            card.hBoxLayout.addSpacing(12)
+            self.settingsPageGroup.addSettingCard(card)
+
+        # 全局画质
+        self.settingsQuality = _FCombo()
+        self.settingsQuality.addItems(["原画", "蓝光", "超清", "流畅", "仅音频"])
+        _qmap = {10000: 0, 400: 1, 250: 2, 80: 3, -1: 4}
+        self.settingsQuality.setCurrentIndex(_qmap.get(self.config.get("quality", [80])[0], 2))
+        self.settingsQuality.currentIndexChanged.connect(
+            lambda idx: self.globalQuality([10000, 400, 250, 80, -1][idx])
+        )
+        _card(FluentIcon.VIDEO, "全局画质", "所有窗口的默认画质", self.settingsQuality)
+
+        # 解码方案
+        self.settingsDecode = _FCombo()
+        self.settingsDecode.addItems(["硬解", "软解"])
+        self.settingsDecode.setCurrentIndex(0 if self.config.get("hardwareDecode", True) else 1)
+        self.settingsDecode.currentIndexChanged.connect(lambda idx: self.setDecode(idx == 0))
+        _card(FluentIcon.SETTING, "解码方案", "硬解优先使用显卡，软解兼容性更好", self.settingsDecode)
+
+        # 全局音量
+        from qfluentwidgets_pro import Slider as _FSlider
+
+        self.settingsVolume = _FSlider(Qt.Horizontal)
+        self.settingsVolume.setRange(0, 100)
+        self.settingsVolume.setValue(self.config.get("globalVolume", 30))
+        self.settingsVolume.valueChanged.connect(self.globalSetVolume)
+        _card(FluentIcon.VOLUME, "全局音量", "默认播放音量", self.settingsVolume)
+
+        # 主题
+        self.settingsTheme = _FCombo()
+        self.settingsTheme.addItems(["深色", "浅色"])
+        self.settingsTheme.setCurrentIndex(0 if self.config.get("theme", "dark") == "dark" else 1)
+        self.settingsTheme.currentIndexChanged.connect(
+            lambda idx: self._applySettingsPageTheme(idx)
+        )
+        _card(FluentIcon.PALETTE, "主题模式", "深浅色切换（立即生效）", self.settingsTheme)
+
+        self.settingsPageLayout.addWidget(self.settingsPageGroup)
+        _settings_btn = FPrimaryPushButton("打开完整设置面板…")
         _settings_btn.clicked.connect(self.openSettingsDialog)
         self.settingsPageLayout.addWidget(_settings_btn, alignment=Qt.AlignLeft)
         self.settingsPageLayout.addStretch()
@@ -972,6 +1018,15 @@ class MainWindow(WindowsFramelessMainWindow):
             f'min-height:84px;max-height:84px;'
             f'QPushButton:hover{{border-color:{hover};color:{hover};}}'
         )
+
+    def _applySettingsPageTheme(self, index):
+        """设置页主题切换：立即生效并保存"""
+        from app.ui.uikit_bridge import set_theme as _set_theme
+
+        theme = "dark" if index == 0 else "light"
+        self.config["theme"] = theme
+        _set_theme(theme == "dark")
+        self.configManager.save()
 
     def _openAllDanmakuMachines(self):
         """弹幕机控制台：打开所有窗口的弹幕机"""

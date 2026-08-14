@@ -76,7 +76,7 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 
 ## 截图
 
-**主窗口（4 宫格默认布局）：**
+**主窗口（顶部 Fluent 导航 + 直播监控页，4 宫格默认布局）：**
 
 ![主窗口](docs/screenshot-main.png)
 
@@ -87,6 +87,19 @@ DD Monitor 最初由 [神君Channel](https://space.bilibili.com/637783) 开发�
 **添加直播间面板（多 tab：热门 / VTB / 关注）：**
 
 ![添加直播间](docs/screenshot-addroom.png)
+
+## 界面结构
+
+主窗口为标准 Fluent 布局：顶部 `TopNavigationInterface` 横向导航（图标 + 文字，悬停/选中动画，主题自适应）+ 下方 `StackedWidget` 内容区：
+
+| 分区 | 内容 |
+|---|---|
+| 直播监控 | 16 宫格 + 左侧控制条（CommandBar：播放/刷新/停止/弹幕设置/静音 + 音量滑条 + 添加主播） |
+| 弹幕机 | 毛玻璃弹幕机控制台（打开全部/全局弹幕设置） |
+| 卡片面板 | 关注卡片流（CardWidget 悬停动画 + InfoBadge 状态角标） |
+| 设置 | 常用设置（画质/解码/音量/主题）+ 完整设置面板入口 |
+
+导航右侧：账号 / 帮助 / 投喂（弹出菜单）。启动默认进入直播监控页。
 
 > 截图由 `scripts/make_screenshots.py` 渲染真实 UI 生成（隔离临时配置，不触碰
 > 用户数据）。发版后如需更新截图，直接重跑该脚本即可。
