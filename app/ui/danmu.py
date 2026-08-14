@@ -6,9 +6,10 @@ from PySide6.QtWidgets import (
     QWidget,
     QTextBrowser,
     QGridLayout,
+    QFrame,
 )
-from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt, Signal, QPoint, QSize
+from PySide6.QtGui import QFont, QPainterPath
+from PySide6.QtCore import Qt, Signal, QPoint, QSize, QRectF
 from app.ui.common_widget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
 from app.ui.title_bar import FluentWindow
 from qfluentwidgets_pro import (
@@ -21,6 +22,7 @@ from qfluentwidgets_pro import (
     Slider as FluentSlider,
     TabWidget,
 )
+from qfluentwidgets_pro.components.material.acrylic_widget import AcrylicWidget
 from app.ui.uikit_bridge import is_dark, theme_changed
 
 # 弹幕显示比例（定义在 constants.py，此处重导出兼容旧导入路径）
@@ -135,9 +137,12 @@ class TextOption(FluentWindow):
         layout.addWidget(self.showEnterRoom, 6, 1, 1, 1)
 
 
-class TextBrowser(QWidget):
-    """弹幕机 - 弹出式窗口
-    通过限制移动位置来模拟嵌入式窗口
+class TextBrowser(AcrylicWidget, QWidget):
+    """弹幕机 - 弹出式窗口（Fluent 毛玻璃 + 圆角）
+
+    通过限制移动位置来模拟嵌入式窗口。背景用组件库 AcrylicWidget
+    （半透明 tint + 噪点纹理，深浅主题自适应），圆角裁剪见
+    acrylicClipPath。
     """
 
     closeSignal = Signal()
@@ -150,54 +155,74 @@ class TextBrowser(QWidget):
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
-        # ---- 窗体布局 ----
+        # ---- 窗体布局（三区：弹幕 60% / 同传 25% / 信息 15%）----
         layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(10, 0, 10, 10)
+        layout.setSpacing(6)
 
-        # 标题栏
+        # 标题栏（透明底，由毛玻璃背景透出）
         self.bar = Bar(" 弹幕机")
-        self.bar.setStyleSheet("background:#AAAAAAAA")
         self.bar.moveSignal.connect(self.moveWindow)
-        layout.addWidget(self.bar, 0, 0, 1, 10)
+        layout.addWidget(self.bar, 0, 0, 1, 8)
         # 弹幕选项菜单
         self.optionButton = ToolButton("settings")
         self.optionButton.setToolTip("弹幕设置")
         self.optionButton.clicked.connect(self.optionWidget.show)  # 弹出设置菜单
-        layout.addWidget(self.optionButton, 0, 8, 1, 1)
+        layout.addWidget(self.optionButton, 0, 8, 1, 1, alignment=Qt.AlignVCenter)
         # 关闭按钮
         self.closeButton = ToolButton("close")
         self.closeButton.setToolTip("关闭")
         self.closeButton.clicked.connect(self.userClose)
-        layout.addWidget(self.closeButton, 0, 9, 1, 1)
+        layout.addWidget(self.closeButton, 0, 9, 1, 1, alignment=Qt.AlignVCenter)
 
-        # 弹幕区域
-        self.textBrowser = QTextBrowser()
-        self.textBrowser.setFont(QFont("Microsoft JhengHei", 14, QFont.Bold))
-        self.textBrowser.setStyleSheet("border-width:1")
+        # 弹幕区域（主区 60%）
+        self.textBrowser = self._create_zone(QFont("Microsoft JhengHei", 14, QFont.Bold))
+        layout.addWidget(self.textBrowser, 1, 0, 3, 10)
+
+        # 同传区域（25%）
+        self.transBrowser = self._create_zone(QFont("Microsoft JhengHei", 13, QFont.Bold))
+        layout.addWidget(self.transBrowser, 4, 0, 1, 10)
+
+        # 信息区域（15%，单行紧凑）
+        self.msgsBrowser = self._create_zone(QFont("Microsoft JhengHei", 12, QFont.Bold))
+        self.msgsBrowser.setMaximumHeight(64)
+        layout.addWidget(self.msgsBrowser, 5, 0, 1, 10)
+
+        # 深浅主题刷新（文字/分区底色）
+        self._apply_theme_colors()
+        theme_changed().connect(self._apply_theme_colors)
+
+    @staticmethod
+    def _create_zone(font):
+        """创建圆角半透明弹幕分区（背景半透明白/黑，文字主题色）"""
+        zone = QTextBrowser()
+        zone.setFont(font)
         # 限制文档最大行数，防止长时间运行内存无限增长（内存泄漏）
-        self.textBrowser.document().setMaximumBlockCount(500)
-        # textCursor = self.textBrowser.textCursor()
-        # textBlockFormat = QTextBlockFormat()
-        # textBlockFormat.setLineHeight(17, QTextBlockFormat.FixedHeight)  # 弹幕框行距
-        # textCursor.setBlockFormat(textBlockFormat)
-        # self.textBrowser.setTextCursor(textCursor)
-        layout.addWidget(self.textBrowser, 1, 0, 1, 10)
+        zone.document().setMaximumBlockCount(500)
+        zone.setFrameShape(QFrame.NoFrame)
+        return zone
 
-        # 同传区域
-        self.transBrowser = QTextBrowser()
-        self.transBrowser.setFont(QFont("Microsoft JhengHei", 14, QFont.Bold))
-        self.transBrowser.setStyleSheet("border-width:1")
-        self.transBrowser.document().setMaximumBlockCount(500)
-        layout.addWidget(self.transBrowser, 2, 0, 1, 10)
+    def _apply_theme_colors(self, *args):
+        if is_dark():
+            bg, fg, border = "rgba(255,255,255,14)", "#F1F5F9", "rgba(255,255,255,26)"
+        else:
+            bg, fg, border = "rgba(255,255,255,120)", "#1C2330", "rgba(0,0,0,40)"
+        for zone in (self.textBrowser, self.transBrowser, self.msgsBrowser):
+            zone.setStyleSheet(
+                f"QTextBrowser{{background-color:{bg};color:{fg};"
+                f"border:1px solid {border};border-radius:8px;"
+                f"padding:4px 8px;}}"
+            )
+        # 标题栏文字颜色
+        self.bar.setStyleSheet(
+            f"color:{fg};background:transparent;font-size:12px;font-weight:600;"
+        )
 
-        # 信息区域
-        self.msgsBrowser = QTextBrowser()
-        self.msgsBrowser.setFont(QFont("Microsoft JhengHei", 14, QFont.Bold))
-        self.msgsBrowser.setStyleSheet("border-width:1")
-        self.msgsBrowser.document().setMaximumBlockCount(500)
-        # self.msgsBrowser.setMaximumHeight(100)
-        layout.addWidget(self.msgsBrowser, 3, 0, 1, 10)
+    def acrylicClipPath(self):
+        """毛玻璃圆角裁剪（12px 圆角）"""
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
+        return path
 
     def userClose(self):
         self.hide()
