@@ -432,6 +432,7 @@ class MainWindow(WindowsFramelessMainWindow):
             progressCounter += 1
             progressBar.setValue(progressCounter)
             self._connectVideoWidget(self.videoWidgetList[i])
+            self.videoWidgetList[i].volumeAmplify = float(self.config["volumeAmplify"][i] or 1.0)
             # 不在循环内调 processEvents — 见 login.py thread.wait 注释
             logging.info(f"播放器设置完毕 {i + 1} / 16")
         QApplication.instance().processEvents()  # 刷新启动画面进度（勿用模块级 app 变量）
@@ -646,6 +647,7 @@ class MainWindow(WindowsFramelessMainWindow):
     def _connectVideoWidget(self, videoWidget):
         videoWidget.mutedChanged.connect(self.mutedChanged)
         videoWidget.volumeChanged.connect(self.volumeChanged)
+        videoWidget.amplifyChanged.connect(self.amplifyChanged)
         videoWidget.addMedia.connect(self.addMedia)
         videoWidget.deleteMedia.connect(self.deleteMedia)
         videoWidget.exchangeMedia.connect(self.exchangeMedia)
@@ -929,6 +931,13 @@ class MainWindow(WindowsFramelessMainWindow):
         if showMax:
             pop_video_widget.showMaximized()
         pop_video_widget.mediaReload()
+
+    def amplifyChanged(self, info):
+        id, amp = info
+        if not (0 <= id < MAX_WINDOWS):
+            return
+        self.config["volumeAmplify"][id] = amp
+        self.configManager.save()
 
     def mutedChanged(self, mutedInfo):
         id, muted = mutedInfo

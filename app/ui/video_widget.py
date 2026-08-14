@@ -278,6 +278,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
 
     mutedChanged = Signal(list)
     volumeChanged = Signal(list)
+    amplifyChanged = Signal(list)
     addMedia = Signal(list)
     deleteMedia = Signal(int)
     exchangeMedia = Signal(list)
@@ -1223,6 +1224,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
     def _menuSetAmplify(self, amp_val):
         self.volumeAmplify = amp_val
         self._applyVolume()
+        self.amplifyChanged.emit([self.id, amp_val])
 
     def _menuSwitchCdn(self):
         if self._stream_candidates and len(self._stream_candidates) > 1:

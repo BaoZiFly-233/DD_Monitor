@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
     "audioChannel": [0] * MAX_WINDOWS,
     "muted": [1] * MAX_WINDOWS,
     "volume": [50] * MAX_WINDOWS,
+    "volumeAmplify": [1.0] * MAX_WINDOWS,
     "translator": [True] * MAX_WINDOWS,
     "danmu": [list(DEFAULT_DANMU_CONFIG) for _ in range(MAX_WINDOWS)],
     "rollingDanmu": dict(DEFAULT_ROLLING_DANMU),
