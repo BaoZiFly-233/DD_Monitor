@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """一些公用的组件"""
 
+import threading
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QSlider
@@ -50,6 +52,11 @@ class Slider(QSlider):
         self.sliderValue.emit(value)
 
 
+# 图片下载并发信号量：卡片多时（32+ 卡片 × 头像/关键帧）若全部同时
+# 下载会打满 B 站 CDN 连接与内存，限制同时最多 8 个下载，其余排队
+_IMG_DOWNLOAD_SEMAPHORE = threading.Semaphore(8)
+
+
 class DownloadImage(QThread):
     """下载图片（线程安全：QImage 在线程内构造，主线程转 QPixmap）
 
@@ -79,6 +86,10 @@ class DownloadImage(QThread):
     def run(self):
         if not self.url:
             return
+        with _IMG_DOWNLOAD_SEMAPHORE:
+            self._download()
+
+    def _download(self):
         try:
             if self.W == 60:
                 r = http_utils.get(self.url + "@100w_100h.jpg", headers=http_utils.DEFAULT_HEADERS)
