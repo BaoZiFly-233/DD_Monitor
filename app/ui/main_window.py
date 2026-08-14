@@ -409,7 +409,7 @@ class MainWindow(WindowsFramelessMainWindow):
 
         # ---- 内嵌/弹出播放器初始化 ----
         self.videoWidgetList = []
-        self.popVideoWidgetList = [None] * 16
+        self.popVideoWidgetList = [None] * MAX_WINDOWS
         progressCounter = 1
         for i in range(16):
             volume = self.config["volume"][i]
@@ -954,14 +954,14 @@ class MainWindow(WindowsFramelessMainWindow):
         self.globalMuteToken = not self.globalMuteToken
         for videoWidget in self.videoWidgetList:
             videoWidget.mediaMute(force)
-        self.config["muted"] = [force] * 16
+        self.config["muted"] = [force] * MAX_WINDOWS
 
     def globalSetVolume(self, value):
         for videoWidget in self.videoWidgetList:
             videoWidget.set_volume_direct(int(value * videoWidget.volumeAmplify))
             videoWidget.volume = value
             videoWidget.slider.setValue(value)
-        self.config["volume"] = [value] * 16
+        self.config["volume"] = [value] * MAX_WINDOWS
         self.config["globalVolume"] = value
 
     def globalMediaStop(self):
@@ -1071,13 +1071,13 @@ class MainWindow(WindowsFramelessMainWindow):
             if not videoWidget.isHidden():  # 窗口没有被隐藏
                 videoWidget.quality = quality
                 videoWidget.mediaReload()
-        self.config["quality"] = [quality] * 16
+        self.config["quality"] = [quality] * MAX_WINDOWS
         self.configManager.save()
 
     def globalAudioChannel(self, audioChannel):
         for videoWidget in self._iterVideoWidgets(include_popups=True):
             videoWidget.set_audio_channel(audioChannel)
-        self.config["audioChannel"] = [audioChannel] * 16
+        self.config["audioChannel"] = [audioChannel] * MAX_WINDOWS
         self.configManager.save()
 
     def setDecode(self, hardwareDecodeToken):
