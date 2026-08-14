@@ -125,6 +125,28 @@ class TestMigrateRobustness:
         assert cm.config["layout"] == [(0, 0, 1, 1)]
         assert isinstance(cm.config["player"], list)
 
+    def test_danmu_numeric_fields_clamped(self, cm):
+        """danmu 数值字段越界/非数字必须 clamp 到合法范围（ComboBox 越界防护）"""
+        cm.config = {
+            "danmu": [[True, 999, 15, -3, 99, "x", "abc", 7, False]],
+        }
+        cm._migrate()
+        d = cm.config["danmu"][0]
+        assert d[1] == 100  # 透明度 999 → 100
+        assert d[2] == 9  # 横向占比 15 → 9（DISPLAY_RATIOS 10 项，index 0-9）
+        assert d[3] == 0  # 纵向占比 -3 → 0
+        assert d[4] == 2  # 显示类型 99 → 2
+        assert d[6] == 10  # 字号非数字 → 默认 10
+        assert d[7] == 3  # 礼物策略 7 → 3
+
+    def test_accent_invalid_fallback(self, cm):
+        """非法 accent 不崩溃：UI 层回退 blue（config 迁移保持原值，UI 校验）"""
+        from app.ui.uikit_bridge import ACCENT_NAMES, set_accent
+
+        with pytest.raises(ValueError):
+            set_accent("not_a_color")
+        set_accent(ACCENT_NAMES[0])  # 合法值不受影响
+
 
 class TestSave:
     def test_save_writes_file(self, cm):

@@ -103,4 +103,5 @@ class TestBoundaryClamping:
 
     def test_font_size_clamp(self):
         s = DanmakuSettings.from_config_list([True, 50, 1, 7, 0, "【 [ {", 99, 0, True])
-        assert s.font_size == 25
+        # 字号 ComboBox 为 5-25 共 21 项，index 合法范围 0-20
+        assert s.font_size == 20

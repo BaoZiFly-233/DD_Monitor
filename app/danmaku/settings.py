@@ -56,12 +56,12 @@ class DanmakuSettings:
         lst = lst[:9]
         return cls(
             enabled=bool(lst[0]),
-            opacity=max(7, int(lst[1])),
+            opacity=max(7, min(int(lst[1]), 100)),
             horizontal_index=max(0, min(int(lst[2]), 9)),
             vertical_index=max(0, min(int(lst[3]), 9)),
             translate_mode=max(0, min(int(lst[4]), 2)),
             translate_filters=str(lst[5]),
-            font_size=max(0, min(int(lst[6]), 25)),
+            font_size=max(0, min(int(lst[6]), 20)),
             show_enter_room=max(0, min(int(lst[7]), 3)),
             rolling_enabled=bool(lst[8]),
         )

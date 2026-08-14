@@ -158,8 +158,8 @@ class ConfigManager(QObject):
                 # [1]=透明度 7-100 [2]/[3]=占比 index 0-10 [4]=类型 0-2
                 # [6]=字号 index 0-20 [7]=礼物/进入 0-3
                 text_setting[1] = max(7, min(_safe_int(text_setting[1], 20), 100))
-                text_setting[2] = max(0, min(_safe_int(text_setting[2], 1), 10))
-                text_setting[3] = max(0, min(_safe_int(text_setting[3], 7), 10))
+                text_setting[2] = max(0, min(_safe_int(text_setting[2], 1), 9))
+                text_setting[3] = max(0, min(_safe_int(text_setting[3], 7), 9))
                 text_setting[4] = max(0, min(_safe_int(text_setting[4], 0), 2))
                 text_setting[5] = str(text_setting[5] or "【 [ {")
                 text_setting[6] = max(0, min(_safe_int(text_setting[6], 10), 20))
