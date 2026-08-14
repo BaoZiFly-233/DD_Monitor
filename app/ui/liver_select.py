@@ -956,7 +956,11 @@ class AddLiverRoomWidget(QWidget):
                 for line in vtbs:
                     line = line.strip()
                     if line:
-                        self.vtbList.append(line.split(","))
+                        parts = line.split(",")
+                        # 防御：少于 3 列的行补空列，避免 line[x] IndexError 导致整表加载失败
+                        while len(parts) < 3:
+                            parts.append("")
+                        self.vtbList.append(parts[:3])
                     else:
                         self.vtbList.append(["", "", ""])
             self.hacoTable.setRowCount(len(self.vtbList))
