@@ -1394,7 +1394,7 @@ class MainWindow(WindowsFramelessMainWindow):
         except (TypeError, ValueError):  # 空输入/非法字符：按 0 处理并提示
             intergerMaxCache = 0
         if intergerMaxCache <= 0:
-            info(self, "大小错误", "缓存大小不能小于为0GB!")
+            info(self, "大小错误", "缓存大小不能小于 1GB!")
             return
         self.config["maxCacheSize"] = intergerMaxCache * 1024000
         self.config["saveCachePath"] = savePath
