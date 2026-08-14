@@ -594,7 +594,9 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.videoFrame.setDanmakuInterval(fps)
         self.videoFrame.update()
         self._updateDanmuButtonState()
-        self._danmuDensityTimer.start()
+        # 仅启用滚动弹幕时才跑密度定时器（_updateDanmuDensity 内部自停）
+        if self.isRollingDanmuEnabled():
+            self._danmuDensityTimer.start()
 
         if self.textBrowser is None:
             return
