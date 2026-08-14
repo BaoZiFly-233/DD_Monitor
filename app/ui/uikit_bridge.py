@@ -449,10 +449,22 @@ def confirm(parent, title, text, on_result=None, ok_text="确定", cancel_text="
     return mb
 
 
-def info(parent, title, text, on_close=None, ok_text="知道了"):
-    """弹出 Fluent 风格信息框（非阻塞，仅确认按钮）。"""
-    mb = MessageBox(title, text, parent)
-    mb.hideCancelButton()
-    mb.yesSignal.connect(lambda: on_close() if on_close else None)
-    mb.show()
-    return mb
+def info(parent, title, text, on_close=None, ok_text="知道了", level="info"):
+    """Fluent InfoBar 通知（右下角滑入，3 秒自动消失，非阻塞）。
+
+    level: "info" / "success" / "warning" / "error"（决定图标与配色）。
+    与 confirm() 的区别：通知类提示用 InfoBar，重要决策用 MessageBox。
+    """
+    from qfluentwidgets_pro import InfoBar, InfoBarPosition
+
+    method = getattr(InfoBar, level if level in ("info", "success", "warning", "error") else "info")
+    bar = method(
+        title=title,
+        content=text,
+        duration=3000,
+        position=InfoBarPosition.BOTTOM_RIGHT,
+        parent=parent,
+    )
+    if on_close:
+        bar.closedSignal.connect(lambda: on_close())
+    return bar

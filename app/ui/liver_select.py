@@ -416,7 +416,7 @@ class CoverLabel(QLabel):
     def recordError(self, roomID):
         self.recordThread.checkTimer.stop()
         self.refreshStateLabel()
-        uikit_info(self, "录制中止", "%s %s 录制结束 请检查网络或主播是否掉线" % (self.title, roomID))
+        uikit_info(self, "录制中止", "%s %s 录制结束 请检查网络或主播是否掉线" % (self.title, roomID), level="error")
 
     def updateProfile(self, img):
         self.profile.set_image(img)
@@ -1087,7 +1087,7 @@ class AddLiverRoomWidget(QWidget):
     def collectVTBList(self, vtbList):
         try:
             if not vtbList:
-                uikit_info(self, "更新VUP名单", "更新失败 请检查网络")
+                uikit_info(self, "更新VUP名单", "更新失败 请检查网络", level="error")
                 return
             with open(os.path.join(self.application_path, "resources/vtb.csv"), "w", encoding="utf-8") as vtbs:
                 for line in vtbList:
@@ -1104,10 +1104,10 @@ class AddLiverRoomWidget(QWidget):
             for y, line in enumerate(self.vtbList):
                 for x in range(3):
                     self.hacoTable.setItem(y, x, QTableWidgetItem(line[x]))
-            uikit_info(self, "更新VUP名单", "更新完成")
+            uikit_info(self, "更新VUP名单", "更新完成", level="success")
         except Exception:
             logging.exception("vtb.csv 写入失败")
-            uikit_info(self, "更新VUP名单", "更新失败 请检查网络")
+            uikit_info(self, "更新VUP名单", "更新失败 请检查网络", level="error")
         finally:
             # 恢复按钮状态与连接（无论成功/失败/空名单）
             self.refreshButton.setText("更新名单")

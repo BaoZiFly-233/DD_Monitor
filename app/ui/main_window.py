@@ -1491,12 +1491,12 @@ class MainWindow(WindowsFramelessMainWindow):
         except (TypeError, ValueError):  # 空输入/非法字符：按 0 处理并提示
             intergerMaxCache = 0
         if intergerMaxCache <= 0:
-            info(self, "大小错误", "缓存大小不能小于 1GB!")
+            info(self, "大小错误", "缓存大小不能小于 1GB!", level="error")
             return
         self.config["maxCacheSize"] = intergerMaxCache * 1024000
         self.config["saveCachePath"] = savePath
         self.configManager.save()
-        info(self, "缓存设置更改", "设置成功 重启监控室后生效")
+        info(self, "缓存设置更改", "设置成功 重启监控室后生效", level="success")
 
     def openHotKey(self):
         hotkey_window = self._getHotKeyWindow()
@@ -1725,7 +1725,7 @@ class MainWindow(WindowsFramelessMainWindow):
         if savePath:
             try:
                 self.configManager.export_to(savePath)
-                info(self, "导出预设", "导出完成")
+                info(self, "导出预设", "导出完成", level="success")
             except Exception:
                 logging.exception("json 配置导出失败")
 
@@ -1735,7 +1735,7 @@ class MainWindow(WindowsFramelessMainWindow):
             if self.configManager.import_from(jsonPath, self.config["layout"]):
                 self.config = self.configManager.config
                 self.liverPanel.addLiverRoomList(self.config["roomid"])
-                info(self, "导入预设", "导入完成")
+                info(self, "导入预设", "导入完成", level="success")
 
     def muteExcept(self):
         if not self.soloToken:
