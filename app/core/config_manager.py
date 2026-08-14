@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
     "checkUpdate": True,
     "theme": "dark",
     "accent": "blue",
+    "popupGeometry": "",
     "sessionData": "",
     "loginUserInfo": {},
     "credential": {},

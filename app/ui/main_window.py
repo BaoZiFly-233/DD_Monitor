@@ -906,7 +906,22 @@ class MainWindow(WindowsFramelessMainWindow):
         pop_video_widget = self._getOrCreatePopVideoWidget(id)
         pop_video_widget.roomID = roomID
         pop_video_widget.quality = quality
-        pop_video_widget.resize(1280, 720)
+        # 恢复上次的悬浮窗位置（分辨率变化时 clamp 到可见区域），
+        # 否则每次都在默认位置弹出，用户拖到别处后下次又回默认
+        try:
+            from PySide6.QtCore import QByteArray
+
+            geom = QByteArray().fromBase64(self.config.get("popupGeometry", "").encode("ASCII"))
+            restored = pop_video_widget.restoreGeometry(geom)
+            if not restored:
+                pop_video_widget.resize(1280, 720)
+            # 确保窗口主体落在可见屏幕内（上次所在屏幕已断开/分辨率变化）
+            screen = QApplication.screenAt(pop_video_widget.frameGeometry().center())
+            if screen is None:
+                pop_video_widget.resize(1280, 720)
+                pop_video_widget.move(100, 100)
+        except Exception:
+            pop_video_widget.resize(1280, 720)
         pop_video_widget.show()
         pop_video_widget.setDanmakuBaseViewport(self._resolveDanmakuBaseViewport())
         if startWithDanmu:
@@ -1631,6 +1646,13 @@ class MainWindow(WindowsFramelessMainWindow):
 
     def closePopWindow(self, info):
         id, roomID = info
+        # 保存悬浮窗位置（关闭时），下次弹出恢复到同一位置
+        try:
+            pop = self.popVideoWidgetList[id - 16] if 16 <= id < 16 + len(self.popVideoWidgetList) else None
+            if pop is not None and pop.isVisible():
+                self.config["popupGeometry"] = str(pop.saveGeometry().toBase64(), "ASCII")
+        except Exception:
+            pass
         # 房间号有效
         if not self.videoWidgetList[id - 16].isHidden() and roomID != "0" and roomID:
             self.videoWidgetList[id - 16].roomID = roomID
