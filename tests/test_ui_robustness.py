@@ -6,6 +6,47 @@ import pytest
 pytest.importorskip("PySide6")
 
 
+def test_all_player_layout_presets_are_valid_and_non_overlapping():
+    """内置布局必须能完整映射到最多 16 个播放器且不能互相覆盖。"""
+    from app.ui.layout_config import layoutList
+    from app.ui.main_window import MAX_WINDOWS, MainWindow
+
+    assert len(layoutList) == 20
+    for preset in layoutList:
+        normalised = MainWindow._normaliseLayoutConfig(preset)
+        assert normalised == [tuple(item) for item in preset]
+        assert 1 <= len(normalised) <= MAX_WINDOWS
+
+        occupied = set()
+        for y, x, h, w in normalised:
+            cells = {
+                (row, column)
+                for row in range(y, y + h)
+                for column in range(x, x + w)
+            }
+            assert occupied.isdisjoint(cells)
+            occupied.update(cells)
+
+
+@pytest.mark.parametrize(
+    "invalid_layout",
+    [
+        None,
+        [],
+        [(0, 0, 1)],
+        [(0, 0, 0, 1)],
+        [(0, 0, 1, 1), (0, 0, 1, 1)],
+        [(16, 0, 1, 1)],
+        [(0, 0, 1, 1)] * 17,
+    ],
+)
+def test_invalid_player_layouts_are_rejected_as_a_whole(invalid_layout):
+    """损坏布局不能被部分应用，否则播放台会留下重叠或幽灵窗口。"""
+    from app.ui.main_window import MainWindow
+
+    assert MainWindow._normaliseLayoutConfig(invalid_layout) == []
+
+
 def test_cover_card_rounding_and_empty_text_are_safe(qapp):
     """新直播卡片使用抗锯齿圆角，空标题和空封面均可安全绘制。"""
     from PySide6.QtGui import QImage, QPixmap
@@ -23,7 +64,32 @@ def test_cover_card_rounding_and_empty_text_are_safe(qapp):
     assert card.getBorderRadius() == 8
     assert card.titleLabel.text() == "未知主播"
     assert card._coverPixmap.isNull()
+    assert card.titleLabel.geometry().top() >= 73
+    assert card.stateLabel.geometry().top() >= card.titleLabel.geometry().bottom()
     card.close()
+
+
+def test_card_panel_scrolls_when_top_dock_is_short(qapp, monkeypatch, tmp_path):
+    """多行 FlowLayout 应扩大内容高度，由滚动区接管而不是裁掉后续卡片。"""
+    from app.ui.liver_select import CollectLiverInfo, LiverPanel
+    from app.ui.main_window import ScrollArea
+
+    monkeypatch.setattr(CollectLiverInfo, "start", lambda self: None)
+    panel = LiverPanel({str(10000 + i): False for i in range(8)}, str(tmp_path))
+    scroll = ScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.resize(390, 180)
+    scroll.setWidget(panel)
+    scroll.show()
+    qapp.processEvents()
+    panel.syncFlowHeight(scroll.viewport().width())
+    qapp.processEvents()
+
+    assert panel.minimumHeight() == panel.layout.heightForWidth(scroll.viewport().width())
+    assert panel.minimumHeight() > scroll.viewport().height()
+    assert scroll.verticalScrollBar().maximum() > 0
+    scroll.close()
+    scroll.deleteLater()
 
 
 def test_global_danmaku_panel_uses_scrollable_embedded_pages(qapp):

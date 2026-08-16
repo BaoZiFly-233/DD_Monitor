@@ -52,7 +52,7 @@ Its play URL model also keeps quality and URL resolution outside the widget tree
 DD Monitor already follows this rule through `app/media/stream.py`; the same rule is
 now applied to danmaku events and room identity.
 
-## Proposed target architecture
+## Current danmaku architecture
 
 ```text
 blivedm websocket thread
@@ -61,7 +61,7 @@ blivedm websocket thread
         v
 room/request validation (GUI thread)
         |
-        +---------------------> DanmakuFeedModel
+        +---------------------> DanmakuEventModel
         |                       searchable live timeline
         |                       auto-follow / pause / resume
         |
@@ -100,7 +100,7 @@ matches the player. Raw strings are not a valid cross-thread contract.
 The per-player console is a model/view work surface rather than three overlapping
 `QTextBrowser` instances. It provides:
 
-- all/chat/event views;
+- all/chat/translation/interaction views;
 - search without mutating source data;
 - username, timestamp, kind and price presentation;
 - automatic following only while the user is already at the bottom;
@@ -132,19 +132,31 @@ These budgets are release gates, not aspirations.
 
 ## Delivery plan
 
-### Phase 1 - next danmaku refactor
+### Phase 1 - event and render core (implemented)
 
-- Introduce the immutable event contract and preserve metadata from `blivedm`.
-- Add room validation at the GUI boundary.
-- Add model/view live history with search and manual-scroll protection.
-- Move text rasterisation behind an asynchronous bounded cache.
-- Keep KikoPlay-style independent lane schedulers and collision prediction.
-- Rebuild the danmaku console and global settings as complete Fluent work surfaces.
-- Keep mpv scripts disabled and verify multi-instance native stability.
+- [x] Preserve room, connection, user, color, position, gift, medal and time metadata in an immutable event.
+- [x] Emit event objects from `blivedm` instead of preformatted strings.
+- [x] Reject old-room and old-connection events at the `VideoWidget` boundary.
+- [x] Replace rich-text history with a bounded model/delegate workbench, search and manual-scroll protection.
+- [x] Move text rasterisation behind an asynchronous cache with duplicate request coalescing.
+- [x] Keep KikoPlay-style independent lane schedulers and collision prediction.
+- [x] Rebuild the per-player danmaku console as a complete Fluent work surface.
+- [x] Keep mpv scripts disabled and verify multi-instance native stability.
 
-The README rewrite and reference review are complete. The runtime items above remain
-planned work and must not be presented as current functionality until their tests
-and native playback gates pass.
+Current limits and guarantees:
+
+- each player retains at most 500 events;
+- each renderer retains at most 128 cached sprites and 256 pending callbacks;
+- room changes clear the previous room history;
+- sprite misses are scheduled off the GUI thread;
+- the existing scroll/top/bottom overlay behavior remains compatible.
+
+Measured Phase 1 baseline on the current Windows development machine:
+
+- cached event append: about `0.028 ms/event`;
+- unique sprite miss scheduling: about `0.019 ms/request`;
+- workbench construction: about `45 ms`;
+- workbench reopen after hiding: about `4 ms`.
 
 ### Phase 2 - reliability and observability
 

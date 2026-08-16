@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QGridLayout,
+    QHBoxLayout,
     QTableWidgetItem,
+    QVBoxLayout,
     QToolTip,
     QWidget,
 )
@@ -30,7 +32,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtCore import QBuffer, QIODevice, QMimeData, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QRectF, Qt, QThread, QTimer, QUrl, Signal
 from app.core import http_utils
 from app.ui.common_widget import DownloadImage  # 公共图片下载线程
 from qfluentwidgets_pro import (
@@ -91,7 +93,7 @@ class CircleImage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(34, 34)
+        self.setFixedSize(30, 30)
         self.circle_image = QPixmap()
 
     def set_image(self, image):
@@ -99,12 +101,21 @@ class CircleImage(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        if self.circle_image.isNull():
-            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        circle_rect = self.rect().adjusted(1, 1, -1, -1)
+        if self.circle_image.isNull():
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(current_color("bg.muted")))
+            painter.drawEllipse(circle_rect)
+            FluentIcon.PEOPLE.render(
+                painter,
+                QRectF(8, 8, 14, 14),
+                fill=current_color("text.tertiary"),
+            )
+            return
         clip = QPainterPath()
-        clip.addEllipse(self.rect().adjusted(1, 1, -1, -1))
+        clip.addEllipse(circle_rect)
         painter.setClipPath(clip)
         pixmap = self.circle_image.scaled(
             self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
@@ -115,7 +126,7 @@ class CircleImage(QWidget):
         painter.setClipping(False)
         painter.setPen(QPen(QColor(current_color("border.strong")), 1))
         painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
+        painter.drawEllipse(circle_rect)
 
 
 def _category_button(name, selected=False):
@@ -230,27 +241,37 @@ class CoverLabel(CardWidget):
         self.roomTitle = ""  # 这里才是真的存放房间名的地方
         self.recordState = 0  # 0 无录制任务  1 录制中  2 等待开播录制
         self.savePath = ""
-        self.setFixedSize(168, 96)
+        self.setFixedSize(172, 124)
         self.setObjectName("cover")
         self.setBorderRadius(8)
         self.setClickEnabled(True)
         self._coverPixmap = QPixmap()
         self.firstUpdateToken = True
-        self.layout = QGridLayout(self)
-        self.layout.setContentsMargins(10, 9, 9, 9)
-        self.layout.setHorizontalSpacing(6)
-        self.layout.setVerticalSpacing(6)
-        self.titleLabel = BodyLabel("检测中")
-        self.titleLabel.setFont(QFont("Microsoft YaHei UI", 10, QFont.DemiBold))
-        self.titleLabel.setMaximumWidth(108)
-        self.layout.addWidget(self.titleLabel, 0, 0, 1, 1)
+
+        # 封面与信息分层：上方 16:6.6 预览，下方头像/主播名/状态。
+        # 小卡片不再把三类文字叠在图片上，任何封面亮度下都保持可读。
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(7, 7, 7, 7)
+        self.layout.setSpacing(5)
+        self.layout.addSpacing(66)
+        footer = QHBoxLayout()
+        footer.setContentsMargins(1, 0, 1, 0)
+        footer.setSpacing(7)
         self.profile = CircleImage()
-        self.layout.addWidget(self.profile, 0, 1, 2, 1, Qt.AlignTop | Qt.AlignRight)
+        footer.addWidget(self.profile, 0, Qt.AlignVCenter)
+        details = QVBoxLayout()
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(1)
+        self.titleLabel = BodyLabel("检测中")
+        self.titleLabel.setFont(QFont("Microsoft YaHei UI", 9, QFont.DemiBold))
+        self.titleLabel.setMaximumWidth(116)
+        details.addWidget(self.titleLabel)
         self.stateLabel = CaptionLabel("检测中")
-        self.stateLabel.setFont(QFont("Microsoft YaHei UI", 9, QFont.DemiBold))
-        self.stateLabel.setMaximumWidth(112)
-        self.layout.addWidget(self.stateLabel, 1, 0, 1, 1, Qt.AlignLeft | Qt.AlignBottom)
-        self.layout.setColumnStretch(0, 1)
+        self.stateLabel.setFont(QFont("Microsoft YaHei UI", 8, QFont.DemiBold))
+        self.stateLabel.setMaximumWidth(116)
+        details.addWidget(self.stateLabel, 0, Qt.AlignLeft)
+        footer.addLayout(details, 1)
+        self.layout.addLayout(footer)
         self.liveState = 0  # 0 未开播  1 直播中  2 投稿视频   -1 错误
         self._stateColorToken = "text.secondary"
         self._stateBackgroundToken = "bg.muted"
@@ -270,7 +291,7 @@ class CoverLabel(CardWidget):
 
     def _setTitleText(self, text):
         text = str(text or "未知主播")
-        self.titleLabel.setText(self.titleLabel.fontMetrics().elidedText(text, Qt.ElideRight, 108))
+        self.titleLabel.setText(self.titleLabel.fontMetrics().elidedText(text, Qt.ElideRight, 116))
 
     def _setState(self, text, color_token, background_token):
         self.stateLabel.setText(text)
@@ -279,15 +300,13 @@ class CoverLabel(CardWidget):
         self._applyTheme()
 
     def _applyTheme(self, *args):
-        has_cover = not self._coverPixmap.isNull()
-        title_color = "#FFFFFF" if has_cover else current_color("text.primary")
-        if self.topToken and not has_cover:
-            title_color = current_color("warning")
-        self.titleLabel.setStyleSheet(f"color:{title_color};background:transparent;")
+        self.titleLabel.setStyleSheet(
+            f"color:{current_color('text.primary')};background:transparent;"
+        )
         self.stateLabel.setStyleSheet(
             f"color:{current_color(self._stateColorToken)};"
             f"background-color:{current_color(self._stateBackgroundToken)};"
-            "border-radius:5px;padding:2px 6px;"
+            "border-radius:4px;padding:1px 5px;"
         )
         self.update()
 
@@ -337,19 +356,34 @@ class CoverLabel(CardWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        card_rect = self.rect().adjusted(1, 1, -1, -1)
-        clip = QPainterPath()
-        clip.addRoundedRect(card_rect, 8, 8)
-        painter.setClipPath(clip)
+
+        preview_rect = QRectF(7, 7, self.width() - 14, 66)
+        preview_path = QPainterPath()
+        preview_path.addRoundedRect(preview_rect, 6, 6)
+        painter.setClipPath(preview_path)
+        painter.fillRect(preview_rect, QColor(current_color("bg.muted")))
         if not self._coverPixmap.isNull():
+            target_size = preview_rect.size().toSize()
             cover = self._coverPixmap.scaled(
-                card_rect.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                target_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
             )
-            x = card_rect.x() + (card_rect.width() - cover.width()) // 2
-            y = card_rect.y() + (card_rect.height() - cover.height()) // 2
+            x = int(preview_rect.x() + (preview_rect.width() - cover.width()) / 2)
+            y = int(preview_rect.y() + (preview_rect.height() - cover.height()) / 2)
             painter.drawPixmap(x, y, cover)
-            painter.fillRect(card_rect, QColor(0, 0, 0, 78))
+        else:
+            icon_rect = QRectF(
+                preview_rect.center().x() - 10,
+                preview_rect.center().y() - 10,
+                20,
+                20,
+            )
+            FluentIcon.VIDEO.render(
+                painter,
+                icon_rect,
+                fill=current_color("text.tertiary"),
+            )
         painter.setClipping(False)
+
         border_color = current_color("border")
         border_width = 1
         if self.isPlaying:
@@ -1448,7 +1482,8 @@ class LiverPanel(QWidget):
         self._displayOrder = []
         # Fluent FlowLayout：卡片流式自动换行，随容器宽度自适应列数
         self.layout = FlowLayout(self, needAni=False)
-        self.layout.setSpacing(12)
+        self.layout.setHorizontalSpacing(10)
+        self.layout.setVerticalSpacing(10)
         self.layout.setContentsMargins(7, 7, 7, 7)
         self.coverList = []
         self.roomIDDict = self._normalize_room_dict(roomIDDict)
@@ -1468,6 +1503,18 @@ class LiverPanel(QWidget):
         self.collectLiverInfo = CollectLiverInfo(self._buildRoomIDListForCollector())
         self.collectLiverInfo.liverInfo.connect(self.refreshRoomPanel)
         self.collectLiverInfo.start()
+
+    def syncFlowHeight(self, width=None):
+        """让滚动内容高度匹配当前列数，避免多行卡片被 viewport 裁切。"""
+        content_width = max(1, int(width or self.width()))
+        required_height = max(0, self.layout.heightForWidth(content_width))
+        if self.minimumHeight() != required_height:
+            self.setMinimumHeight(required_height)
+            self.updateGeometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.syncFlowHeight(event.size().width())
 
     @property
     def addLiverRoomWidget(self):
@@ -1767,7 +1814,7 @@ class LiverPanel(QWidget):
             cover.show()
 
         self._displayOrder = ordered_covers
-        self.adjustSize()
+        self.syncFlowHeight()
 
     def getFirstRoomID(self):
         """获取卡片面板中第一个有效的房间号（用于快捷键加载）"""

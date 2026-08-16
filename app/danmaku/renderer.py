@@ -5,8 +5,9 @@ from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from hashlib import sha1
 import time
+import weakref
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QObject, QRunnable, QRectF, Qt, QThread, QThreadPool, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QPen
 
 from app.danmaku.layout import BottomLayout, RollLayout, TopLayout
@@ -79,30 +80,116 @@ class EmptyTextFilter(DanmakuDataFilter):
         return DanmakuFilterResult()
 
 
-class DanmakuImageCache:
-    """弹幕精灵缓存 — 每个 DanmakuRenderer 实例独立持有。
+_SPRITE_POOL = None
 
-    相同文字+样式的弹幕只渲染一次，缓存 QImage 精灵。
-    LRU 淘汰策略，超过上限时移除最久未使用的条目。
-    """
 
-    def __init__(self, max_items=128):
+def _sprite_pool():
+    global _SPRITE_POOL
+    if _SPRITE_POOL is None:
+        _SPRITE_POOL = QThreadPool()
+        _SPRITE_POOL.setMaxThreadCount(max(1, min(2, QThread.idealThreadCount())))
+        _SPRITE_POOL.setExpiryTimeout(10_000)
+    return _SPRITE_POOL
+
+
+class _SpriteRenderTask(QRunnable):
+    def __init__(self, cache, key, text, color, style):
+        super().__init__()
+        self._cache_ref = weakref.ref(cache)
+        self._key = key
+        self._text = text
+        self._color = color
+        self._style = style
+
+    def run(self):
+        sprite = DanmakuImageCache._render_sprite(
+            self._key,
+            self._text,
+            self._color,
+            self._style,
+        )
+        cache = self._cache_ref()
+        if cache is None:
+            return
+        try:
+            cache._sprite_rendered.emit(self._key, sprite)
+        except RuntimeError:
+            return
+
+
+class DanmakuImageCache(QObject):
+    """LRU sprite cache with bounded asynchronous miss rendering."""
+
+    _sprite_rendered = Signal(str, object)
+
+    def __init__(self, max_items=128, max_pending=256, parent=None):
+        super().__init__(parent)
         self._cache = OrderedDict()
+        self._pending = {}
+        self._pending_count = 0
         self._max_items = max(32, int(max_items))
+        self._max_pending = max(1, int(max_pending))
+        self._sprite_rendered.connect(self._on_sprite_rendered)
 
-    def get_or_create(self, text, color, style: DanmakuStyle):
-        key = self._build_key(text, color, style)
+    def _cached_sprite(self, key):
         sprite = self._cache.get(key)
         if sprite is not None:
             self._cache.move_to_end(key)
-            return sprite
+        return sprite
 
-        sprite = self._render_sprite(key, text, color, style)
-        self._cache[key] = sprite
-        self._cache.move_to_end(key)
+    def _store_sprite(self, sprite):
+        self._cache[sprite.key] = sprite
+        self._cache.move_to_end(sprite.key)
         while len(self._cache) > self._max_items:
             self._cache.popitem(last=False)
+
+    def get_or_create(self, text, color, style: DanmakuStyle):
+        """Synchronously fetch a sprite for tests and explicit pre-warming."""
+        key = self._build_key(text, color, style)
+        sprite = self._cached_sprite(key)
+        if sprite is not None:
+            return sprite
+        sprite = self._render_sprite(key, text, color, style)
+        self._store_sprite(sprite)
         return sprite
+
+    def get_or_request(self, text, color, style: DanmakuStyle, callback):
+        """Return a hit immediately or queue one bounded background render."""
+        key = self._build_key(text, color, style)
+        sprite = self._cached_sprite(key)
+        if sprite is not None:
+            return sprite
+        if self._pending_count >= self._max_pending:
+            return None
+
+        callbacks = self._pending.get(key)
+        if callbacks is None:
+            callbacks = []
+            self._pending[key] = callbacks
+            _sprite_pool().start(_SpriteRenderTask(self, key, text, color, style))
+        callbacks.append(callback)
+        self._pending_count += 1
+        return None
+
+    @property
+    def pending_count(self):
+        return self._pending_count
+
+    def cancel_pending(self):
+        self._pending.clear()
+        self._pending_count = 0
+
+    @Slot(str, object)
+    def _on_sprite_rendered(self, key, sprite):
+        callbacks = self._pending.pop(key, None)
+        if callbacks is None:
+            return
+        self._pending_count = max(0, self._pending_count - len(callbacks))
+        if not isinstance(sprite, CachedSprite):
+            return
+        self._store_sprite(sprite)
+        for callback in callbacks:
+            callback(sprite)
 
     @staticmethod
     def _build_key(text, color, style: DanmakuStyle):
@@ -180,8 +267,9 @@ class DanmakuRenderer:
         self._roll_layout = RollLayout()
         self._top_layout = TopLayout()
         self._bottom_layout = BottomLayout()
-        self._image_cache = DanmakuImageCache(max_items=128)
+        self._image_cache = DanmakuImageCache(max_items=128, max_pending=256)
         self._active = []
+        self._render_generation = 0
         self._enabled = True
         self._roll_duration = 12.0
         self._viewport_width = 0
@@ -353,6 +441,16 @@ class DanmakuRenderer:
     def _active_count_by_kind(self, kind):
         return sum(1 for bullet in self._active if bullet.kind == kind)
 
+    def addEvent(self, event):
+        if not getattr(event, "is_overlay", False):
+            return
+        self.addDanmaku(
+            event.text,
+            color=event.color,
+            kind=event.position,
+            uname=event.uname,
+        )
+
     def addDanmaku(self, text, color="#FFFFFF", kind="scroll", uname=""):
         if not self._enabled or self._viewport_width <= 0 or self._viewport_height <= 0:
             return
@@ -368,11 +466,39 @@ class DanmakuRenderer:
         ):
             return
 
-        item = DanmakuItemData(text=str(text), color=str(color), kind=normalized_kind, uname=str(uname))
+        overlay_text = str(text).strip()
+        if len(overlay_text) > 200:
+            overlay_text = overlay_text[:197] + "..."
+        item = DanmakuItemData(
+            text=overlay_text,
+            color=str(color),
+            kind=normalized_kind,
+            uname=str(uname),
+        )
         if self._run_data_filters(item).filtered:
             return
 
-        sprite = self._image_cache.get_or_create(item.text, item.color, self._style)
+        generation = self._render_generation
+        sprite = self._image_cache.get_or_request(
+            item.text,
+            item.color,
+            self._style,
+            lambda ready, pending=item, token=generation: self._on_sprite_ready(
+                pending,
+                ready,
+                token,
+            ),
+        )
+        if sprite is not None:
+            self._place_item(item, sprite)
+
+    def _on_sprite_ready(self, item, sprite, generation):
+        if generation != self._render_generation or not self._enabled:
+            return
+        self._place_item(replace(item, created_at=time.monotonic()), sprite)
+
+    def _place_item(self, item, sprite):
+        normalized_kind = item.kind
         if normalized_kind == self.ROLL_KIND:
             placement = self._roll_layout.allocate(
                 item.created_at, sprite.width, sprite.layout_height, self._roll_duration
@@ -384,6 +510,12 @@ class DanmakuRenderer:
             speed = float(placement.speed)
             y = float(placement.y)
         else:
+            if normalized_kind == self.TOP_KIND and not self._top_enabled:
+                return
+            if normalized_kind == self.BOTTOM_KIND and not self._bottom_enabled:
+                return
+            if self._active_count_by_kind(normalized_kind) >= self._MAX_FIXED_PER_KIND:
+                return
             layout = self._top_layout if normalized_kind == self.TOP_KIND else self._bottom_layout
             placement = layout.allocate(item.created_at, sprite.width, sprite.layout_height, self._FIXED_DURATION)
             if placement is None:
@@ -412,6 +544,8 @@ class DanmakuRenderer:
         self._request_update()
 
     def stop(self):
+        self._render_generation += 1
+        self._image_cache.cancel_pending()
         self._active.clear()
         self._roll_layout.reset()
         self._top_layout.reset()

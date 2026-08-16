@@ -3,6 +3,7 @@
 
 import time
 
+from app.danmaku.events import DanmakuEvent
 from app.danmaku.renderer import (
     DanmakuDataFilter,
     DanmakuFilterResult,
@@ -10,6 +11,17 @@ from app.danmaku.renderer import (
     DanmakuRenderer,
     EmptyTextFilter,
 )
+
+
+def _wait_until(qapp, predicate, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return
+        time.sleep(0.005)
+    qapp.processEvents()
+    assert predicate()
 
 
 class TestFilters:
@@ -70,6 +82,18 @@ class TestImageCache:
         s2 = cache.get_or_create("乙", "#FFFFFF", style)
         assert s1 is not s2
 
+    def test_async_miss_queue_is_bounded(self, qapp):
+        from app.danmaku.renderer import DanmakuStyle
+
+        cache = DanmakuImageCache(max_items=32, max_pending=4)
+        style = DanmakuStyle()
+        for index in range(10):
+            cache.get_or_request(f"pending-{index}", "#FFFFFF", style, lambda sprite: None)
+
+        assert cache.pending_count == 4
+        cache.cancel_pending()
+        assert cache.pending_count == 0
+
     def test_lru_eviction(self, qapp):
         from app.danmaku.renderer import DanmakuStyle
 
@@ -91,18 +115,65 @@ class TestImageCache:
 
 
 class TestRendererLifecycle:
+    def test_add_structured_event(self, qapp):
+        renderer = DanmakuRenderer()
+        renderer.setViewportSize(800, 600)
+        renderer.addEvent(
+            DanmakuEvent(
+                connection_id=1,
+                room_id="100",
+                kind="danmaku",
+                text="结构化弹幕",
+                position="top",
+            )
+        )
+        _wait_until(qapp, lambda: renderer.activeCount() == 1)
+
+    def test_non_overlay_event_is_ignored(self, qapp):
+        renderer = DanmakuRenderer()
+        renderer.setViewportSize(800, 600)
+        renderer.addEvent(
+            DanmakuEvent(
+                connection_id=1,
+                room_id="100",
+                kind="gift",
+                text="礼物",
+            )
+        )
+        assert renderer.activeCount() == 0
+        assert renderer._image_cache.pending_count == 0
+
     def test_add_scroll_danmaku(self, qapp):
         renderer = DanmakuRenderer()
         renderer.setViewportSize(800, 600)
         renderer.addDanmaku("滚动弹幕", color="#FF0000", kind="scroll")
-        assert renderer.activeCount() == 1
+        assert renderer.activeCount() == 0
+        assert renderer._image_cache.pending_count == 1
+        _wait_until(qapp, lambda: renderer.activeCount() == 1)
         assert renderer.hasActiveDanmaku()
+
+    def test_overlay_text_is_trimmed_and_bounded(self, qapp):
+        captured = []
+
+        class CaptureCache:
+            def get_or_request(self, text, color, style, callback):
+                captured.append(text)
+                return None
+
+        renderer = DanmakuRenderer()
+        renderer.setViewportSize(800, 600)
+        renderer._image_cache = CaptureCache()
+        renderer.addDanmaku("  " + "x" * 240 + "  ", kind="scroll")
+
+        assert len(captured) == 1
+        assert len(captured[0]) == 200
+        assert captured[0].endswith("...")
 
     def test_add_top_danmaku(self, qapp):
         renderer = DanmakuRenderer()
         renderer.setViewportSize(800, 600)
         renderer.addDanmaku("顶部", kind="top")
-        assert renderer.activeCount() == 1
+        _wait_until(qapp, lambda: renderer.activeCount() == 1)
 
     def test_top_disabled_rejects(self, qapp):
         renderer = DanmakuRenderer()
@@ -123,13 +194,17 @@ class TestRendererLifecycle:
         renderer.addDanmaku("无视口", kind="scroll")
         assert renderer.activeCount() == 0
 
-    def test_stop_clears(self, qapp):
+    def test_stop_clears_and_invalidates_pending_renders(self, qapp):
         renderer = DanmakuRenderer()
         renderer.setViewportSize(800, 600)
         for i in range(5):
             renderer.addDanmaku(f"弹幕{i}", kind="scroll")
-        assert renderer.activeCount() == 5
         renderer.stop()
+        assert renderer.activeCount() == 0
+        assert renderer._image_cache.pending_count == 0
+        for _ in range(20):
+            qapp.processEvents()
+            time.sleep(0.005)
         assert renderer.activeCount() == 0
 
     def test_fixed_kind_limit(self, qapp):
@@ -140,13 +215,14 @@ class TestRendererLifecycle:
         limit = renderer._MAX_FIXED_PER_KIND
         for i in range(limit + 10):
             renderer.addDanmaku(f"t{i}", kind="top")
+        _wait_until(qapp, lambda: renderer._image_cache.pending_count == 0)
         assert renderer.activeCount() == limit
 
     def test_purge_expired(self, qapp):
         renderer = DanmakuRenderer()
         renderer.setViewportSize(800, 600)
         renderer.addDanmaku("临时", kind="scroll")
-        assert renderer.activeCount() == 1
+        _wait_until(qapp, lambda: renderer.activeCount() == 1)
         # 模拟时间流逝：手动把弹幕的 expire_time 改为过去
         now = time.monotonic()
         for bullet in renderer._active:

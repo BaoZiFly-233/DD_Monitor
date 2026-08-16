@@ -12,7 +12,9 @@ from PySide6.QtGui import QDesktopServices, QDrag, QFont, QCursor
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QTimer, QUrl, Signal
 from app.core.bili_credential import normalize_credential_data
 from app.ui.title_bar import AppTitleBar, FramelessWindowBase, TITLE_BAR_HEIGHT, apply_fullscreen_style
-from app.media.remote import DanmakuEvent, remoteThread
+from app.danmaku.events import DanmakuEvent
+from app.danmaku.model import DanmakuEventModel
+from app.media.remote import remoteThread
 from app.media.stream import FetchRoomInfo, GetStreamURL, StreamResult, is_valid_stream_url
 from app.core.constants import DISPLAY_RATIOS
 from app.danmaku.settings import DanmakuSettings
@@ -147,6 +149,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
     fullScreenKey = Signal()
     muteExceptKey = Signal()
     closePopWindow = Signal(list)
+    danmakuEvent = Signal(object)
 
     def __init__(
         self,
@@ -362,8 +365,12 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.fetchRoomInfo.finished.connect(self._onRoomInfoFetchFinished)
         self._roomInfoPending = False
 
+        self.danmakuModel = DanmakuEventModel(self, max_events=500)
+        self._danmakuHistoryRoomId = str(self.roomID)
         self.danmu = remoteThread(self.roomID, self.sessionData)
         self._danmuPendingRestart = False
+        self._danmuConnectionSerial = 0
+        self._activeDanmuConnectionId = 0
         self.danmu.finished.connect(self._onDanmuFinished)
 
         # ---- 定时器 ----
@@ -415,11 +422,18 @@ class VideoWidget(FramelessWindowBase, QFrame):
         if self.textBrowser is not None:
             return self.textBrowser
 
-        self.textBrowser = TextBrowser(self)
+        self.textBrowser = TextBrowser(self, event_model=self.danmakuModel)
         self.textBrowser.closeSignal.connect(self.closeDanmu)
         self.textBrowser.moveSignal.connect(self.moveTextBrowser)
+        self.textBrowser.optionWidgetCreated.connect(self._wireTextBrowserOptions)
 
-        option_widget = self.textBrowser.optionWidget
+        self.applyDanmuSettings()
+        if not self.textSetting[0]:
+            self.textBrowser.hide()
+        self.moveTextBrowser()
+        return self.textBrowser
+
+    def _wireTextBrowserOptions(self, option_widget):
         option_widget.opacitySlider.setValue(self.textSetting[1])
         option_widget.horizontalCombobox.setCurrentIndex(self.textSetting[2])
         option_widget.verticalCombobox.setCurrentIndex(self.textSetting[3])
@@ -435,12 +449,6 @@ class VideoWidget(FramelessWindowBase, QFrame):
         option_widget.translateFitler.textChanged.connect(self.setTranslateFilter)
         option_widget.fontSizeCombox.currentIndexChanged.connect(self.setFontSize)
         option_widget.showEnterRoom.currentIndexChanged.connect(self.setMsgsBrowser)
-
-        self.applyDanmuSettings()
-        if not self.textSetting[0]:
-            self.textBrowser.hide()
-        self.moveTextBrowser()
-        return self.textBrowser
 
     def applyDanmuSettings(self):
         browser_opacity = max(self.textSetting[1], 7)
@@ -471,35 +479,11 @@ class VideoWidget(FramelessWindowBase, QFrame):
         if self.textBrowser is None:
             return
 
-        alpha_hex = format(max(0, min(255, int(round(browser_opacity / 100.0 * 255)))), "02x")
-        # 弹幕机为视频浮层：背景固定半透明黑 + 文字固定白色，不随明暗主题变化
-        self.textBrowser.textBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000;color:#FFFFFF")
-        self.textBrowser.transBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000;color:#FFFFFF")
-        self.textBrowser.msgsBrowser.setStyleSheet(f"background-color:#{alpha_hex}000000;color:#FFFFFF")
-
-        self.textBrowser.textBrowser.setFont(QFont("Microsoft JhengHei", browser_font_size, QFont.Bold))
-        self.textBrowser.transBrowser.setFont(QFont("Microsoft JhengHei", browser_font_size, QFont.Bold))
-        self.textBrowser.msgsBrowser.setFont(QFont("Microsoft JhengHei", browser_font_size, QFont.Bold))
-
-        if self.textSetting[4] == 0:
-            self.textBrowser.textBrowser.show()
-            self.textBrowser.transBrowser.show()
-        elif self.textSetting[4] == 1:
-            self.textBrowser.transBrowser.hide()
-            self.textBrowser.textBrowser.show()
-        elif self.textSetting[4] == 2:
-            self.textBrowser.textBrowser.hide()
-            self.textBrowser.transBrowser.show()
-
-        if self.textSetting[7] < 3:
-            self.textBrowser.msgsBrowser.show()
-        else:
-            self.textBrowser.msgsBrowser.hide()
-
+        self.textBrowser.setPanelOpacity(browser_opacity / 100.0)
+        self.textBrowser.setFontSize(browser_font_size)
+        self.textBrowser.setTranslationRules(self.filters)
+        self.textBrowser.setDisplayFilters(self.textSetting[4], self.textSetting[7])
         self.textBrowser.resize(self.width() * self.horiPercent, self.height() * self.vertPercent)
-        self.textBrowser.textBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.transBrowser.verticalScrollBar().setValue(100000000)
-        self.textBrowser.msgsBrowser.verticalScrollBar().setValue(100000000)
 
     def _rollingSpeedFactor(self):
         return max(0.5, min(int(self.rollingSetting.get("speed_percent", 85)) / 100.0, 2.0))
@@ -691,9 +675,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.credential = normalize_credential_data(base_credential, sessdata=self.sessionData)
         self.getMediaURL.sessionData = self.sessionData
         self.getMediaURL.credential = self.credential
-        self.danmu.setSessionData(self.sessionData)
-        # 弹幕线程已连上游客连接时，setSessionData 只对下一次连接生效；
-        # 登录态变化（登录/登出）时重启弹幕连接，让 SESSDATA 立即生效
+        # 登录态变化时重启连接；运行中 worker 的配置保持不可变。
         if session_changed and self.danmu.isRunning():
             self._restartDanmu()
 
@@ -897,12 +879,25 @@ class VideoWidget(FramelessWindowBase, QFrame):
     def setTranslateFilter(self, filterWords):
         self.textSetting[5] = filterWords
         self.filters = filterWords.split(" ")
+        if self.textBrowser is not None:
+            self.textBrowser.setTranslationRules(self.filters)
         self.setDanmu.emit()
 
     def setFontSize(self, index):
         self.textSetting[6] = index
         self.applyDanmuSettings()
         self.setDanmu.emit()
+
+    def nativeEvent(self, eventType, message):
+        """嵌入式播放器不处理无边框顶层窗口的原生消息。"""
+        if getattr(self, "top", False):
+            # Windows 的 FramelessWindowBase 只有在 _initFrameless() 完成后
+            # 才具备 windowEffect；其他平台没有这个 Windows 专属属性。
+            can_use_frameless_handler = sys.platform != "win32" or hasattr(self, "windowEffect")
+            handler = getattr(FramelessWindowBase, "nativeEvent", None)
+            if can_use_frameless_handler and handler is not None:
+                return handler(self, eventType, message)
+        return QFrame.nativeEvent(self, eventType, message)
 
     def resizeEvent(self, QEvent):
         try:
@@ -1041,10 +1036,6 @@ class VideoWidget(FramelessWindowBase, QFrame):
                 self.roomID = room_id
                 self.addMedia.emit([self.id, self.roomID])
                 self.mediaReload()
-                if self.textBrowser is not None:
-                    self.textBrowser.textBrowser.clear()
-                    self.textBrowser.transBrowser.clear()
-                    self.textBrowser.msgsBrowser.clear()
             elif "exchange" in text:
                 parts = text.split(":")
                 if len(parts) < 3:  # 数据格式异常
@@ -1234,6 +1225,10 @@ class VideoWidget(FramelessWindowBase, QFrame):
 
     def mediaReload(self):
         self.checkPlaying.stop()
+        current_room_id = str(self.roomID)
+        if current_room_id != self._danmakuHistoryRoomId:
+            self.danmakuModel.clear()
+            self._danmakuHistoryRoomId = current_room_id
         if self.roomID != "0":
             self.playerRestart()
             self.setTitle()  # 异步获取房间信息，播放在 _onRoomInfo 回调中触发
@@ -1262,43 +1257,52 @@ class VideoWidget(FramelessWindowBase, QFrame):
         self.getMediaURL.recordToken = False
         self.checkPlaying.stop()
         self.stopDanmu()
+        self.danmakuModel.clear()
+        self._danmakuHistoryRoomId = "0"
         self.refreshTimeStampTimer.stop()
         self.hideTextBrowser()
 
     def _safe_disconnect_danmu(self):
-        """安全断开弹幕信号，抑制未连接时的 RuntimeWarning"""
+        """安全断开弹幕信号，抑制未连接时的 RuntimeWarning。"""
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
-                self.danmu.message.disconnect(self.playDanmu)
+                self.danmu.message.disconnect(self._onDanmakuEvent)
             except (RuntimeError, TypeError):
                 pass
 
     def stopDanmu(self):
         self._safe_disconnect_danmu()
         self._danmuPendingRestart = False
+        self._activeDanmuConnectionId = 0
         self.danmu.stop()
         self.scrollingDanmaku.reset()
         # 非阻塞：不调用 wait()，线程收到 stop 信号后退出，
         # finished 信号会触发 _onDanmuFinished
 
-    def _restartDanmu(self):
-        """内部：请求重启弹幕线程（如果线程在运行则等 finished 信号）"""
-        self.danmu.setRoomID(self.roomID)
-        self.danmu.setSessionData(self.sessionData)
+    def _startDanmuConnection(self):
+        if self.roomID in ("", "0"):
+            return
+        self._danmuConnectionSerial += 1
+        self._activeDanmuConnectionId = self._danmuConnectionSerial
+        self.danmu.configure(self.roomID, self.sessionData, self._activeDanmuConnectionId)
         self._safe_disconnect_danmu()
-        self.danmu.message.connect(self.playDanmu)
+        self.danmu.message.connect(self._onDanmakuEvent)
+        self.danmu.start()
+
+    def _restartDanmu(self):
+        """请求重启弹幕线程，运行中的旧连接退出后再提交新配置。"""
         if self.danmu.isRunning():
             self._danmuPendingRestart = True
             self.danmu.stop()
         else:
-            self.danmu.start()
+            self._startDanmuConnection()
 
     def _onDanmuFinished(self):
-        """弹幕线程结束回调 — 处理待重启请求"""
+        """弹幕线程结束回调 — 处理待重启请求。"""
         if self._danmuPendingRestart:
             self._danmuPendingRestart = False
-            self.danmu.start()
+            self._startDanmuConnection()
 
     def reloadDanmu(self):
         self._restartDanmu()
@@ -1535,8 +1539,7 @@ class VideoWidget(FramelessWindowBase, QFrame):
         else:
             self.titleLabel.setToolTip(self.uname)
 
-    @staticmethod
-    def _coerceDanmakuEvent(message):
+    def _coerceDanmakuEvent(self, message):
         if isinstance(message, DanmakuEvent):
             return message
         if isinstance(message, dict):
@@ -1544,14 +1547,30 @@ class VideoWidget(FramelessWindowBase, QFrame):
             fallback_position = raw_kind if raw_kind in {"scroll", "top", "bottom"} else "scroll"
             position = str(message.get("position", message.get("dm_position", fallback_position)))
             return DanmakuEvent(
+                connection_id=message.get("connection_id", self._activeDanmuConnectionId),
+                room_id=message.get("room_id", self.roomID),
                 kind=raw_kind,
                 text=message.get("text", ""),
                 uname=message.get("uname", ""),
+                user_id=message.get("user_id", ""),
+                user_avatar=message.get("user_avatar", ""),
                 color=message.get("color", "#FFFFFF"),
-                price=float(message.get("price", 0.0) or 0.0),
+                price=message.get("price", 0.0),
+                quantity=message.get("quantity", 0),
+                gift_name=message.get("gift_name", ""),
+                medal_name=message.get("medal_name", ""),
+                medal_level=message.get("medal_level", 0),
+                guard_level=message.get("guard_level", 0),
+                is_translation=message.get("is_translation", False),
                 position=position,
+                timestamp_ms=message.get("timestamp_ms", 0),
             )
-        return DanmakuEvent(kind="danmaku", text=str(message))
+        return DanmakuEvent(
+            connection_id=self._activeDanmuConnectionId,
+            room_id=str(self.roomID),
+            kind="danmaku",
+            text=str(message),
+        )
 
     @staticmethod
     def _normalizeDanmakuPosition(position):
@@ -1567,41 +1586,45 @@ class VideoWidget(FramelessWindowBase, QFrame):
             return bool(self.rollingSetting.get("bottom_enabled", True))
         return True
 
+    def _onDanmakuEvent(self, event):
+        if not isinstance(event, DanmakuEvent):
+            return
+        if (
+            event.connection_id != self._activeDanmuConnectionId
+            or event.room_id != str(self.roomID)
+            or self.roomID in ("", "0")
+        ):
+            logging.debug(
+                "%s 丢弃迟到弹幕 room=%s/%s generation=%s/%s",
+                self.name_str,
+                event.room_id,
+                self.roomID,
+                event.connection_id,
+                self._activeDanmuConnectionId,
+            )
+            return
+        if event.kind in {"danmaku", "super_chat"} and not event.is_translation:
+            event = event.mark_translation(
+                any(symbol and symbol in event.text for symbol in self.filters)
+            )
+        if not self.danmakuModel.append_event(event):
+            return
+        self.danmakuEvent.emit(event)
+        if event.is_overlay:
+            self.playDanmu(event)
+
     def playDanmu(self, message):
         event = self._coerceDanmakuEvent(message)
-        text = event.text
-        kind = event.kind
-        color = event.color
-        position = self._normalizeDanmakuPosition(getattr(event, "position", "scroll"))
-        text_browser = self.ensureTextBrowser() if self.isBrowserDanmuEnabled() else None
+        position = self._normalizeDanmakuPosition(event.position)
 
-        if kind in {"gift", "guard", "enter"}:
-            if text_browser is None:
-                return
-            if self.textSetting[7] == 0:
-                text_browser.msgsBrowser.append(text)
-            elif self.textSetting[7] == 1 and kind in {"gift", "guard"}:
-                text_browser.msgsBrowser.append(text)
-            elif self.textSetting[7] == 2 and kind == "enter":
-                text_browser.msgsBrowser.append(text)
-            return
-
-        token = False
-        if text_browser is not None:
-            for symbol in self.filters:
-                if symbol and symbol in text:
-                    text_browser.transBrowser.append(text)
-                    token = True
-                    break
-        if not token and text_browser is not None:
-            text_browser.textBrowser.append(text + "\n")
         if (
-            self.isRollingDanmuEnabled()
+            event.is_overlay
+            and self.isRollingDanmuEnabled()
             and self._isRollingPositionEnabled(position)
             and hasattr(self, "scrollingDanmaku")
             and self.scrollingDanmaku
         ):
-            self.scrollingDanmaku.addDanmaku(text, color=color, kind=position, uname=event.uname)
+            self.scrollingDanmaku.addEvent(event)
 
     def keyPressEvent(self, QKeyEvent):
         if QKeyEvent.key() == Qt.Key_Escape:

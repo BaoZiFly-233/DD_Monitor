@@ -2,15 +2,13 @@
 
 from PySide6.QtWidgets import (
     QLabel,
-    QToolButton,
     QWidget,
-    QTextBrowser,
     QGridLayout,
     QVBoxLayout,
     QFrame,
 )
-from PySide6.QtGui import QFont, QPainterPath
-from PySide6.QtCore import Qt, Signal, QPoint, QSize, QRectF
+from PySide6.QtGui import QColor, QPainterPath
+from PySide6.QtCore import Qt, Signal, QPoint, QRectF
 from app.ui.common_widget import Slider  # 保留：sliderValue 信号被主窗口/弹幕机连接
 from app.ui.title_bar import FluentWindow
 from qfluentwidgets_pro import (
@@ -18,23 +16,20 @@ from qfluentwidgets_pro import (
     ComboBox,
     EditableComboBox,
     FluentIcon,
-    Icon,
     LineEdit,
     Slider as FluentSlider,
     SmoothScrollArea,
     TabWidget,
 )
 from qfluentwidgets_pro.components.material.acrylic_widget import AcrylicWidget
+from qfluentwidgets_pro.components.widgets.button import TransparentToolButton
 from app.ui.uikit_bridge import is_dark, theme_changed
+from app.ui.danmaku_workbench import DanmakuWorkbench
 
 # 弹幕显示比例（定义在 constants.py，此处重导出兼容旧导入路径）
 from app.core.constants import DISPLAY_RATIOS  # noqa: F401
 # 弹幕配置数据类（独立模块，纯数据无 Qt 依赖；重导出兼容旧导入路径）
 from app.danmaku.settings import DanmakuSettings  # noqa: F401
-
-# 弹幕机标题栏图标映射（Fluent 矢量图标，颜色随主题自动适配）
-_DANMU_ICONS = {"settings": FluentIcon.SETTING, "close": FluentIcon.CLOSE}
-
 
 class Bar(QLabel):
     """自定义标题栏"""
@@ -67,21 +62,6 @@ class Bar(QLabel):
     def mouseMoveEvent(self, event):
         if self.pressToken:
             self.moveSignal.emit(self.mapToParent(event.pos() - self.startPos))
-
-
-class ToolButton(QToolButton):
-    """标题栏按钮（Fluent 矢量图标，颜色随主题自动适配）
-
-    注意：不能继承 qfluentwidgets 的 ToolButton——其构造用 singledispatch
-    重载，子类里 super().__init__(icon=...) 会被转发回子类自身导致
-    TypeError（弹幕机创建即崩）。用 QToolButton + Icon(QIcon) 同效。
-    """
-
-    def __init__(self, icon_name, size=18):
-        super().__init__()
-        self.setFixedSize(25, 25)
-        self.setIconSize(QSize(size, size))
-        self.setIcon(Icon(_DANMU_ICONS.get(icon_name, FluentIcon.INFO)))
 
 
 class BrowserOptionWidget(QWidget):
@@ -158,8 +138,8 @@ class BrowserOptionWidget(QWidget):
 class TextOption(FluentWindow):
     """弹幕机选项独立窗口。"""
 
-    def __init__(self, setting=None):
-        super().__init__(title="弹幕窗设置")
+    def __init__(self, setting=None, parent=None):
+        super().__init__(parent=parent, title="弹幕窗设置")
         self.resize(380, 460)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.optionPage = BrowserOptionWidget(setting, self)
@@ -180,15 +160,16 @@ class TextBrowser(AcrylicWidget, QWidget):
 
     closeSignal = Signal()
     moveSignal = Signal(QPoint)
+    optionWidgetCreated = Signal(object)
 
-    def __init__(self, parent):
-        super(TextBrowser, self).__init__(parent)
-        self.optionWidget = TextOption()
+    def __init__(self, parent, event_model=None):
+        super().__init__(parent)
+        self.optionWidget = None
         self.setWindowTitle("弹幕机")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
-        # ---- 窗体布局（三区：弹幕 60% / 同传 25% / 信息 15%）----
+        # ---- 窗体布局：统一事件工作台 ----
         layout = QGridLayout(self)
         layout.setContentsMargins(10, 0, 10, 10)
         layout.setSpacing(6)
@@ -198,58 +179,56 @@ class TextBrowser(AcrylicWidget, QWidget):
         self.bar.moveSignal.connect(self.moveWindow)
         layout.addWidget(self.bar, 0, 0, 1, 8)
         # 弹幕选项菜单
-        self.optionButton = ToolButton("settings")
+        self.optionButton = TransparentToolButton(FluentIcon.SETTING, self)
+        self.optionButton.setFixedSize(30, 30)
         self.optionButton.setToolTip("弹幕设置")
-        self.optionButton.clicked.connect(self.optionWidget.show)  # 弹出设置菜单
+        self.optionButton.clicked.connect(self.showOptionWidget)
         layout.addWidget(self.optionButton, 0, 8, 1, 1, alignment=Qt.AlignVCenter)
         # 关闭按钮
-        self.closeButton = ToolButton("close")
-        self.closeButton.setToolTip("关闭")
+        self.closeButton = TransparentToolButton(FluentIcon.CLOSE, self)
+        self.closeButton.setFixedSize(30, 30)
+        self.closeButton.setToolTip("关闭弹幕机")
         self.closeButton.clicked.connect(self.userClose)
         layout.addWidget(self.closeButton, 0, 9, 1, 1, alignment=Qt.AlignVCenter)
 
-        # 弹幕区域（主区 60%）
-        self.textBrowser = self._create_zone(QFont("Microsoft JhengHei", 14, QFont.Bold))
-        layout.addWidget(self.textBrowser, 1, 0, 3, 10)
+        self.workbench = DanmakuWorkbench(self, max_events=500, event_model=event_model)
+        layout.addWidget(self.workbench, 1, 0, 1, 10)
 
-        # 同传区域（25%）
-        self.transBrowser = self._create_zone(QFont("Microsoft JhengHei", 13, QFont.Bold))
-        layout.addWidget(self.transBrowser, 4, 0, 1, 10)
-
-        # 信息区域（15%，单行紧凑）
-        self.msgsBrowser = self._create_zone(QFont("Microsoft JhengHei", 12, QFont.Bold))
-        self.msgsBrowser.setMaximumHeight(64)
-        layout.addWidget(self.msgsBrowser, 5, 0, 1, 10)
-
-        # 深浅主题刷新（文字/分区底色）
+        self._panel_opacity = 0.55
         self._apply_theme_colors()
         theme_changed().connect(self._apply_theme_colors)
 
-    @staticmethod
-    def _create_zone(font):
-        """创建圆角半透明弹幕分区（背景半透明白/黑，文字主题色）"""
-        zone = QTextBrowser()
-        zone.setFont(font)
-        # 限制文档最大行数，防止长时间运行内存无限增长（内存泄漏）
-        zone.document().setMaximumBlockCount(500)
-        zone.setFrameShape(QFrame.NoFrame)
-        return zone
-
     def _apply_theme_colors(self, *args):
-        if is_dark():
-            bg, fg, border = "rgba(255,255,255,14)", "#F1F5F9", "rgba(255,255,255,26)"
-        else:
-            bg, fg, border = "rgba(255,255,255,120)", "#1C2330", "rgba(0,0,0,40)"
-        for zone in (self.textBrowser, self.transBrowser, self.msgsBrowser):
-            zone.setStyleSheet(
-                f"QTextBrowser{{background-color:{bg};color:{fg};"
-                f"border:1px solid {border};border-radius:8px;"
-                f"padding:4px 8px;}}"
-            )
-        # 标题栏文字颜色
+        fg = "#F1F5F9" if is_dark() else "#1C2330"
         self.bar.setStyleSheet(
             f"color:{fg};background:transparent;font-size:12px;font-weight:600;"
         )
+        self.update()
+
+    def _updateAcrylicColor(self):
+        AcrylicWidget._updateAcrylicColor(self)
+        alpha = max(20, min(235, int(round(self._panel_opacity * 235))))
+        tint = QColor(20, 23, 29, alpha) if is_dark() else QColor(250, 251, 253, alpha)
+        self.acrylicBrush.tintColor = tint
+
+    def setPanelOpacity(self, opacity):
+        self._panel_opacity = max(0.07, min(float(opacity), 1.0))
+        self.update()
+
+    def appendEvent(self, event):
+        return self.workbench.appendEvent(event)
+
+    def clearEvents(self):
+        self.workbench.clear()
+
+    def setDisplayFilters(self, translation_mode=0, interaction_mode=0):
+        self.workbench.setDisplayFilters(translation_mode, interaction_mode)
+
+    def setTranslationRules(self, words):
+        self.workbench.setTranslationRules(words)
+
+    def setFontSize(self, size):
+        self.workbench.setFontSize(size)
 
     def acrylicClipPath(self):
         """毛玻璃圆角裁剪（12px 圆角）"""
@@ -257,9 +236,26 @@ class TextBrowser(AcrylicWidget, QWidget):
         path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
         return path
 
+    def ensureOptionWidget(self):
+        if self.optionWidget is None:
+            self.optionWidget = TextOption(parent=self)
+            self.optionWidgetCreated.emit(self.optionWidget)
+        return self.optionWidget
+
+    def showOptionWidget(self):
+        option_widget = self.ensureOptionWidget()
+        option_widget.show()
+        option_widget.raise_()
+        option_widget.activateWindow()
+
     def userClose(self):
         self.hide()
         self.closeSignal.emit()
+
+    def hideEvent(self, event):
+        if self.optionWidget is not None:
+            self.optionWidget.hide()
+        super().hideEvent(event)
 
     def moveWindow(self, moveDelta):
         self.moveSignal.emit(self.pos() + moveDelta)

@@ -28,7 +28,8 @@ from PySide6.QtGui import (
     QIntValidator,
     QShowEvent,
 )
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QByteArray, QPoint, QSize, QThread, QTimer, QUrl, Qt, Signal
+from app.ui.layout_config import layoutList
 from app.ui.layout_panel import LayoutSettingPanel
 from app.ui.title_bar import AppTitleBar, FluentWindow, apply_fullscreen_style
 from app.ui.video_widget import VideoWidget
@@ -133,7 +134,7 @@ class ScrollArea(SmoothScrollArea):
     def __init__(self):
         super(ScrollArea, self).__init__()
         self.multiple = self.width() // WINDOW_CARD_WIDTH
-        self.horizontalScrollBar().setVisible(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     def sizeHint(self):
         return QSize(100, 90)
@@ -149,15 +150,21 @@ class ScrollArea(SmoothScrollArea):
             clearAll.triggered.connect(lambda: self.clearAll.emit())
             menu.exec(self.mapToGlobal(QMouseEvent.position().toPoint()))
 
-    def wheelEvent(self, QEvent):
-        if QEvent.angleDelta().y() < 0:
+    def wheelEvent(self, event):
+        if event.angleDelta().y() < 0:
             value = self.verticalScrollBar().value()
             self.verticalScrollBar().setValue(value + 80)
-        elif QEvent.angleDelta().y() > 0:
+        elif event.angleDelta().y() > 0:
             value = self.verticalScrollBar().value()
             self.verticalScrollBar().setValue(value - 80)
 
-    def resizeEvent(self, QResizeEvent):
+    def resizeEvent(self, event):
+        # QAbstractScrollArea 必须先更新 viewport 几何；旧实现跳过基类调用，
+        # 顶部 Dock 变矮后滚动范围不会随内容更新，卡片因此被直接裁切。
+        super().resizeEvent(event)
+        content = self.widget()
+        if content is not None and hasattr(content, "syncFlowHeight"):
+            content.syncFlowHeight(self.viewport().width())
         multiple = self.width() // WINDOW_CARD_WIDTH
         if multiple and multiple != self.multiple:  # 按卡片长度的倍数调整且不为0
             self.multiple = multiple
@@ -349,14 +356,9 @@ class MainWindow(WindowsFramelessMainWindow):
         self.setTitleBar(AppTitleBar(self))
         self.setWindowTitle(f"DD监控室{self.versionDisplay}")
         self.setWindowIcon(Icon(FluentIcon.ROBOT))
-        # QMainWindow 的 menuBar 从窗口顶部开始，会盖住 Fluent 标题栏
-        # （48px，含窗口控制按钮）；把 QMainWindow 内容区（menuBar/
-        # dock/central）整体下移标题栏高度，menuBar 保持在 menuBar 区
+        # 标题栏占据最上层；QMainWindow 的 menuWidget、Dock 和中央播放台
+        # 统一从其下方开始布局。
         self.setContentsMargins(0, self.titleBar.height(), 0, 0)
-        # 顶栏菜单悬停即弹：菜单（Qt.Popup）打开后鼠标事件被 popup
-        # 截获，menuBar 的 hovered 信号不再触发，必须用 app 级事件
-        # 过滤器监听全局鼠标移动来驱动菜单切换
-        QApplication.instance().installEventFilter(self)
         self.resize(1600, 900)
         # 最小尺寸：防止无边框窗口被拖到极小导致布局错乱/控件不可见
         self.setMinimumSize(640, 480)
@@ -402,13 +404,11 @@ class MainWindow(WindowsFramelessMainWindow):
         )
 
         self.navigationInterface = TopNavigationInterface(self)
-        rootWidget = QWidget()
-        self.setCentralWidget(rootWidget)
-        self.rootLayout = QVBoxLayout(rootWidget)
-        self.rootLayout.setContentsMargins(0, 0, 0, 0)
-        self.rootLayout.setSpacing(0)
-        self.rootLayout.addWidget(self.navigationInterface)
-        self.rootLayout.addWidget(mainWidget, 1)
+        self.navigationInterface.setObjectName("mainNavigation")
+        # menuWidget 始终位于所有 Dock 之上；若把导航放进 centralWidget，
+        # 顶部停靠的面板会被 Qt 排到导航上方，割裂主窗口层级。
+        self.setMenuWidget(self.navigationInterface)
+        self.setCentralWidget(mainWidget)
 
         # 顶栏是命令入口，不再用整页承载单个按钮。
         self.navigationInterface.addItem(
@@ -416,6 +416,13 @@ class MainWindow(WindowsFramelessMainWindow):
             icon=FluentIcon.VIDEO,
             text="播放台",
             onClick=lambda: None,
+        )
+        self.navigationInterface.addItem(
+            routeKey="layout",
+            icon=FluentIcon.LAYOUT,
+            text="布局方式",
+            onClick=self.openLayoutSetting,
+            selectable=False,
         )
         self.navigationInterface.addItem(
             routeKey="control",
@@ -446,6 +453,11 @@ class MainWindow(WindowsFramelessMainWindow):
             selectable=False,
         )
         self.navigationInterface.addItem(
+            routeKey="options", icon=FluentIcon.MENU, text="全局",
+            onClick=lambda: self.optionMenu.popup(QCursor.pos()),
+            selectable=False, position=TopNavigationItemPosition.RIGHT,
+        )
+        self.navigationInterface.addItem(
             routeKey="account", icon=FluentIcon.PEOPLE, text="账号",
             onClick=lambda: self.loginMenu.popup(QCursor.pos()),
             selectable=False, position=TopNavigationItemPosition.RIGHT,
@@ -462,7 +474,6 @@ class MainWindow(WindowsFramelessMainWindow):
         )
         self.navigationInterface.expand(useAni=False)
         self.navigationInterface.setCurrentItem("monitor")
-        self.menuBar().hide()
         self.layoutSettingPanel = LayoutSettingPanel()
         self.layoutSettingPanel.layoutConfig.connect(self.changeLayout)
         self.version = None
@@ -618,13 +629,16 @@ class MainWindow(WindowsFramelessMainWindow):
 
         # ---- 菜单设置 ----
         self.optionMenu = RoundMenu("设置", self)
-        self.menuBar().addMenu(self.optionMenu)
         self.controlBarLayoutToken = self.config["control"]
         settingsAction = QAction("打开设置面板...", self, triggered=self.openSettingsDialog)
         self.optionMenu.addAction(settingsAction)
         self.optionMenu.addSeparator()
         layoutConfigAction = QAction("布局方式", self, triggered=self.openLayoutSetting)
         self.optionMenu.addAction(layoutConfigAction)
+        resetWorkspaceAction = QAction(
+            "恢复默认面板布局", self, triggered=self.resetDockLayout
+        )
+        self.optionMenu.addAction(resetWorkspaceAction)
         globalQualityMenu = self.optionMenu.addMenu("全局画质 ►")
         originQualityAction = QAction("原画", self, triggered=lambda: self.globalQuality(10000))
         globalQualityMenu.addAction(originQualityAction)
@@ -666,7 +680,6 @@ class MainWindow(WindowsFramelessMainWindow):
         progressText.setText("设置选项菜单...")
 
         self.versionMenu = RoundMenu("帮助", self)
-        self.menuBar().addMenu(self.versionMenu)
         bilibiliAction = QAction("B站视频", self, triggered=self.openBilibili)
         self.versionMenu.addAction(bilibiliAction)
         hotKeyAction = QAction("快捷键", self, triggered=self.openHotKey)
@@ -681,7 +694,6 @@ class MainWindow(WindowsFramelessMainWindow):
         progressText.setText("设置帮助菜单...")
 
         self.payMenu = RoundMenu("开源和投喂", self)
-        self.menuBar().addMenu(self.payMenu)
         githubAction = QAction("GitHub", self, triggered=self.openGithub)
         self.payMenu.addAction(githubAction)
         feedAction = QAction("投喂作者", self, triggered=self.openFeed)
@@ -689,7 +701,6 @@ class MainWindow(WindowsFramelessMainWindow):
         progressText.setText("设置关于菜单...")
 
         self.loginMenu = RoundMenu("B站账号", self)
-        self.menuBar().addMenu(self.loginMenu)
         self._rebuildLoginMenu()
 
         # 鼠标和计时器
@@ -1513,41 +1524,6 @@ class MainWindow(WindowsFramelessMainWindow):
                 videoWidget.topLabel.hide()  # 隐藏播放窗口的控制条
                 videoWidget.frame.hide()
 
-    def eventFilter(self, obj, event):
-        """全局鼠标移动 → 顶栏菜单悬停切换。
-
-        菜单（Qt.Popup）打开后鼠标事件被 popup 截获，menuBar 的
-        hovered 信号不再触发；在 app 级监听 MouseMove，光标位于
-        菜单栏菜单项上且该菜单未打开时执行切换（exec 动画路径）。
-        """
-        if event.type() == QEvent.MouseMove:
-            self._onGlobalMouseMove(event.globalPosition().toPoint())
-        return super().eventFilter(obj, event)
-
-    def _onGlobalMouseMove(self, gpos):
-        """光标在菜单栏菜单项上时，关闭其他菜单并弹出目标菜单。"""
-        mb = self.menuBar()
-        if mb is None or not mb.isVisible():
-            return
-        local = mb.mapFromGlobal(gpos)
-        if not mb.rect().contains(local):
-            return
-        for action in mb.actions():
-            if mb.actionGeometry(action).contains(local):
-                menu = action.menu()
-                if menu is not None and not menu.isVisible():
-                    self._openTopMenu(action)
-                return
-
-    def _openTopMenu(self, action):
-        """关闭其他顶层菜单并弹出目标菜单（exec：动画由菜单动画开关控制）"""
-        menu = action.menu()
-        for m in (self.optionMenu, self.versionMenu, self.payMenu, self.loginMenu):
-            if m is not menu and m.isVisible():
-                m.close()
-        pos = self.menuBar().mapToGlobal(self.menuBar().actionGeometry(action).bottomLeft())
-        menu.exec(pos)
-
     def moveEvent(self, event):  # 捕获主窗口moveEvent来实时同步弹幕机位置
         # 无边框窗口初始化（super().__init__）期间 moveEvent 会提前触发，
         # 此时 _viewport_debounce 尚未创建，直接跳过
@@ -1633,30 +1609,99 @@ class MainWindow(WindowsFramelessMainWindow):
         self.layoutSettingPanel.raise_()
         self.layoutSettingPanel.activateWindow()
 
+    @staticmethod
+    def _normaliseLayoutConfig(layoutConfig):
+        """严格验证布局；任一项损坏时由调用方回退到四宫格。"""
+        try:
+            raw_items = list(layoutConfig or [])
+        except TypeError:
+            return []
+        if not raw_items or len(raw_items) > MAX_WINDOWS:
+            return []
+
+        normalised = []
+        occupied_cells = set()
+        for raw in raw_items:
+            if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+                return []
+            try:
+                y, x, h, w = (int(value) for value in raw)
+            except (TypeError, ValueError):
+                return []
+            if y < 0 or x < 0 or h < 1 or w < 1:
+                return []
+            if y + h > MAX_WINDOWS or x + w > MAX_WINDOWS:
+                return []
+
+            cells = {
+                (row, column)
+                for row in range(y, y + h)
+                for column in range(x, x + w)
+            }
+            if occupied_cells.intersection(cells):
+                return []
+            occupied_cells.update(cells)
+            normalised.append((y, x, h, w))
+        return normalised
+
     def changeLayout(self, layoutConfig):
+        layoutConfig = self._normaliseLayoutConfig(layoutConfig)
+        if not layoutConfig:
+            layoutConfig = list(layoutList[7])  # 损坏/空布局回退到标准四宫格
+
+        # 先完整摘除当前网格。旧实现只按旧布局长度反复移除 itemAt(0)，
+        # 当保存状态或前一次切换不完整时会留下幽灵播放器并与新网格重叠。
         for videoWidget in self.videoWidgetList:
-            videoWidget.mediaPlay(1)  # 全部暂停
-        for index, _ in enumerate(self.config["layout"]):
-            self.videoWidgetList[index].hideTextBrowser()
-            item = self.mainLayout.itemAt(0)
-            if item is not None and item.widget() is not None:
-                item.widget().hide()
-                self.mainLayout.removeWidget(item.widget())
-        for index, layout in enumerate(layoutConfig):
-            y, x, h, w = layout
+            try:
+                videoWidget.mediaPlay(1)
+                videoWidget.hideTextBrowser()
+            except Exception:
+                logging.exception("暂停播放器 %s 时发生异常", videoWidget.id + 1)
+            self.mainLayout.removeWidget(videoWidget)
+            videoWidget.hide()
+
+        # 先一次性提交纯 Qt 网格；弹幕窗和播放状态属于可失败的外围副作用，
+        # 不能在这里打断布局重建。
+        for index, (y, x, h, w) in enumerate(layoutConfig):
             videoWidget = self.videoWidgetList[index]
-            videoWidget.show()
-            if videoWidget.textSetting[0]:  # 显示弹幕
-                videoWidget.showTextBrowser()
             self.mainLayout.addWidget(videoWidget, y, x, h, w)
-            if videoWidget.roomID != "0":
-                videoWidget.mediaPlay(2)  # 显示的窗口播放
-        # 隐藏布局之外的窗口（按布局数量而非循环变量，避免空布局时未绑定）
+            videoWidget.show()
+
         for videoWidget in self.videoWidgetList[len(layoutConfig) :]:
             videoWidget.getMediaURL.recordToken = False
             videoWidget.checkPlaying.stop()
-        self.config["layout"] = layoutConfig
+
+        # 清除旧布局留下的行列 stretch/minimum，保证从 5 列切回 1/2 列时
+        # 播放器重新均分整个播放台，而不是挤在左上角。
+        for row in range(self.mainLayout.rowCount()):
+            self.mainLayout.setRowStretch(row, 0)
+            self.mainLayout.setRowMinimumHeight(row, 0)
+        for column in range(self.mainLayout.columnCount()):
+            self.mainLayout.setColumnStretch(column, 0)
+            self.mainLayout.setColumnMinimumWidth(column, 0)
+        occupied_rows = {y + offset for y, _x, h, _w in layoutConfig for offset in range(h)}
+        occupied_columns = {x + offset for _y, x, _h, w in layoutConfig for offset in range(w)}
+        for row in occupied_rows:
+            self.mainLayout.setRowStretch(row, 1)
+        for column in occupied_columns:
+            self.mainLayout.setColumnStretch(column, 1)
+
+        self.config["layout"] = [tuple(item) for item in layoutConfig]
         self._applyDanmakuBaseViewport()
+
+        for videoWidget in self.videoWidgetList[: len(layoutConfig)]:
+            if videoWidget.roomID == "0":
+                continue
+            try:
+                if not videoWidget.userPause:
+                    videoWidget.mediaPlay(2)
+                    if videoWidget._mpv is not None and videoWidget.liveStatus == 1:
+                        videoWidget.checkPlaying.start(3000)
+                if videoWidget.textSetting[0]:
+                    videoWidget.showTextBrowser()
+            except Exception:
+                logging.exception("恢复播放器 %s 时发生异常", videoWidget.id + 1)
+
         self.configManager.save()
 
     def changeLiverPanelLayout(self, multiple):
@@ -1698,6 +1743,21 @@ class MainWindow(WindowsFramelessMainWindow):
         self.config["geometry"] = str(self.saveGeometry().toBase64(), "ASCII")
         self.config["windowState"] = str(self.saveState().toBase64(), "ASCII")
         logging.info("save Window layout.")
+
+    def resetDockLayout(self):
+        """把两个工作面板恢复到默认左右停靠位置并立即保存。"""
+        if self.isFullScreen():
+            self.fullScreen()
+        for dock in (self.controlDock, self.cardDock):
+            dock.setFloating(False)
+            dock.show()
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.controlDock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.cardDock)
+        self.resizeDocks([self.controlDock, self.cardDock], [220, 380], Qt.Horizontal)
+        self.controlBarLayoutToken = True
+        self.saveDockLayout()
+        self.configManager.save()
+        logging.info("restore default Dock layout.")
 
     def loadDockLayout(self):
         if "geometry" in self.config:
